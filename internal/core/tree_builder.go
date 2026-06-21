@@ -6,20 +6,19 @@ import (
 )
 
 type TreeBuilder struct {
-	trees   map[string]*Tree
-	entries map[string]TreeEntry
+	trees map[string]*Tree
+	store func(*Tree) error
 }
 
-func NewTreeBuilder() *TreeBuilder {
+func NewTreeBuilder(storeFn func(*Tree) error) *TreeBuilder {
 	return &TreeBuilder{
-		trees:   make(map[string]*Tree),
-		entries: make(map[string]TreeEntry),
+		trees: make(map[string]*Tree),
+		store: storeFn,
 	}
 }
 
-func (b *TreeBuilder) BuildFromIndex(idx *Index) *Tree {
+func (b *TreeBuilder) BuildFromIndex(idx *Index) (*Tree, error) {
 	b.trees[""] = &Tree{}
-	b.entries = make(map[string]TreeEntry)
 
 	for i := range idx.Entries {
 		b.addEntry(&idx.Entries[i])
@@ -37,7 +36,7 @@ func (b *TreeBuilder) addEntry(entry *IndexEntry) {
 		fullpath = path.Join(fullpath, part)
 
 		if fullpath == entry.Path {
-			b.entries[fullpath] = TreeEntry{
+			te := TreeEntry{
 				Name: part,
 				Type: BlobObject,
 				Hash: entry.Hash,
@@ -45,7 +44,7 @@ func (b *TreeBuilder) addEntry(entry *IndexEntry) {
 			}
 			b.getOrCreateTree(parent).Entries = append(
 				b.getOrCreateTree(parent).Entries,
-				b.entries[fullpath],
+				te,
 			)
 		} else {
 			if _, exists := b.trees[fullpath]; !exists {
@@ -63,29 +62,39 @@ func (b *TreeBuilder) addEntry(entry *IndexEntry) {
 	}
 }
 
-func (b *TreeBuilder) getOrCreateTree(path string) *Tree {
-	if t, ok := b.trees[path]; ok {
+func (b *TreeBuilder) getOrCreateTree(treePath string) *Tree {
+	if t, ok := b.trees[treePath]; ok {
 		return t
 	}
 	t := &Tree{}
-	b.trees[path] = t
+	b.trees[treePath] = t
 	return t
 }
 
-func (b *TreeBuilder) buildTree(treePath string) *Tree {
+func (b *TreeBuilder) buildTree(treePath string) (*Tree, error) {
 	t := b.trees[treePath]
 	if t == nil {
-		return &Tree{}
+		return &Tree{}, nil
 	}
 
 	for i := range t.Entries {
 		if t.Entries[i].Type == TreeObject {
 			subPath := path.Join(treePath, t.Entries[i].Name)
-			subTree := b.buildTree(subPath)
+			subTree, err := b.buildTree(subPath)
+			if err != nil {
+				return nil, err
+			}
 			t.Entries[i].Hash = subTree.Hash
 		}
 	}
 
 	result := NewTree(t.Entries)
-	return result
+
+	if b.store != nil {
+		if err := b.store(result); err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
 }

@@ -38,17 +38,20 @@ var saveCmd = &cobra.Command{
 			return fmt.Errorf("nothing to save (use 'drift add' first)")
 		}
 
-		builder := core.NewTreeBuilder()
-		tree := builder.BuildFromIndex(&idx)
-		if tree == nil {
-			return fmt.Errorf("failed to build tree")
+		builder := core.NewTreeBuilder(func(t *core.Tree) error {
+			return store.PutTree(t)
+		})
+
+		tree, err := builder.BuildFromIndex(&idx)
+		if err != nil {
+			return fmt.Errorf("failed to build tree: %w", err)
 		}
 
-		if err := store.PutTree(tree); err != nil {
-			return fmt.Errorf("failed to store tree: %w", err)
+		commits, err := store.ListCommits()
+		if err != nil {
+			return fmt.Errorf("failed to list commits: %w", err)
 		}
 
-		commits, _ := store.ListCommits()
 		parentHash := ""
 		branch := "main"
 
