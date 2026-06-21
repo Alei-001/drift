@@ -55,19 +55,48 @@ drift init
 
 ## Phase 2：暂存区
 
-**状态：** 待开始
+**状态：** 已完成
 
 **目标：** 实现文件变更检测和暂存区管理
 
+### 设计决策
+
+| 方面 | Drift | go-git | 理由 |
+|------|-------|--------|------|
+| Index 格式 | JSON | 二进制 (DIRC) | 人可读，调试方便 |
+| 元数据 | path, hash, mtime, size, mode | hash, name, mtime, size, mode, uid/gid | 去掉不需要的字段 |
+| Status 存储 | 动态计算（不存储） | 动态计算 | Status 是派生状态 |
+| 变更检测 | mtime+size 快速判断，必要时计算 hash | 同左 | 学习 go-git 的正确做法 |
+
+### 核心架构
+
+```
+Status = diffCommitWithStaging + diffStagingWithWorktree
+
+commit tree ↔ index  →  Staging 状态（已暂存）
+index ↔ working dir  →  Worktree 状态（未暂存）
+```
+
 ### 任务清单
 
-| 任务 | 描述 | 优先级 |
-|------|------|--------|
-| 变更检测 | 检测工作区文件新增、修改、删除 | P0 |
-| 暂存区管理 | 实现 index 文件的读写 | P0 |
-| drift add | 实现添加文件到暂存区 | P0 |
-| drift status | 实现查看工作区状态 | P0 |
-| drift reset | 实现清空暂存区 | P1 |
+| 任务 | 文件 | 状态 |
+|------|------|------|
+| Index 结构 | `internal/core/index.go` | 已完成 |
+| Status 类型 | `internal/core/status.go` | 已完成 |
+| 目录遍历 | `internal/core/walker.go` | 已完成 |
+| 变更检测 | `internal/core/change.go` | 已完成 |
+| drift add | `internal/cli/add.go` | 已完成 |
+| drift status | `internal/cli/status.go` | 已完成 |
+| drift reset | `internal/cli/reset.go` | 已完成 |
+
+### 验证结果
+
+- [x] `go build ./...` 编译通过
+- [x] `go vet ./...` 无警告
+- [x] `drift add file.txt` 能将文件添加到暂存区
+- [x] `drift add .` 能递归添加目录下所有文件
+- [x] `drift status` 能正确显示新增/修改/删除/未跟踪状态
+- [x] `drift reset` 能清空暂存区
 
 ---
 
