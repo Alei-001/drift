@@ -92,11 +92,11 @@ func (s *Store) blobPath(hash string) string {
 }
 
 func (s *Store) treePath(hash string) string {
-	return filepath.Join(s.DriftDir(), treesDir, hash+".json")
+	return filepath.Join(s.DriftDir(), treesDir, hash+".dre")
 }
 
 func (s *Store) commitPath(id string) string {
-	return filepath.Join(s.DriftDir(), commitsDir, id+".json")
+	return filepath.Join(s.DriftDir(), commitsDir, id+".dcm")
 }
 
 func (s *Store) PutBlob(data []byte) (string, error) {
@@ -183,7 +183,7 @@ func (s *Store) PutTree(t *core.Tree) error {
 		return nil
 	}
 
-	data, err := json.MarshalIndent(t, "", "  ")
+	data, err := t.Marshal()
 	if err != nil {
 		return err
 	}
@@ -206,12 +206,12 @@ func (s *Store) GetTree(hash string) (*core.Tree, error) {
 		return nil, err
 	}
 
-	var t core.Tree
-	if err := json.Unmarshal(data, &t); err != nil {
+	t := &core.Tree{}
+	if err := t.Unmarshal(data); err != nil {
 		return nil, err
 	}
 
-	return &t, nil
+	return t, nil
 }
 
 func (s *Store) PutCommit(c *core.Commit) error {
@@ -220,7 +220,7 @@ func (s *Store) PutCommit(c *core.Commit) error {
 
 	path := s.commitPath(c.ID)
 
-	data, err := json.MarshalIndent(c, "", "  ")
+	data, err := c.Marshal()
 	if err != nil {
 		return err
 	}
@@ -243,12 +243,12 @@ func (s *Store) GetCommit(id string) (*core.Commit, error) {
 		return nil, err
 	}
 
-	var c core.Commit
-	if err := json.Unmarshal(data, &c); err != nil {
+	c := &core.Commit{}
+	if err := c.Unmarshal(data); err != nil {
 		return nil, err
 	}
 
-	return &c, nil
+	return c, nil
 }
 
 func (s *Store) ListCommits() ([]*core.Commit, error) {
@@ -260,11 +260,11 @@ func (s *Store) ListCommits() ([]*core.Commit, error) {
 
 	var commits []*core.Commit
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".dcm" {
 			continue
 		}
 
-		id := entry.Name()[:len(entry.Name())-5]
+		id := entry.Name()[:len(entry.Name())-4]
 		c, err := s.GetCommit(id)
 		if err != nil {
 			continue

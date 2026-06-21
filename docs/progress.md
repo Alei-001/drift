@@ -117,6 +117,75 @@ index ↔ working dir  →  Worktree 状态（未暂存）
 
 ---
 
+## Phase 3：版本管理
+
+**状态：** 已完成
+
+**目标：** 实现版本提交和历史管理
+
+### 设计决策
+
+| 方面 | Drift | go-git | 理由 |
+|------|-------|--------|------|
+| Tree 格式 | 二进制 (DREE) | 二进制 (mode+name+\0+hash) | 性能优先，与 Index 一致 |
+| Commit 格式 | 二进制 (DCMT) | 二进制 (headers+message) | 性能优先，与 Index 一致 |
+| Tree 结构 | 递归（每个目录独立对象） | 递归 | 语义正确，便于 diff/export |
+| Author 信息 | 无（简化） | 有 | 个人工具，不需要多人协作 |
+
+### 二进制格式 (DREE - Tree)
+
+```
+Header:
+  - Magic: "DREE" (4 bytes)
+  - Entry count: uint32 (4 bytes)
+
+Entry:
+  - Name length: uint16 (2 bytes)
+  - Name: []byte (variable)
+  - Type: uint8 (1 byte) - BlobObject 或 TreeObject
+  - Hash: [32]byte (SHA-256)
+  - Mode: uint32 (4 bytes)
+```
+
+### 二进制格式 (DCMT - Commit)
+
+```
+Header:
+  - Magic: "DCMT" (4 bytes)
+  - Version: uint32 (4 bytes)
+
+Fields:
+  - ID length: uint16 (2 bytes)
+  - ID: []byte (variable)
+  - Hash: [32]byte
+  - TreeHash: [32]byte
+  - ParentHash: [32]byte (全零表示无父)
+  - Timestamp: int64 (Unix ms)
+  - Branch length: uint16 (2 bytes)
+  - Branch: []byte (variable)
+  - Message length: uint16 (2 bytes)
+  - Message: []byte (variable)
+```
+
+### 任务清单
+
+| 任务 | 文件 | 状态 |
+|------|------|------|
+| Tree 二进制编解码 | `internal/core/tree_codec.go` | 已完成 |
+| Commit 二进制编解码 | `internal/core/commit_codec.go` | 已完成 |
+| Tree 构建器 | `internal/core/tree_builder.go` | 已完成 |
+| drift save | `internal/cli/save.go` | 已完成 |
+| drift list | `internal/cli/list.go` | 已完成 |
+
+### 验证结果
+
+- [x] `go build ./...` 编译通过
+- [x] `go vet ./...` 无警告
+- [x] `drift save -m "message"` 能创建版本
+- [x] `drift list` 能显示版本历史
+
+---
+
 ## 后续阶段
 
 | 阶段 | 状态 | 预计时间 |

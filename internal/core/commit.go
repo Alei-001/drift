@@ -3,13 +3,13 @@ package core
 import "time"
 
 type Commit struct {
-	Hash      string    `json:"hash"`
-	ID        string    `json:"id"`
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
-	Parent    string    `json:"parent"`
-	Branch    string    `json:"branch"`
-	TreeHash  string    `json:"tree_hash"`
+	Hash      string
+	ID        string
+	Message   string
+	Timestamp time.Time
+	Parent    string
+	Branch    string
+	TreeHash  string
 }
 
 func NewCommit(id, message, parent, branch, treeHash string) *Commit {
