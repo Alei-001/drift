@@ -314,12 +314,12 @@ func (s *Store) GetRef(name string) (string, error) {
 	return ref["commit_hash"], nil
 }
 
-func (s *Store) SaveIndex(index interface{}) error {
+func (s *Store) SaveIndex(idx *core.Index) error {
 	unlock := s.lock()
 	defer unlock()
 
 	path := filepath.Join(s.DriftDir(), indexFile)
-	data, err := json.MarshalIndent(index, "", "  ")
+	data, err := idx.Marshal()
 	if err != nil {
 		return err
 	}
@@ -332,7 +332,7 @@ func (s *Store) SaveIndex(index interface{}) error {
 	return os.Rename(tmp, path)
 }
 
-func (s *Store) LoadIndex(index interface{}) error {
+func (s *Store) LoadIndex(idx *core.Index) error {
 	path := filepath.Join(s.DriftDir(), indexFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -342,5 +342,9 @@ func (s *Store) LoadIndex(index interface{}) error {
 		return err
 	}
 
-	return json.Unmarshal(data, index)
+	if len(data) == 0 {
+		return nil
+	}
+
+	return idx.Unmarshal(data)
 }

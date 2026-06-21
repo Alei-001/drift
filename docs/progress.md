@@ -63,10 +63,27 @@ drift init
 
 | 方面 | Drift | go-git | 理由 |
 |------|-------|--------|------|
-| Index 格式 | JSON | 二进制 (DIRC) | 人可读，调试方便 |
+| Index 格式 | 二进制 (DRIX) | 二进制 (DIRC) | 性能优先，支持大量文件 |
 | 元数据 | path, hash, mtime, size, mode | hash, name, mtime, size, mode, uid/gid | 去掉不需要的字段 |
 | Status 存储 | 动态计算（不存储） | 动态计算 | Status 是派生状态 |
 | 变更检测 | mtime+size 快速判断，必要时计算 hash | 同左 | 学习 go-git 的正确做法 |
+
+### 二进制格式 (DRIX)
+
+```
+Header:
+  - Magic: "DRIX" (4 bytes)
+  - Version: uint32 (4 bytes)
+  - Entry count: uint32 (4 bytes)
+
+Entry:
+  - Path length: uint16 (2 bytes)
+  - Path: []byte (variable)
+  - Hash: [32]byte (SHA-256)
+  - ModifiedAt: int64 (Unix ms)
+  - Size: int64
+  - Mode: uint32
+```
 
 ### 核心架构
 
