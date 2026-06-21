@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -172,44 +173,9 @@ func (idx *Index) readEntry(r io.Reader) (*IndexEntry, error) {
 }
 
 func hexEncode(data []byte) string {
-	const hexChars = "0123456789abcdef"
-	result := make([]byte, len(data)*2)
-	for i, b := range data {
-		result[i*2] = hexChars[b>>4]
-		result[i*2+1] = hexChars[b&0x0f]
-	}
-	return string(result)
+	return hex.EncodeToString(data)
 }
 
 func hexDecode(s string) ([]byte, error) {
-	if len(s)%2 != 0 {
-		return nil, fmt.Errorf("invalid hex string length: %d", len(s))
-	}
-
-	result := make([]byte, len(s)/2)
-	for i := 0; i < len(s); i += 2 {
-		high, err := hexCharToByte(s[i])
-		if err != nil {
-			return nil, err
-		}
-		low, err := hexCharToByte(s[i+1])
-		if err != nil {
-			return nil, err
-		}
-		result[i/2] = (high << 4) | low
-	}
-	return result, nil
-}
-
-func hexCharToByte(c byte) (byte, error) {
-	switch {
-	case c >= '0' && c <= '9':
-		return c - '0', nil
-	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10, nil
-	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10, nil
-	default:
-		return 0, fmt.Errorf("invalid hex character: %c", c)
-	}
+	return hex.DecodeString(s)
 }

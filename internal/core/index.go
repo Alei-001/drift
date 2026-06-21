@@ -10,15 +10,15 @@ var (
 )
 
 type Index struct {
-	Entries []IndexEntry `json:"entries"`
+	Entries []IndexEntry
 }
 
 type IndexEntry struct {
-	Path       string    `json:"path"`
-	Hash       string    `json:"hash"`
-	ModifiedAt time.Time `json:"modified_at"`
-	Size       int64     `json:"size"`
-	Mode       uint32    `json:"mode"`
+	Path       string
+	Hash       string
+	ModifiedAt time.Time
+	Size       int64
+	Mode       uint32
 }
 
 func (idx *Index) Entry(path string) (IndexEntry, error) {
