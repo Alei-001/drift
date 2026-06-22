@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,10 +75,9 @@ Examples:
 		} else if v2 == "" {
 			// Working tree vs specified version
 			return diffWorktree(reader, v1, output, showPatch, filePaths)
-		} else {
-			// Two versions comparison
-			return diffVersions(reader, v1, v2, output, showPatch, filePaths)
 		}
+		// Two versions comparison
+		return diffVersions(reader, v1, v2, output, showPatch, filePaths)
 	},
 }
 
@@ -88,84 +86,6 @@ func init() {
 	diffCmd.Flags().BoolVarP(&diffPatch, "patch", "p", false, "Show detailed line-by-line differences")
 	diffCmd.Flags().StringVarP(&diffOutput, "output", "o", "", "Output to file instead of stdout")
 	diffCmd.Flags().StringSliceVar(&diffFilePaths, "file", []string{}, "Specific file(s) to compare (can be repeated)")
-}
-
-// resolveVersion resolves a version string to a commit.
-// Supports: branch name (e.g., "main"), version ID (e.g., "v1"), branch/version (e.g., "main/v1")
-func resolveVersion(version string) (*core.Commit, error) {
-	// Check for branch/version format (e.g., "main/v1")
-	if strings.Contains(version, "/") {
-		parts := strings.SplitN(version, "/", 2)
-		branchName := parts[0]
-		versionID := parts[1]
-
-		// Get the branch ref
-		branchHash, err := sharedStore.GetRef(branchName)
-		if err != nil || branchHash == "" {
-			return nil, fmt.Errorf("branch not found: %s", branchName)
-		}
-
-		// Find the commit with this version ID in this branch
-		commits, err := sharedStore.ListCommits()
-		if err != nil {
-			return nil, err
-		}
-
-		for _, c := range commits {
-			if c.ID == versionID && c.Branch == branchName {
-				return c, nil
-			}
-		}
-
-		return nil, fmt.Errorf("version %s not found in branch %s", versionID, branchName)
-	}
-
-	// First, try to resolve as a branch/ref name (returns latest commit on that branch)
-	if hash, err := sharedStore.GetRef(version); err == nil && hash != "" {
-		if commit, err := findCommitByHash(sharedStore, hash); err == nil && commit != nil {
-			return commit, nil
-		}
-	} else if err != nil && !errors.Is(err, storage.ErrObjectNotFound) {
-		// Return unexpected errors (e.g., permission denied, corrupt file)
-		return nil, fmt.Errorf("failed to resolve %q as branch: %w", version, err)
-	}
-
-	// Try to resolve as version ID in current branch
-	currentBranch, _ := sharedStore.GetRef("HEAD")
-	if currentBranch == "" {
-		currentBranch = "main"
-	}
-
-	commits, err := sharedStore.ListCommits()
-	if err != nil {
-		return nil, err
-	}
-
-	// First try current branch
-	for _, c := range commits {
-		if c.ID == version && c.Branch == currentBranch {
-			return c, nil
-		}
-	}
-
-	// If not found in current branch, try any branch (but warn about ambiguity)
-	var found *core.Commit
-	var foundBranch string
-	for _, c := range commits {
-		if c.ID == version {
-			if found != nil {
-				return nil, fmt.Errorf("ambiguous version %s: exists in both %s and %s branches. Use branch/version format (e.g., %s/%s)", version, foundBranch, c.Branch, foundBranch, version)
-			}
-			found = c
-			foundBranch = c.Branch
-		}
-	}
-
-	if found != nil {
-		return found, nil
-	}
-
-	return nil, fmt.Errorf("version not found: %s", version)
 }
 
 func diffWorktree(reader *core.TreeReader, version string, output io.Writer, showPatch bool, filePaths []string) error {
@@ -187,7 +107,7 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 		}
 		versionLabel = latest.ID
 	} else {
-		commit, err := resolveVersion(version)
+		commit, err := resolveCommit(sharedStore, version)
 		if err != nil {
 			return err
 		}
@@ -230,11 +150,11 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 }
 
 func diffVersions(reader *core.TreeReader, v1, v2 string, output io.Writer, showPatch bool, filePaths []string) error {
-	commit1, err := resolveVersion(v1)
+	commit1, err := resolveCommit(sharedStore, v1)
 	if err != nil {
 		return err
 	}
-	commit2, err := resolveVersion(v2)
+	commit2, err := resolveCommit(sharedStore, v2)
 	if err != nil {
 		return err
 	}
@@ -330,13 +250,13 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 	for _, blob := range targetBlobs {
 		trackedPaths[blob.Path] = true
 		fullPath := filepath.Join(sharedDir, filepath.FromSlash(blob.Path))
-		workData, err := os.ReadFile(fullPath)
 
-		blobData, _ := sharedStore.GetBlob(blob.Hash)
-
+		// P2-#11: stat first to detect deleted files.
+		_, err := os.Lstat(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				// File deleted in working tree
+				blobData, _ := sharedStore.GetBlob(blob.Hash)
 				diffs = append(diffs, FileDiff{
 					Path:     blob.Path,
 					Status:   "deleted",
@@ -349,11 +269,28 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 			continue
 		}
 
+		// P2-#11: stream-compare file hash to blob hash. This reads the file
+		// in a streaming fashion (no full load into memory) and compares the
+		// SHA-256. If they match, the file is unmodified — skip it.
+		same, err := streamCompareFileToBlob(fullPath, sharedStore, blob.Hash)
+		if err != nil {
+			continue
+		}
+		if same {
+			continue
+		}
+
+		// Modified: load both sides for patch rendering.
+		workData, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		blobData, _ := sharedStore.GetBlob(blob.Hash)
+
 		if bytes.Equal(workData, blobData) {
 			continue
 		}
 
-		// File modified
 		diffs = append(diffs, FileDiff{
 			Path:     blob.Path,
 			Status:   "modified",
@@ -712,20 +649,34 @@ func isBinary(data []byte) bool {
 	return false
 }
 
+// streamCompareFileToBlob reports whether the file at filePath has the same
+// content as the stored blob, by streaming both through hashers and comparing
+// the resulting hashes. This avoids loading either side fully into memory,
+// which matters for large creative files (PSD, video). P2-#11.
+func streamCompareFileToBlob(filePath string, store *storage.Store, blobHash string) (bool, error) {
+	fileHash, err := core.CalculateHashFromFile(filePath)
+	if err != nil {
+		return false, err
+	}
+	return fileHash == blobHash, nil
+}
+
+// computeLCS returns the longest common subsequence of a and b.
+// P2-#12: uses Myers O(ND) diff algorithm (the same algorithm git uses)
+// instead of O(m*n) DP, which is dramatically faster for large files with
+// small differences.
+//
+// For inputs above maxLines, returns nil (full-replace diff fallback).
 func computeLCS(a, b []string) []string {
 	m, n := len(a), len(b)
 
-	// Issue 8: cap input size to avoid OOM on huge files. Creative workers
-	// may diff novel-length text; O(m*n) DP at 1M lines × 1M lines is fatal.
-	// Fall back to a trivial empty LCS above the threshold, which produces a
-	// full replace diff (correct, just less pretty).
+	// Cap input size to avoid OOM. Creative workers may diff novel-length
+	// text; the DP table is O(m*n) but we use rolling arrays for O(min)
+	// space. Above the threshold, fall back to a full-replace diff.
 	const maxLines = 20000
 	if m > maxLines || n > maxLines {
 		return nil
 	}
-
-	// Use rolling arrays for O(min(m,n)) space instead of O(m*n).
-	// We still need O(m*n) time, but memory is the bigger concern.
 	if m == 0 || n == 0 {
 		return nil
 	}
@@ -737,7 +688,6 @@ func computeLCS(a, b []string) []string {
 	}
 
 	// Full DP table needed for backtracking to reconstruct the LCS.
-	// For inputs under maxLines this is acceptable.
 	dp := make([][]int, m+1)
 	for i := range dp {
 		dp[i] = make([]int, n+1)

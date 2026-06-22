@@ -97,17 +97,56 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 	}
 
 	// Check committed-but-not-staged files: compare worktree against commit.
+	// P1-#10: use mtime+size fast path before hashing, mirroring go-git's
+	// indexEntry comparison. Creative workers have large files (PSD/video);
+	// hashing every committed file on every `drift status` is prohibitively
+	// slow. We cache nothing here (the commit tree has no mtime), so we
+	// compare against the filesystem's current mtime+size — if they match
+	// the values from the last `add`, the file is unchanged.
+	//
+	// Since committed files don't have a stored mtime in the tree, we can
+	// only use size as a fast reject. If size differs, it's definitely
+	// modified; if size matches, we must hash to be sure.
 	for path, hash := range commitFiles {
 		if stagedPaths[path] {
 			continue
 		}
 		fullPath := filepath.Join(workDir, filepath.FromSlash(path))
-		_, err := os.Lstat(fullPath)
+		info, err := os.Lstat(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				fs := s.File(path)
 				fs.Worktree = Deleted
 			}
+			continue
+		}
+
+		// Symlink: compare target string.
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(fullPath)
+			if err != nil {
+				continue
+			}
+			data, err := store.GetBlob(hash)
+			if err != nil {
+				continue
+			}
+			if target != string(data) {
+				fs := s.File(path)
+				fs.Worktree = Modified
+			}
+			continue
+		}
+
+		// Size fast-path: different size ⇒ definitely modified.
+		// Same size ⇒ must hash to be certain.
+		blobData, err := store.GetBlob(hash)
+		if err != nil {
+			continue
+		}
+		if info.Size() != int64(len(blobData)) {
+			fs := s.File(path)
+			fs.Worktree = Modified
 			continue
 		}
 

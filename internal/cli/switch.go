@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -147,17 +149,110 @@ func init() {
 	rootCmd.AddCommand(switchCmd)
 }
 
+// findCommitByHash loads a commit by its hash directly from the commit store.
+// Commit files are named <hash>.dcm, so this is O(1) — no need to scan all
+// commits. Mirrors go-git's CommitObject lookup.
 func findCommitByHash(store *storage.Store, hash string) (*core.Commit, error) {
-	commits, err := store.ListCommits()
+	c, err := store.GetCommit(hash)
 	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, fmt.Errorf("commit not found: %s", hash)
+		}
 		return nil, err
 	}
+	return c, nil
+}
 
-	for _, c := range commits {
-		if c.Hash == hash {
-			return c, nil
+// resolveCommit resolves a version specifier to a commit. This is the single
+// shared resolver used by diff, export, restore, and log. P1-#4: previously
+// diff.go and export.go had separate, inconsistent implementations.
+//
+// Supported formats:
+//   - branch name (e.g. "main") → latest commit on that branch
+//   - version ID (e.g. "v1") → commit with that ID in current branch
+//   - branch/version (e.g. "main/v1") → commit with that ID in that branch
+//
+// Ambiguous version IDs (same ID in multiple branches) return an error
+// suggesting the branch/version form.
+func resolveCommit(store *storage.Store, version string) (*core.Commit, error) {
+	// branch/version format (e.g. "main/v1").
+	if strings.Contains(version, "/") {
+		parts := strings.SplitN(version, "/", 2)
+		branchName := parts[0]
+		versionID := parts[1]
+
+		branchHash, err := store.GetRef(branchName)
+		if err != nil || branchHash == "" {
+			return nil, fmt.Errorf("branch not found: %s", branchName)
+		}
+
+		// Walk the branch's commit chain (O(depth), not O(all commits)).
+		commits, err := store.ListBranchCommits(branchName)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range commits {
+			if c.ID == versionID && c.Branch == branchName {
+				return c, nil
+			}
+		}
+		return nil, fmt.Errorf("version %s not found in branch %s", versionID, branchName)
+	}
+
+	// Try branch name first (latest commit on that branch).
+	if hash, err := store.GetRef(version); err == nil && hash != "" {
+		if commit, err := findCommitByHash(store, hash); err == nil && commit != nil {
+			return commit, nil
+		}
+	} else if err != nil && !errors.Is(err, storage.ErrObjectNotFound) {
+		return nil, fmt.Errorf("failed to resolve %q as branch: %w", version, err)
+	}
+
+	// Try version ID in current branch, then any branch.
+	currentBranch, _ := store.GetRef("HEAD")
+	if currentBranch == "" {
+		currentBranch = "main"
+	}
+
+	// P1-#9: walk only the current branch's chain instead of all commits.
+	if commits, err := store.ListBranchCommits(currentBranch); err == nil {
+		for _, c := range commits {
+			if c.ID == version {
+				return c, nil
+			}
 		}
 	}
 
-	return nil, fmt.Errorf("commit not found: %s", hash)
+	// Not in current branch — search other branches for ambiguity.
+	refs, err := store.ListRefs()
+	if err != nil {
+		return nil, err
+	}
+	var found *core.Commit
+	var foundBranch string
+	for branchName := range refs {
+		if branchName == "HEAD" || branchName == currentBranch {
+			continue
+		}
+		commits, err := store.ListBranchCommits(branchName)
+		if err != nil {
+			continue
+		}
+		for _, c := range commits {
+			if c.ID == version {
+				if found != nil {
+					return nil, fmt.Errorf("ambiguous version %s: exists in both %s and %s branches. Use branch/version format (e.g., %s/%s)",
+						version, foundBranch, c.Branch, foundBranch, version)
+				}
+				found = c
+				foundBranch = c.Branch
+			}
+		}
+	}
+
+	if found != nil {
+		return found, nil
+	}
+
+	return nil, fmt.Errorf("version not found: %s", version)
 }

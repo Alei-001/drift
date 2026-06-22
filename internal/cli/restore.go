@@ -37,7 +37,7 @@ Use --force to discard staged changes and unstaged modifications.`,
 			}
 		}
 
-		commit, err := findCommitByPrefix(sharedStore, version)
+		commit, err := resolveCommit(sharedStore, version)
 		if err != nil {
 			return err
 		}
@@ -77,29 +77,22 @@ Use --force to discard staged changes and unstaged modifications.`,
 		}
 
 		newIdx := &core.Index{}
-		var added, modified, deleted int
 		var deletedPaths []string
 
+		// P1-#2: write target blobs to worktree. added/modified counts are
+		// computed below by comparing against prevBlobs, not during the write
+		// loop (the old in-loop logic was dead code — os.Lstat after write
+		// always succeeds, so "added" was always 0).
 		for _, b := range targetBlobs {
 			entry, err := writeBlobToWorktree(sharedStore, sharedDir, b)
 			if err != nil {
 				return err
 			}
-
-			// Determine if this was an add or modify.
-			fullPath := filepath.Join(sharedDir, filepath.FromSlash(b.Path))
-			if _, statErr := os.Lstat(fullPath); statErr != nil {
-				added++
-			} else {
-				// File existed before; check if content changed.
-				modified++
-			}
-
 			newIdx.Add(entry)
 		}
 
-		// Recompute added/modified accurately by comparing against prevBlobs.
-		added, modified = 0, 0
+		// Compute added/modified by comparing target against prevBlobs.
+		var added, modified int
 		for _, b := range targetBlobs {
 			if prevBlobs[b.Path] {
 				modified++
@@ -108,6 +101,7 @@ Use --force to discard staged changes and unstaged modifications.`,
 			}
 		}
 
+		var deleted int
 		for path := range prevBlobs {
 			if !targetPaths[path] {
 				if err := core.ValidateTreePath(path); err != nil {

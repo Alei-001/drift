@@ -65,7 +65,7 @@ func TestIndex_Unmarshal_UnsupportedVersion(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write(indexMagic[:])
 	buf.Write([]byte{99, 0, 0, 0}) // version 99
-	buf.Write([]byte{0, 0, 0, 0}) // count 0
+	buf.Write([]byte{0, 0, 0, 0})  // count 0
 	idx := &Index{}
 	if err := idx.Unmarshal(buf.Bytes()); err != ErrIndexVersion {
 		t.Fatalf("expected ErrIndexVersion, got %v", err)
@@ -76,10 +76,10 @@ func TestIndex_Unmarshal_UnsupportedVersion(t *testing.T) {
 func TestIndex_Unmarshal_Truncated(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write(indexMagic[:])
-	buf.Write([]byte{1, 0, 0, 0})  // version 1
-	buf.Write([]byte{1, 0, 0, 0})  // count 1
-	buf.Write([]byte{5, 0})        // path length 5
-	buf.Write([]byte("a.txt"))     // path
+	buf.Write([]byte{1, 0, 0, 0}) // version 1
+	buf.Write([]byte{1, 0, 0, 0}) // count 1
+	buf.Write([]byte{5, 0})       // path length 5
+	buf.Write([]byte("a.txt"))    // path
 	// Missing hash, timestamp, size, mode.
 	idx := &Index{}
 	if err := idx.Unmarshal(buf.Bytes()); err != ErrIndexCorrupt {

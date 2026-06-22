@@ -210,3 +210,48 @@ func asciiToLower(c byte) byte {
 	}
 	return c
 }
+
+// ErrSymlinkEscape is returned when a symlink target would resolve outside
+// the repository root, which could be used to read or write arbitrary files
+// during restore/switch operations.
+var ErrSymlinkEscape = errors.New("symlink target escapes repository root")
+
+// ValidateSymlinkTarget reports whether a symlink with the given target,
+// created at linkPath within root, would resolve to a path inside root.
+// Both root and linkPath are absolute or root-relative; target is the
+// symlink's stored target string (may be relative or absolute).
+//
+// Mirrors go-git's filesystem checkSafe / symlink containment logic.
+func ValidateSymlinkTarget(root, linkPath, target string) error {
+	// Normalize to absolute paths for containment checking.
+	absRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return err
+	}
+
+	// The directory containing the symlink is the resolution base.
+	linkDir := filepath.Dir(linkPath)
+	absLinkDir, err := filepath.Abs(filepath.Join(absRoot, linkDir))
+	if err != nil {
+		return err
+	}
+
+	// Resolve the target relative to the link's directory.
+	var resolved string
+	if filepath.IsAbs(target) {
+		resolved = filepath.Clean(target)
+	} else {
+		resolved = filepath.Clean(filepath.Join(absLinkDir, target))
+	}
+
+	// The resolved path must be within absRoot.
+	rel, err := filepath.Rel(absRoot, resolved)
+	if err != nil {
+		return err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w: %q resolves to %q (outside %s)",
+			ErrSymlinkEscape, target, resolved, absRoot)
+	}
+	return nil
+}

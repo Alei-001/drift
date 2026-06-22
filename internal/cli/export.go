@@ -27,7 +27,7 @@ var exportCmd = &cobra.Command{
 			return fmt.Errorf("output path is required (use -o flag)")
 		}
 
-		commit, err := findCommitByPrefix(sharedStore, version)
+		commit, err := resolveCommit(sharedStore, version)
 		if err != nil {
 			return err
 		}
@@ -60,52 +60,6 @@ func init() {
 	exportCmd.Flags().StringP("output", "o", "", "Output path")
 	exportCmd.Flags().StringP("format", "f", "dir", "Export format: dir, zip, tar")
 	rootCmd.AddCommand(exportCmd)
-}
-
-func findCommitByPrefix(store *storage.Store, prefix string) (*core.Commit, error) {
-	// First, try to resolve as a branch/ref name.
-	if hash, err := store.GetRef(prefix); err == nil && hash != "" {
-		if commit, err := findCommitByHash(store, hash); err == nil && commit != nil {
-			return commit, nil
-		}
-	}
-
-	commits, err := store.ListCommits()
-	if err != nil {
-		return nil, err
-	}
-
-	// Try to resolve as version ID, preferring the current branch
-	currentBranch, _ := store.GetRef("HEAD")
-	if currentBranch == "" {
-		currentBranch = "main"
-	}
-
-	// First try current branch
-	for _, c := range commits {
-		if c.ID == prefix && c.Branch == currentBranch {
-			return c, nil
-		}
-	}
-
-	// If not found in current branch, try any branch (but warn about ambiguity)
-	var found *core.Commit
-	var foundBranch string
-	for _, c := range commits {
-		if c.ID == prefix {
-			if found != nil {
-				return nil, fmt.Errorf("ambiguous version %s: exists in both %s and %s branches. Use branch/version format (e.g., %s/%s)", prefix, foundBranch, c.Branch, foundBranch, prefix)
-			}
-			found = c
-			foundBranch = c.Branch
-		}
-	}
-
-	if found != nil {
-		return found, nil
-	}
-
-	return nil, fmt.Errorf("version not found: %s", prefix)
 }
 
 func exportDir(store *storage.Store, blobs []core.BlobEntry, output string, total int) error {
@@ -211,6 +165,12 @@ func writeBlobToFile(store *storage.Store, blob core.BlobEntry, outputDir string
 }
 
 func addBlobToZip(store *storage.Store, blob core.BlobEntry, w *zip.Writer) error {
+	// P3-#18: validate path before using it as a zip entry name, preventing
+	// path traversal in the extracted archive.
+	if err := core.ValidateTreePath(blob.Path); err != nil {
+		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
+	}
+
 	data, err := store.GetBlob(blob.Hash)
 	if err != nil {
 		return err
@@ -226,6 +186,11 @@ func addBlobToZip(store *storage.Store, blob core.BlobEntry, w *zip.Writer) erro
 }
 
 func addBlobToTar(store *storage.Store, blob core.BlobEntry, tw *tar.Writer) error {
+	// P3-#18: validate path before using it as a tar entry name.
+	if err := core.ValidateTreePath(blob.Path); err != nil {
+		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
+	}
+
 	data, err := store.GetBlob(blob.Hash)
 	if err != nil {
 		return err

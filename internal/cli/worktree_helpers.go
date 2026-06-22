@@ -34,6 +34,12 @@ func writeBlobToWorktree(store *storage.Store, root string, blob core.BlobEntry)
 			return core.IndexEntry{}, err
 		}
 		target := string(data)
+		// P0-#17: reject symlinks that escape the repository root, which
+		// could be planted by a malicious repository to read/write arbitrary
+		// files on the user's machine during restore/switch.
+		if err := core.ValidateSymlinkTarget(root, blob.Path, target); err != nil {
+			return core.IndexEntry{}, fmt.Errorf("unsafe symlink %q: %w", blob.Path, err)
+		}
 		if err := os.Symlink(target, fullPath); err != nil {
 			return core.IndexEntry{}, fmt.Errorf("failed to create symlink %s: %w", blob.Path, err)
 		}

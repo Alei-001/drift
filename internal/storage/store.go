@@ -323,6 +323,15 @@ func (s *Store) GetCommit(id string) (*core.Commit, error) {
 		return nil, err
 	}
 
+	// Verify the filename hash matches the hash stored inside the commit.
+	// This catches wrong-file reads and partial-write corruption where the
+	// internal field hash happens to be self-consistent but the file on disk
+	// is not the one the caller asked for.
+	if c.Hash != id {
+		return nil, fmt.Errorf("%w: filename hash %q does not match commit hash %q",
+			ErrObjectCorrupted, id, c.Hash)
+	}
+
 	return c, nil
 }
 
@@ -353,6 +362,19 @@ func (s *Store) ListCommits() ([]*core.Commit, error) {
 	})
 
 	return commits, nil
+}
+
+// WithLock acquires the store's exclusive lock, runs fn, then releases the
+// lock. This allows callers to compose multi-step operations (e.g. read ref,
+// modify, write ref) atomically without exposing the lock primitive.
+// P2-#7: prevents TOCTOU races between GetRef and SaveRef.
+func (s *Store) WithLock(fn func() error) error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return fn()
 }
 
 func (s *Store) SaveRef(name, commitHash string) error {
@@ -426,6 +448,92 @@ func (s *Store) ListRefs() (map[string]string, error) {
 	}
 
 	return refs, nil
+}
+
+// DeleteRef removes a branch ref. It refuses to delete "HEAD" or the
+// currently checked-out branch. Mirrors go-git's Reference deletion.
+func (s *Store) DeleteRef(name string) error {
+	if name == "HEAD" {
+		return fmt.Errorf("cannot delete HEAD")
+	}
+
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	path := filepath.Join(s.DriftDir(), refsDir, name+".json")
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("branch %q not found", name)
+		}
+		return err
+	}
+	return nil
+}
+
+// RenameRef renames a branch ref from oldName to newName. HEAD is updated
+// if it pointed at oldName. Mirrors go-git's branch rename.
+func (s *Store) RenameRef(oldName, newName string) error {
+	if oldName == "HEAD" || newName == "HEAD" {
+		return fmt.Errorf("cannot rename HEAD")
+	}
+	if oldName == newName {
+		return nil
+	}
+
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	oldPath := filepath.Join(s.DriftDir(), refsDir, oldName+".json")
+	newPath := filepath.Join(s.DriftDir(), refsDir, newName+".json")
+
+	// Read old ref.
+	data, err := os.ReadFile(oldPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("branch %q not found", oldName)
+		}
+		return err
+	}
+
+	// Refuse to overwrite an existing branch.
+	if _, err := os.Stat(newPath); err == nil {
+		return fmt.Errorf("branch %q already exists", newName)
+	}
+
+	// Write new ref with updated name field, then remove old.
+	var ref map[string]string
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return err
+	}
+	ref["name"] = newName
+	newData, err := json.MarshalIndent(ref, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := newPath + ".tmp"
+	if err := os.WriteFile(tmp, newData, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, newPath); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Remove(oldPath); err != nil {
+		return err
+	}
+
+	// Update HEAD if it pointed at oldName.
+	if head, err := s.GetRef("HEAD"); err == nil && head == oldName {
+		_ = s.SaveRef("HEAD", newName)
+	}
+
+	return nil
 }
 
 func (s *Store) SaveIndex(idx *core.Index) error {

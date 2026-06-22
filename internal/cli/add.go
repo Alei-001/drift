@@ -127,6 +127,11 @@ func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileI
 		if err != nil {
 			return fmt.Errorf("failed to read symlink %s: %w", relPath, err)
 		}
+		// P0-#17: reject symlinks that escape the repository root, which
+		// could be used to read/write arbitrary files on restore.
+		if err := core.ValidateSymlinkTarget(root, relPath, target); err != nil {
+			return fmt.Errorf("unsafe symlink %s: %w", relPath, err)
+		}
 		hash, err = store.PutBlob([]byte(target))
 		if err != nil {
 			return fmt.Errorf("failed to store symlink %s: %w", relPath, err)

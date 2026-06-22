@@ -7,8 +7,8 @@ import (
 )
 
 type Config struct {
-	User  UserConfig  `json:"user"`
-	Core  CoreConfig  `json:"core"`
+	User UserConfig `json:"user"`
+	Core CoreConfig `json:"core"`
 }
 
 type UserConfig struct {

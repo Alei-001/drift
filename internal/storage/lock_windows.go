@@ -44,6 +44,26 @@ func platformLock(f *os.File) error {
 	return nil
 }
 
+// platformTryLock attempts a non-blocking exclusive lock. Returns nil on
+// success, a non-nil error if the lock is held by another process.
+func platformTryLock(f *os.File) error {
+	handle := syscall.Handle(f.Fd())
+	var o overlapped
+
+	r1, _, err := procLockFileEx.Call(
+		uintptr(handle),
+		uintptr(LOCKFILE_EXCLUSIVE_LOCK|LOCKFILE_FAIL_IMMEDIATELY),
+		0,
+		1,
+		0,
+		uintptr(unsafe.Pointer(&o)),
+	)
+	if r1 == 0 {
+		return err
+	}
+	return nil
+}
+
 func platformUnlock(f *os.File) error {
 	handle := syscall.Handle(f.Fd())
 	var o overlapped
