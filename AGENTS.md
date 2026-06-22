@@ -16,7 +16,7 @@ go run ./cmd/drift/     # Run CLI
 ```
 cmd/drift/main.go       → Entry point, calls cli.Execute()
 internal/
-  cli/                  → Cobra commands: init, add, status, reset, save, list
+  cli/                  → Cobra commands: init, add, status, reset, save, list, export, restore
   core/                 → Domain types: Blob, Tree, Commit, Index, hash functions
   storage/store.go      → Object store: content-addressable, atomic writes, file locking
 ```
@@ -41,7 +41,7 @@ All persistent data uses binary formats for performance:
 - Docs (`docs/`) are in Chinese — that's intentional
 - `reference/go-git/` is a read-only reference, gitignored — do not import from it
 - Use standard library when possible (e.g., `encoding/hex` instead of custom hex functions)
-- Use codegraph for dependency analysis
+- Use codegraph for dependency analysis (`codegraph explore`, `codegraph node`)
 - Atomic write pattern: write to `.tmp`, then `os.Rename`
 - Blobs are content-addressable: same content → same hash → single stored copy
 - Progress tracking: update `docs/progress.md` at phase milestones
@@ -55,3 +55,4 @@ All persistent data uses binary formats for performance:
 - Tree is recursive — each directory is an independent Tree object
 - Commit hash includes timestamp — same inputs at different times produce different hashes
 - All objects use binary format (DRIX/DREE/DCMT) for performance
+- Restore follows go-git's resetWorktreeToTree pattern: index → worktree diff, preserve untracked files
