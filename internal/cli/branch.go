@@ -68,9 +68,11 @@ func createBranch(name string) error {
 		currentBranch = "main"
 	}
 
+	// Get the current branch's commit hash (empty string if no commits yet)
 	commitHash, err := sharedStore.GetRef(currentBranch)
 	if err != nil {
-		return fmt.Errorf("failed to get current branch: %w", err)
+		// If the ref doesn't exist (no commits yet), use empty hash
+		commitHash = ""
 	}
 
 	if err := sharedStore.SaveRef(name, commitHash); err != nil {

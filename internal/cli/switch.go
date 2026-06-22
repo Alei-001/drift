@@ -51,6 +51,17 @@ The staging area must be empty (or use --force to discard).`,
 			return fmt.Errorf("failed to update HEAD: %w", err)
 		}
 
+		// Handle case where branch has no commits yet
+		if commitHash == "" {
+			// Empty working tree - clear index
+			newIdx := &core.Index{}
+			if err := sharedStore.SaveIndex(newIdx); err != nil {
+				return fmt.Errorf("failed to update index: %w", err)
+			}
+			fmt.Printf("Switched to branch: %s\n", branch)
+			return nil
+		}
+
 		commit, err := findCommitByHash(sharedStore, commitHash)
 		if err != nil {
 			return fmt.Errorf("failed to load commit: %w", err)

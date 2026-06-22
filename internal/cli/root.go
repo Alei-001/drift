@@ -69,6 +69,11 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("init failed: %w", err)
 		}
 
+		// Create main branch (empty hash means no commits yet)
+		if err := store.SaveRef("main", ""); err != nil {
+			return fmt.Errorf("failed to create main branch: %w", err)
+		}
+
 		// Set HEAD to the default branch so branch detection works before first switch.
 		if err := store.SaveRef("HEAD", "main"); err != nil {
 			return fmt.Errorf("failed to set HEAD: %w", err)
