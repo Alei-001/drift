@@ -9,14 +9,22 @@ import (
 type WalkFunc func(path string, info os.FileInfo) error
 
 func WalkWorkingDir(root string, fn WalkFunc) error {
-	ignore := LoadDriftIgnore(root)
+	return WalkWorkingDirWithIgnore(root, root, fn)
+}
 
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+// WalkWorkingDirWithIgnore walks walkRoot but loads ignore patterns from ignoreRoot.
+// This allows adding a subdirectory while still respecting the project-root .driftignore.
+func WalkWorkingDirWithIgnore(walkRoot, ignoreRoot string, fn WalkFunc) error {
+	ignore := LoadDriftIgnore(ignoreRoot)
+	walkAbs, _ := filepath.Abs(walkRoot)
+	ignoreAbs, _ := filepath.Abs(ignoreRoot)
+
+	return filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		rel, err := filepath.Rel(root, path)
+		rel, err := filepath.Rel(walkRoot, path)
 		if err != nil {
 			return err
 		}
@@ -34,7 +42,16 @@ func WalkWorkingDir(root string, fn WalkFunc) error {
 			return nil
 		}
 
-		if ignore.IsIgnored(rel) {
+		// For ignore matching, use the path relative to ignoreRoot so that
+		// project-root .driftignore patterns work when walking a subdirectory.
+		ignoreRel := rel
+		if walkAbs != ignoreAbs {
+			if r, err := filepath.Rel(ignoreAbs, path); err == nil {
+				ignoreRel = filepath.ToSlash(r)
+			}
+		}
+
+		if ignore.IsIgnored(ignoreRel) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

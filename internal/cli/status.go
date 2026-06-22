@@ -17,9 +17,7 @@ var statusCmd = &cobra.Command{
 		}
 
 		var commitTree *core.Tree
-		commits, _ := sharedStore.ListCommits()
-		if len(commits) > 0 {
-			latest := commits[len(commits)-1]
+		if latest, _ := currentBranchCommit(sharedStore); latest != nil {
 			if latest.TreeHash != "" {
 				t, err := sharedStore.GetTree(latest.TreeHash)
 				if err == nil {

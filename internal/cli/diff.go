@@ -40,11 +40,10 @@ func diffWorktree(reader *core.TreeReader, version string) error {
 	var targetBlobs []core.BlobEntry
 
 	if version == "" {
-		commits, err := sharedStore.ListCommits()
-		if err != nil || len(commits) == 0 {
+		latest, err := currentBranchCommit(sharedStore)
+		if err != nil || latest == nil {
 			return fmt.Errorf("no versions to compare against")
 		}
-		latest := commits[len(commits)-1]
 		tree, err := sharedStore.GetTree(latest.TreeHash)
 		if err != nil {
 			return err
@@ -233,11 +232,13 @@ func computeLCS(a, b []string) []string {
 		}
 	}
 
+	// Backtrack in reverse order, then reverse the slice.
+	// This avoids the O(n^2) cost of repeatedly prepending to a slice.
 	result := make([]string, 0, dp[m][n])
 	i, j := m, n
 	for i > 0 && j > 0 {
 		if a[i-1] == b[j-1] {
-			result = append([]string{a[i-1]}, result...)
+			result = append(result, a[i-1])
 			i--
 			j--
 		} else if dp[i-1][j] > dp[i][j-1] {
@@ -245,6 +246,10 @@ func computeLCS(a, b []string) []string {
 		} else {
 			j--
 		}
+	}
+
+	for l, r := 0, len(result)-1; l < r; l, r = l+1, r-1 {
+		result[l], result[r] = result[r], result[l]
 	}
 
 	return result

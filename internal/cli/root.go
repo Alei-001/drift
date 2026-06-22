@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/drift/drift/internal/config"
+	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -68,6 +69,11 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("init failed: %w", err)
 		}
 
+		// Set HEAD to the default branch so branch detection works before first switch.
+		if err := store.SaveRef("HEAD", "main"); err != nil {
+			return fmt.Errorf("failed to set HEAD: %w", err)
+		}
+
 		fmt.Println("Drift project initialized")
 		return nil
 	},
@@ -81,4 +87,23 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// currentBranchName returns the current branch from HEAD, defaulting to "main".
+func currentBranchName(store *storage.Store) string {
+	branch, err := store.GetRef("HEAD")
+	if err != nil || branch == "" {
+		return "main"
+	}
+	return branch
+}
+
+// currentBranchCommit returns the latest commit on the current branch, or nil if the branch has no commits yet.
+func currentBranchCommit(store *storage.Store) (*core.Commit, error) {
+	branch := currentBranchName(store)
+	hash, err := store.GetRef(branch)
+	if err != nil {
+		return nil, nil // no commits on this branch yet
+	}
+	return findCommitByHash(store, hash)
 }

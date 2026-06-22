@@ -37,10 +37,8 @@ The staging area must be empty (or use --force to discard).`,
 		reader := core.NewTreeReader(sharedStore)
 
 		currentBlobs := make(map[string]bool)
-		commits, _ := sharedStore.ListCommits()
-		if len(commits) > 0 {
-			latest := commits[len(commits)-1]
-			if t, err := sharedStore.GetTree(latest.TreeHash); err == nil {
+		if currentCommit, _ := currentBranchCommit(sharedStore); currentCommit != nil {
+			if t, err := sharedStore.GetTree(currentCommit.TreeHash); err == nil {
 				if blobs, err := reader.ListBlobs(t, ""); err == nil {
 					for _, b := range blobs {
 						currentBlobs[b.Path] = true

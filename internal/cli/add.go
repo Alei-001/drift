@@ -63,7 +63,7 @@ func addDirectory(store *storage.Store, root, dirPath string) error {
 	}
 
 	var added int
-	err := core.WalkWorkingDir(fullDir, func(path string, info os.FileInfo) error {
+	err := core.WalkWorkingDirWithIgnore(fullDir, root, func(path string, info os.FileInfo) error {
 		relPath := filepath.ToSlash(filepath.Join(dirPath, path))
 		fullPath := filepath.Join(root, filepath.FromSlash(relPath))
 		if err := addFile(store, root, relPath, fullPath, info, &idx); err != nil {

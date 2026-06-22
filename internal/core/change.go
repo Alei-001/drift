@@ -35,8 +35,6 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 					fileHash, hashErr := CalculateHashFromFile(fullPath)
 					if hashErr == nil && fileHash != hash {
 						fs.Worktree = Modified
-					} else if hashErr == nil {
-						fs.Worktree = Modified
 					}
 					_ = info
 				}

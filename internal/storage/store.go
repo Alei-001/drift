@@ -173,13 +173,14 @@ func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 	}
 	dst.Close()
 
-	data, err := os.ReadFile(tmp)
+	// Stream-hash the tmp file instead of reading it all into memory.
+	// This avoids OOM on large files (the core use case for creative workers).
+	hash, err := core.CalculateHashFromFile(tmp)
 	if err != nil {
 		_ = os.Remove(tmp)
 		return "", err
 	}
 
-	hash := core.CalculateHash(data)
 	path := s.blobPath(hash)
 
 	if _, err := os.Stat(path); err == nil {

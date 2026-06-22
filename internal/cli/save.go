@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/core"
 	"github.com/spf13/cobra"
 )
@@ -38,27 +37,27 @@ var saveCmd = &cobra.Command{
 			return fmt.Errorf("failed to list commits: %w", err)
 		}
 
-		parentHash := ""
 		branch, _ := sharedStore.GetRef("HEAD")
 		if branch == "" {
+			// HEAD was not initialized (e.g. project created before the init fix).
+			// Default to "main" and persist HEAD so subsequent commands detect the branch.
 			branch = "main"
+			if err := sharedStore.SaveRef("HEAD", branch); err != nil {
+				return fmt.Errorf("failed to initialize HEAD: %w", err)
+			}
 		}
 
+		parentHash := ""
 		if len(commits) > 0 {
 			if refHash, err := sharedStore.GetRef(branch); err == nil {
 				parentHash = refHash
 			}
 		}
 
-		cfg, _ := config.LoadConfig(sharedStore.DriftDir())
-		if cfg == nil {
-			cfg = config.DefaultConfig()
-		}
-
 		id := "v" + strconv.Itoa(len(commits)+1)
 		author := core.Signature{
-			Name:  cfg.User.Name,
-			Email: cfg.User.Email,
+			Name:  sharedConfig.User.Name,
+			Email: sharedConfig.User.Email,
 		}
 		commit := core.NewCommit(id, message, parentHash, branch, tree.Hash, author)
 
