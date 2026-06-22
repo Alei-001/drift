@@ -1,6 +1,17 @@
 package core
 
-import "path"
+import (
+	"errors"
+	"path"
+)
+
+// maxTreeDepth bounds recursive tree traversal to prevent stack overflow
+// when reading a maliciously or accidentally deep-nested tree. Mirrors
+// go-git's MaxTreeDepth default (4096, same as upstream Git's limit).
+const maxTreeDepth = 4096
+
+// ErrTreeTooDeep is returned when tree traversal exceeds maxTreeDepth.
+var ErrTreeTooDeep = errors.New("tree nesting too deep")
 
 type BlobEntry struct {
 	Path string
@@ -22,6 +33,16 @@ func NewTreeReader(store StoreReader) *TreeReader {
 }
 
 func (r *TreeReader) ListBlobs(tree *Tree, prefix string) ([]BlobEntry, error) {
+	return r.listBlobs(tree, prefix, 0)
+}
+
+// listBlobs is the depth-tracked implementation of ListBlobs. Tracking depth
+// prevents a crafted tree (e.g. a/a/a/.../a) from exhausting the call stack.
+func (r *TreeReader) listBlobs(tree *Tree, prefix string, depth int) ([]BlobEntry, error) {
+	if depth > maxTreeDepth {
+		return nil, ErrTreeTooDeep
+	}
+
 	var result []BlobEntry
 
 	for _, entry := range tree.Entries {
@@ -38,7 +59,7 @@ func (r *TreeReader) ListBlobs(tree *Tree, prefix string) ([]BlobEntry, error) {
 			if err != nil {
 				return nil, err
 			}
-			subBlobs, err := r.ListBlobs(subTree, entryPath)
+			subBlobs, err := r.listBlobs(subTree, entryPath, depth+1)
 			if err != nil {
 				return nil, err
 			}

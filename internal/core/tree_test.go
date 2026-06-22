@@ -8,7 +8,7 @@ import (
 // TestNewTree_SortsEntries verifies that NewTree sorts entries (dirs first, then by name).
 func TestNewTree_SortsEntries(t *testing.T) {
 	entries := []TreeEntry{
-		{Name: "z.txt", Type: BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeRegular},
+		{Name: "z.txt", Type: BlobObject, Hash: "3333333333333333333333333333333333333333333333333333333333333333", Mode: ModeRegular},
 		{Name: "sub", Type: TreeObject, Hash: "1111111111111111111111111111111111111111111111111111111111111111", Mode: ModeDir},
 		{Name: "a.txt", Type: BlobObject, Hash: "2222222222222222222222222222222222222222222222222222222222222222", Mode: ModeRegular},
 	}
@@ -19,11 +19,11 @@ func TestNewTree_SortsEntries(t *testing.T) {
 	if len(tree.Entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(tree.Entries))
 	}
-	if tree.Entries[0].Name != "sub" {
-		t.Fatalf("expected sub first, got %q", tree.Entries[0].Name)
+	if tree.Entries[0].Name != "a.txt" {
+		t.Fatalf("expected a.txt first, got %q", tree.Entries[0].Name)
 	}
-	if tree.Entries[1].Name != "a.txt" {
-		t.Fatalf("expected a.txt second, got %q", tree.Entries[1].Name)
+	if tree.Entries[1].Name != "sub" {
+		t.Fatalf("expected sub second, got %q", tree.Entries[1].Name)
 	}
 	if tree.Entries[2].Name != "z.txt" {
 		t.Fatalf("expected z.txt third, got %q", tree.Entries[2].Name)
@@ -34,14 +34,14 @@ func TestNewTree_SortsEntries(t *testing.T) {
 func TestNewTree_DeterministicHash(t *testing.T) {
 	mk := func() []TreeEntry {
 		return []TreeEntry{
-			{Name: "a", Type: BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeRegular},
+			{Name: "a", Type: BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: ModeRegular},
 			{Name: "b", Type: BlobObject, Hash: "1111111111111111111111111111111111111111111111111111111111111111", Mode: ModeRegular},
 		}
 	}
 	t1, _ := NewTree(mk())
 	t2, _ := NewTree([]TreeEntry{
 		{Name: "b", Type: BlobObject, Hash: "1111111111111111111111111111111111111111111111111111111111111111", Mode: ModeRegular},
-		{Name: "a", Type: BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeRegular},
+		{Name: "a", Type: BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: ModeRegular},
 	})
 	if t1.Hash != t2.Hash {
 		t.Fatalf("deterministic hash mismatch: %q vs %q", t1.Hash, t2.Hash)

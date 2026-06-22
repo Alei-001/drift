@@ -11,7 +11,6 @@ import (
 var (
 	treeMagic = [4]byte{'D', 'R', 'E', 'E'}
 
-	ErrInvalidTree = errors.New("invalid tree file")
 	ErrTreeCorrupt = errors.New("tree file corrupted")
 )
 
@@ -132,5 +131,12 @@ func (t *Tree) readEntry(r io.Reader, entry *TreeEntry) error {
 	}
 	entry.Hash = hex.EncodeToString(hashBytes)
 
-	return binary.Read(r, binary.LittleEndian, &entry.Mode)
+	if err := binary.Read(r, binary.LittleEndian, &entry.Mode); err != nil {
+		return ErrTreeCorrupt
+	}
+	// G6: normalize mode to canonical form on decode, mirroring go-git's
+	// canonicalTreeMode. This ensures equivalent modes hash identically and
+	// prevents non-canonical bits from propagating.
+	entry.Mode = canonicalTreeMode(entry.Mode)
+	return nil
 }

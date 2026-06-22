@@ -130,12 +130,11 @@ func TestTreeReader_ListBlobs_Prefix(t *testing.T) {
 // TestTreeReader_ListBlobs_MissingSubtree verifies that a missing subtree returns an error.
 func TestTreeReader_ListBlobs_MissingSubtree(t *testing.T) {
 	store := newMemoryStore()
-	root, err := NewTree([]TreeEntry{
+	// Construct tree directly to bypass Validate (which rejects null hashes);
+	// this test specifically exercises the reader's missing-subtree path.
+	root := &Tree{Entries: []TreeEntry{
 		{Name: "missing", Type: TreeObject, Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeDir},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	}}
 	reader := NewTreeReader(store)
 	if _, err := reader.ListBlobs(root, ""); err == nil {
 		t.Fatal("expected error for missing subtree, got nil")

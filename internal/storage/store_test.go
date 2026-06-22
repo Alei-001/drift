@@ -210,7 +210,7 @@ func TestStore_PutBlobFromFile_TmpCleanup(t *testing.T) {
 func TestStore_PutTree_GetTree(t *testing.T) {
 	s := newTestStore(t)
 	tree, err := core.NewTree([]core.TreeEntry{
-		{Name: "a.txt", Type: core.BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: core.ModeRegular},
+		{Name: "a.txt", Type: core.BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: core.ModeRegular},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -230,9 +230,12 @@ func TestStore_PutTree_GetTree(t *testing.T) {
 // TestStore_PutTree_Idempotent verifies that storing the same tree twice does not error.
 func TestStore_PutTree_Idempotent(t *testing.T) {
 	s := newTestStore(t)
-	tree, _ := core.NewTree([]core.TreeEntry{
-		{Name: "a", Type: core.BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: core.ModeRegular},
+	tree, err := core.NewTree([]core.TreeEntry{
+		{Name: "a", Type: core.BlobObject, Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: core.ModeRegular},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.PutTree(tree); err != nil {
 		t.Fatal(err)
 	}

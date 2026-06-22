@@ -48,16 +48,23 @@ func (idx *Index) Has(path string) bool {
 	return ok
 }
 
-func (idx *Index) Add(entry IndexEntry) {
+// Add inserts or replaces an index entry, validating the entry's path
+// against traversal, absolute, control-character, and metadata-disguise
+// rules — mirroring go-git's index validation on add.
+func (idx *Index) Add(entry IndexEntry) error {
+	if err := ValidateTreePath(entry.Path); err != nil {
+		return err
+	}
 	if idx.byPath == nil {
 		idx.buildIndex()
 	}
 	if i, ok := idx.byPath[entry.Path]; ok {
 		idx.Entries[i] = entry
-		return
+		return nil
 	}
 	idx.Entries = append(idx.Entries, entry)
 	idx.byPath[entry.Path] = len(idx.Entries) - 1
+	return nil
 }
 
 func (idx *Index) Remove(path string) {

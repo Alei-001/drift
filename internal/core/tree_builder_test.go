@@ -23,7 +23,7 @@ func (f *fakeStore) put(t *Tree) error {
 // TestTreeBuilder_FlatIndex verifies that a flat index produces a single root tree.
 func TestTreeBuilder_FlatIndex(t *testing.T) {
 	idx := &Index{}
-	idx.Add(IndexEntry{Path: "a.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeRegular})
+	idx.Add(IndexEntry{Path: "a.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: ModeRegular})
 	idx.Add(IndexEntry{Path: "b.txt", Hash: "1111111111111111111111111111111111111111111111111111111111111111", Mode: ModeRegular})
 
 	store := newFakeStore()
@@ -44,7 +44,7 @@ func TestTreeBuilder_FlatIndex(t *testing.T) {
 // TestTreeBuilder_NestedIndex verifies that nested paths produce subtrees.
 func TestTreeBuilder_NestedIndex(t *testing.T) {
 	idx := &Index{}
-	idx.Add(IndexEntry{Path: "dir/a.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeRegular})
+	idx.Add(IndexEntry{Path: "dir/a.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: ModeRegular})
 	idx.Add(IndexEntry{Path: "dir/sub/b.txt", Hash: "1111111111111111111111111111111111111111111111111111111111111111", Mode: ModeRegular})
 	idx.Add(IndexEntry{Path: "c.txt", Hash: "2222222222222222222222222222222222222222222222222222222222222222", Mode: ModeRegular})
 
@@ -80,7 +80,7 @@ func TestTreeBuilder_NestedIndex(t *testing.T) {
 func TestTreeBuilder_DeterministicHash(t *testing.T) {
 	mk := func() *Index {
 		idx := &Index{}
-		idx.Add(IndexEntry{Path: "a.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeRegular})
+		idx.Add(IndexEntry{Path: "a.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: ModeRegular})
 		idx.Add(IndexEntry{Path: "dir/b.txt", Hash: "1111111111111111111111111111111111111111111111111111111111111111", Mode: ModeRegular})
 		return idx
 	}
@@ -113,7 +113,7 @@ func TestTreeBuilder_EmptyIndex(t *testing.T) {
 // TestTreeBuilder_StoresAllSubtrees verifies that every subtree (including the root) is persisted.
 func TestTreeBuilder_StoresAllSubtrees(t *testing.T) {
 	idx := &Index{}
-	idx.Add(IndexEntry{Path: "a/b/c.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000000", Mode: ModeRegular})
+	idx.Add(IndexEntry{Path: "a/b/c.txt", Hash: "0000000000000000000000000000000000000000000000000000000000000001", Mode: ModeRegular})
 	idx.Add(IndexEntry{Path: "a/d.txt", Hash: "1111111111111111111111111111111111111111111111111111111111111111", Mode: ModeRegular})
 	idx.Add(IndexEntry{Path: "e.txt", Hash: "2222222222222222222222222222222222222222222222222222222222222222", Mode: ModeRegular})
 

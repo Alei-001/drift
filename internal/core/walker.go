@@ -51,14 +51,13 @@ func WalkWorkingDirWithIgnore(walkRoot, ignoreRoot string, fn WalkFunc) error {
 			}
 		}
 
-		if ignore.IsIgnored(ignoreRel) {
-			if info.IsDir() {
+		if info.IsDir() {
+			if ignore.IsIgnoredDir(ignoreRel) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-
-		if info.IsDir() {
+		if ignore.IsIgnored(ignoreRel) {
 			return nil
 		}
 

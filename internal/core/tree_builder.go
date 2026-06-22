@@ -52,6 +52,7 @@ func (b *TreeBuilder) addEntry(entry *IndexEntry) {
 				te := TreeEntry{
 					Name: part,
 					Type: TreeObject,
+					Mode: ModeDir,
 				}
 				b.getOrCreateTree(parent).Entries = append(
 					b.getOrCreateTree(parent).Entries,

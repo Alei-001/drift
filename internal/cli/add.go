@@ -146,7 +146,9 @@ func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileI
 		Mode:       mode,
 	}
 
-	idx.Add(entry)
+	if err := idx.Add(entry); err != nil {
+		return fmt.Errorf("failed to add %s: %w", relPath, err)
+	}
 
 	fmt.Printf("Added: %s\n", relPath)
 	return nil

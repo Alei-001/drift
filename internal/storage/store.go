@@ -225,6 +225,9 @@ func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 }
 
 func (s *Store) PutTree(t *core.Tree) error {
+	if t == nil {
+		return core.ErrInvalidTree
+	}
 	unlock, err := s.lock()
 	if err != nil {
 		return err
