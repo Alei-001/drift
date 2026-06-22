@@ -2,10 +2,8 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"sort"
 
-	"github.com/drift/drift/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -13,17 +11,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "Show version history",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dir, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-
-		store := storage.NewStore(dir)
-		if !store.IsInitialized() {
-			return fmt.Errorf("not a drift project (run 'drift init')")
-		}
-
-		commits, err := store.ListCommits()
+		commits, err := sharedStore.ListCommits()
 		if err != nil {
 			return fmt.Errorf("failed to list commits: %w", err)
 		}

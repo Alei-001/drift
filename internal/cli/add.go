@@ -15,21 +15,11 @@ var addCmd = &cobra.Command{
 	Short: "Add file contents to the staging area",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dir, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-
-		store := storage.NewStore(dir)
-		if !store.IsInitialized() {
-			return fmt.Errorf("not a drift project (run 'drift init')")
-		}
-
 		target := args[0]
 		if target == "." {
-			return addAll(store, dir)
+			return addAll(sharedStore, sharedDir)
 		}
-		return addPath(store, dir, target)
+		return addPath(sharedStore, sharedDir, target)
 	},
 }
 
@@ -47,17 +37,36 @@ func addPath(store *storage.Store, root, path string) error {
 	if info.IsDir() {
 		return addDirectory(store, root, path)
 	}
-	return addFile(store, root, path, fullPath, info)
+
+	var idx core.Index
+	if err := store.LoadIndex(&idx); err != nil {
+		return fmt.Errorf("failed to load index: %w", err)
+	}
+
+	if err := addFile(store, root, path, fullPath, info, &idx); err != nil {
+		return err
+	}
+
+	if err := store.SaveIndex(&idx); err != nil {
+		return fmt.Errorf("failed to save index: %w", err)
+	}
+
+	return nil
 }
 
 func addDirectory(store *storage.Store, root, dirPath string) error {
 	fullDir := filepath.Join(root, filepath.FromSlash(dirPath))
-	var added int
 
+	var idx core.Index
+	if err := store.LoadIndex(&idx); err != nil {
+		return fmt.Errorf("failed to load index: %w", err)
+	}
+
+	var added int
 	err := core.WalkWorkingDir(fullDir, func(path string, info os.FileInfo) error {
 		relPath := filepath.ToSlash(filepath.Join(dirPath, path))
 		fullPath := filepath.Join(root, filepath.FromSlash(relPath))
-		if err := addFile(store, root, relPath, fullPath, info); err != nil {
+		if err := addFile(store, root, relPath, fullPath, info, &idx); err != nil {
 			return err
 		}
 		added++
@@ -65,6 +74,10 @@ func addDirectory(store *storage.Store, root, dirPath string) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if err := store.SaveIndex(&idx); err != nil {
+		return fmt.Errorf("failed to save index: %w", err)
 	}
 
 	fmt.Printf("Added %d file(s)\n", added)
@@ -72,11 +85,15 @@ func addDirectory(store *storage.Store, root, dirPath string) error {
 }
 
 func addAll(store *storage.Store, root string) error {
-	var added int
+	var idx core.Index
+	if err := store.LoadIndex(&idx); err != nil {
+		return fmt.Errorf("failed to load index: %w", err)
+	}
 
+	var added int
 	err := core.WalkWorkingDir(root, func(path string, info os.FileInfo) error {
 		fullPath := filepath.Join(root, filepath.FromSlash(path))
-		if err := addFile(store, root, path, fullPath, info); err != nil {
+		if err := addFile(store, root, path, fullPath, info, &idx); err != nil {
 			return err
 		}
 		added++
@@ -86,32 +103,29 @@ func addAll(store *storage.Store, root string) error {
 		return err
 	}
 
+	if err := store.SaveIndex(&idx); err != nil {
+		return fmt.Errorf("failed to save index: %w", err)
+	}
+
 	fmt.Printf("Added %d file(s)\n", added)
 	return nil
 }
 
-func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileInfo) error {
+func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileInfo, idx *core.Index) error {
 	hash, err := store.PutBlobFromFile(fullPath)
 	if err != nil {
 		return fmt.Errorf("failed to store %s: %w", relPath, err)
 	}
-
-	var idx core.Index
-	_ = store.LoadIndex(&idx)
 
 	entry := core.IndexEntry{
 		Path:       relPath,
 		Hash:       hash,
 		ModifiedAt: info.ModTime(),
 		Size:       info.Size(),
-		Mode:       uint32(info.Mode()),
+		Mode:       core.NormalizeMode(info.Mode()),
 	}
 
 	idx.Add(entry)
-
-	if err := store.SaveIndex(&idx); err != nil {
-		return fmt.Errorf("failed to save index: %w", err)
-	}
 
 	fmt.Printf("Added: %s\n", relPath)
 	return nil

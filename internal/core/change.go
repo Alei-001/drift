@@ -5,15 +5,18 @@ import (
 	"path/filepath"
 )
 
-func ComputeStatus(commitTree *Tree, idx *Index, workDir string) (Status, error) {
+func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreReader) (Status, error) {
 	s := make(Status)
 
 	commitFiles := make(map[string]string)
-	if commitTree != nil {
-		for _, e := range commitTree.Entries {
-			if e.Type == BlobObject {
-				commitFiles[e.Name] = e.Hash
-			}
+	if commitTree != nil && store != nil {
+		reader := NewTreeReader(store)
+		blobs, err := reader.ListBlobs(commitTree, "")
+		if err != nil {
+			return nil, err
+		}
+		for _, be := range blobs {
+			commitFiles[be.Path] = be.Hash
 		}
 	}
 
@@ -25,6 +28,18 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string) (Status, error)
 			if err != nil {
 				fs := s.File(path)
 				fs.Staging = Deleted
+
+				fullPath := filepath.Join(workDir, filepath.FromSlash(path))
+				info, statErr := os.Lstat(fullPath)
+				if statErr == nil {
+					fileHash, hashErr := CalculateHashFromFile(fullPath)
+					if hashErr == nil && fileHash != hash {
+						fs.Worktree = Modified
+					} else if hashErr == nil {
+						fs.Worktree = Modified
+					}
+					_ = info
+				}
 				continue
 			}
 			if entry.Hash != hash {
@@ -77,7 +92,7 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string) (Status, error)
 	} else {
 		for path, hash := range commitFiles {
 			fullPath := filepath.Join(workDir, filepath.FromSlash(path))
-			info, err := os.Lstat(fullPath)
+			_, err := os.Lstat(fullPath)
 			if err != nil {
 				if os.IsNotExist(err) {
 					fs := s.File(path)
@@ -94,10 +109,6 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string) (Status, error)
 			if fileHash != hash {
 				fs := s.File(path)
 				fs.Worktree = Modified
-			} else {
-				fs := s.File(path)
-				_ = info
-				_ = fs
 			}
 		}
 	}

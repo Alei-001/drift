@@ -7,30 +7,29 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"sync"
 
 	"github.com/drift/drift/internal/core"
 )
 
 var (
-	ErrNotInitialized = errors.New("drift project not initialized (run 'drift init')")
-	ErrObjectNotFound = errors.New("object not found")
+	ErrNotInitialized  = errors.New("drift project not initialized (run 'drift init')")
+	ErrObjectNotFound  = errors.New("object not found")
+	ErrObjectCorrupted = errors.New("object corrupted (hash mismatch)")
 )
 
 const (
-	driftDir    = ".drift"
-	blobsDir    = "objects/blobs"
-	treesDir    = "objects/trees"
-	commitsDir  = "commits"
-	refsDir     = "refs"
-	indexFile   = "index"
-	configFile  = "config.json"
-	lockFile    = "lock"
+	driftDir   = ".drift"
+	blobsDir   = "objects/blobs"
+	treesDir   = "objects/trees"
+	commitsDir = "commits"
+	refsDir    = "refs"
+	indexFile  = "index"
+	configFile = "config.json"
+	lockFile   = "lock"
 )
 
 type Store struct {
 	root string
-	mu   sync.Mutex
 }
 
 func NewStore(root string) *Store {
@@ -73,16 +72,15 @@ func (s *Store) Init() error {
 	return nil
 }
 
-// lock acquires an in-process mutex and creates a lock file as a visual indicator.
-// Note: This does NOT provide cross-process locking. For MVP this is sufficient.
-func (s *Store) lock() func() {
-	s.mu.Lock()
+// lock acquires an OS-level exclusive file lock on .drift/lock.
+// Returns an unlock function and an error. If err is non-nil, the lock was not acquired.
+func (s *Store) lock() (func(), error) {
 	lockPath := filepath.Join(s.DriftDir(), lockFile)
-	_ = os.WriteFile(lockPath, []byte("locked"), 0644)
-	return func() {
-		_ = os.Remove(lockPath)
-		s.mu.Unlock()
+	fl, err := acquireFileLock(lockPath)
+	if err != nil {
+		return func() {}, fmt.Errorf("could not acquire lock (another drift process running?): %w", err)
 	}
+	return fl.release, nil
 }
 
 func (s *Store) blobPath(hash string) string {
@@ -101,7 +99,10 @@ func (s *Store) commitPath(id string) string {
 }
 
 func (s *Store) PutBlob(data []byte) (string, error) {
-	unlock := s.lock()
+	unlock, err := s.lock()
+	if err != nil {
+		return "", err
+	}
 	defer unlock()
 
 	hash := core.CalculateHash(data)
@@ -120,7 +121,12 @@ func (s *Store) PutBlob(data []byte) (string, error) {
 		return "", err
 	}
 
-	return hash, os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+
+	return hash, nil
 }
 
 func (s *Store) GetBlob(hash string) ([]byte, error) {
@@ -132,26 +138,21 @@ func (s *Store) GetBlob(hash string) ([]byte, error) {
 		}
 		return nil, err
 	}
+
+	actual := core.CalculateHash(data)
+	if actual != hash {
+		return nil, ErrObjectCorrupted
+	}
+
 	return data, nil
 }
 
 func (s *Store) PutBlobFromFile(filePath string) (string, error) {
-	unlock := s.lock()
-	defer unlock()
-
-	hash, err := core.CalculateHashFromFile(filePath)
+	unlock, err := s.lock()
 	if err != nil {
 		return "", err
 	}
-
-	path := s.blobPath(hash)
-	if _, err := os.Stat(path); err == nil {
-		return hash, nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return "", err
-	}
+	defer unlock()
 
 	src, err := os.Open(filePath)
 	if err != nil {
@@ -159,7 +160,7 @@ func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 	}
 	defer src.Close()
 
-	tmp := path + ".tmp"
+	tmp := filepath.Join(s.DriftDir(), blobsDir, ".puttmp")
 	dst, err := os.Create(tmp)
 	if err != nil {
 		return "", err
@@ -172,11 +173,38 @@ func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 	}
 	dst.Close()
 
-	return hash, os.Rename(tmp, path)
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+
+	hash := core.CalculateHash(data)
+	path := s.blobPath(hash)
+
+	if _, err := os.Stat(path); err == nil {
+		_ = os.Remove(tmp)
+		return hash, nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+
+	return hash, nil
 }
 
 func (s *Store) PutTree(t *core.Tree) error {
-	unlock := s.lock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
 	defer unlock()
 
 	path := s.treePath(t.Hash)
@@ -194,7 +222,12 @@ func (s *Store) PutTree(t *core.Tree) error {
 		return err
 	}
 
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	return nil
 }
 
 func (s *Store) GetTree(hash string) (*core.Tree, error) {
@@ -212,11 +245,19 @@ func (s *Store) GetTree(hash string) (*core.Tree, error) {
 		return nil, err
 	}
 
+	actual := core.CalculateHash(data)
+	if actual != hash {
+		return nil, ErrObjectCorrupted
+	}
+
 	return t, nil
 }
 
 func (s *Store) PutCommit(c *core.Commit) error {
-	unlock := s.lock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
 	defer unlock()
 
 	path := s.commitPath(c.ID)
@@ -231,7 +272,12 @@ func (s *Store) PutCommit(c *core.Commit) error {
 		return err
 	}
 
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	return nil
 }
 
 func (s *Store) GetCommit(id string) (*core.Commit, error) {
@@ -268,7 +314,7 @@ func (s *Store) ListCommits() ([]*core.Commit, error) {
 		id := entry.Name()[:len(entry.Name())-4]
 		c, err := s.GetCommit(id)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("corrupted commit %s: %w", id, err)
 		}
 		commits = append(commits, c)
 	}
@@ -281,12 +327,15 @@ func (s *Store) ListCommits() ([]*core.Commit, error) {
 }
 
 func (s *Store) SaveRef(name, commitHash string) error {
-	unlock := s.lock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
 	defer unlock()
 
 	path := filepath.Join(s.DriftDir(), refsDir, name+".json")
 	data, err := json.MarshalIndent(map[string]string{
-		"name":         name,
+		"name":        name,
 		"commit_hash": commitHash,
 	}, "", "  ")
 	if err != nil {
@@ -298,7 +347,12 @@ func (s *Store) SaveRef(name, commitHash string) error {
 		return err
 	}
 
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	return nil
 }
 
 func (s *Store) GetRef(name string) (string, error) {
@@ -319,8 +373,37 @@ func (s *Store) GetRef(name string) (string, error) {
 	return ref["commit_hash"], nil
 }
 
+func (s *Store) ListRefs() (map[string]string, error) {
+	dir := filepath.Join(s.DriftDir(), refsDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	refs := make(map[string]string)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		name := entry.Name()[:len(entry.Name())-5]
+		commitHash, err := s.GetRef(name)
+		if err != nil {
+			continue
+		}
+		refs[name] = commitHash
+	}
+
+	return refs, nil
+}
+
 func (s *Store) SaveIndex(idx *core.Index) error {
-	unlock := s.lock()
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
 	defer unlock()
 
 	path := filepath.Join(s.DriftDir(), indexFile)
@@ -334,7 +417,12 @@ func (s *Store) SaveIndex(idx *core.Index) error {
 		return err
 	}
 
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+
+	return nil
 }
 
 func (s *Store) LoadIndex(idx *core.Index) error {

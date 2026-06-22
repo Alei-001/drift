@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 )
@@ -13,8 +14,9 @@ var (
 	commitMagic   = [4]byte{'D', 'C', 'M', 'T'}
 	commitVersion = uint32(1)
 
-	ErrInvalidCommit = errors.New("invalid commit file")
-	ErrCommitCorrupt = errors.New("commit file corrupted")
+	ErrInvalidCommit  = errors.New("invalid commit file")
+	ErrCommitCorrupt  = errors.New("commit file corrupted")
+	ErrCommitHashMismatch = errors.New("commit hash mismatch")
 )
 
 func (c *Commit) Marshal() ([]byte, error) {
@@ -44,9 +46,13 @@ func (c *Commit) Marshal() ([]byte, error) {
 		return nil, err
 	}
 
-	parentBytes, err := hex.DecodeString(c.Parent)
-	if err != nil {
-		parentBytes = make([]byte, 32)
+	parentBytes := make([]byte, 32)
+	if !c.isRoot() {
+		pb, err := hex.DecodeString(c.Parent)
+		if err != nil {
+			return nil, fmt.Errorf("invalid parent hash %q: %w", c.Parent, err)
+		}
+		parentBytes = pb
 	}
 	if len(parentBytes) < 32 {
 		padded := make([]byte, 32)
@@ -66,6 +72,14 @@ func (c *Commit) Marshal() ([]byte, error) {
 	}
 
 	if err := c.writeString(&buf, c.Message); err != nil {
+		return nil, err
+	}
+
+	if err := c.writeString(&buf, c.Author.Name); err != nil {
+		return nil, err
+	}
+
+	if err := c.writeString(&buf, c.Author.Email); err != nil {
 		return nil, err
 	}
 
@@ -102,7 +116,7 @@ func (c *Commit) Unmarshal(data []byte) error {
 		return ErrCommitCorrupt
 	}
 	parent := hex.EncodeToString(parentBytes)
-	if parent != "0000000000000000000000000000000000000000000000000000000000000000" {
+	if parent != nullHash {
 		c.Parent = parent
 	}
 
@@ -123,6 +137,25 @@ func (c *Commit) Unmarshal(data []byte) error {
 		return err
 	}
 	c.Message = message
+
+	if r.Len() > 0 {
+		authorName, err := c.readString(r)
+		if err == nil {
+			c.Author.Name = authorName
+		}
+		if r.Len() > 0 {
+			authorEmail, err := c.readString(r)
+			if err == nil {
+				c.Author.Email = authorEmail
+			}
+		}
+	}
+
+	storedHash := c.Hash
+	computedHash := c.calculateHash()
+	if storedHash != computedHash {
+		return ErrCommitHashMismatch
+	}
 
 	return nil
 }

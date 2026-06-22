@@ -27,27 +27,17 @@ var exportCmd = &cobra.Command{
 			return fmt.Errorf("output path is required (use -o flag)")
 		}
 
-		dir, err := os.Getwd()
+		commit, err := findCommitByPrefix(sharedStore, version)
 		if err != nil {
 			return err
 		}
 
-		store := storage.NewStore(dir)
-		if !store.IsInitialized() {
-			return fmt.Errorf("not a drift project (run 'drift init')")
-		}
-
-		commit, err := findCommitByPrefix(store, version)
-		if err != nil {
-			return err
-		}
-
-		tree, err := store.GetTree(commit.TreeHash)
+		tree, err := sharedStore.GetTree(commit.TreeHash)
 		if err != nil {
 			return fmt.Errorf("failed to load tree: %w", err)
 		}
 
-		reader := core.NewTreeReader(store)
+		reader := core.NewTreeReader(sharedStore)
 		blobs, err := reader.ListBlobs(tree, "")
 		if err != nil {
 			return fmt.Errorf("failed to list files: %w", err)
@@ -55,11 +45,11 @@ var exportCmd = &cobra.Command{
 
 		switch format {
 		case "zip":
-			return exportZip(store, blobs, output)
+			return exportZip(sharedStore, blobs, output)
 		case "tar", "tar.gz":
-			return exportTar(store, blobs, output)
+			return exportTar(sharedStore, blobs, output)
 		case "dir", "":
-			return exportDir(store, blobs, output)
+			return exportDir(sharedStore, blobs, output, len(blobs))
 		default:
 			return fmt.Errorf("unsupported format: %s (use dir, zip, or tar)", format)
 		}
@@ -87,7 +77,7 @@ func findCommitByPrefix(store *storage.Store, prefix string) (*core.Commit, erro
 	return nil, fmt.Errorf("version not found: %s", prefix)
 }
 
-func exportDir(store *storage.Store, blobs []core.BlobEntry, output string) error {
+func exportDir(store *storage.Store, blobs []core.BlobEntry, output string, total int) error {
 	if _, err := os.Stat(output); err == nil {
 		return fmt.Errorf("directory already exists: %s", output)
 	}
@@ -96,11 +86,13 @@ func exportDir(store *storage.Store, blobs []core.BlobEntry, output string) erro
 		return err
 	}
 
-	for _, blob := range blobs {
+	for i, blob := range blobs {
 		if err := writeBlobToFile(store, blob, output); err != nil {
 			return err
 		}
+		fmt.Printf("\rExporting: %d/%d", i+1, total)
 	}
+	fmt.Println()
 
 	fmt.Printf("Exported %d file(s) to %s\n", len(blobs), output)
 	return nil

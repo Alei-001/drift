@@ -2,35 +2,21 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 
+	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/core"
-	"github.com/drift/drift/internal/storage"
 	"github.com/spf13/cobra"
 )
 
 var saveCmd = &cobra.Command{
-	Use:   "save -m <message>",
+	Use:   "save [-m message]",
 	Short: "Save staged changes as a new version",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		message, _ := cmd.Flags().GetString("message")
-		if message == "" {
-			return fmt.Errorf("message is required (use -m flag)")
-		}
-
-		dir, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-
-		store := storage.NewStore(dir)
-		if !store.IsInitialized() {
-			return fmt.Errorf("not a drift project (run 'drift init')")
-		}
 
 		var idx core.Index
-		if err := store.LoadIndex(&idx); err != nil {
+		if err := sharedStore.LoadIndex(&idx); err != nil {
 			return fmt.Errorf("failed to load index: %w", err)
 		}
 
@@ -39,7 +25,7 @@ var saveCmd = &cobra.Command{
 		}
 
 		builder := core.NewTreeBuilder(func(t *core.Tree) error {
-			return store.PutTree(t)
+			return sharedStore.PutTree(t)
 		})
 
 		tree, err := builder.BuildFromIndex(&idx)
@@ -47,37 +33,53 @@ var saveCmd = &cobra.Command{
 			return fmt.Errorf("failed to build tree: %w", err)
 		}
 
-		commits, err := store.ListCommits()
+		commits, err := sharedStore.ListCommits()
 		if err != nil {
 			return fmt.Errorf("failed to list commits: %w", err)
 		}
 
 		parentHash := ""
-		branch := "main"
+		branch, _ := sharedStore.GetRef("HEAD")
+		if branch == "" {
+			branch = "main"
+		}
 
 		if len(commits) > 0 {
-			latest := commits[len(commits)-1]
-			parentHash = latest.Hash
-			branch = latest.Branch
+			if refHash, err := sharedStore.GetRef(branch); err == nil {
+				parentHash = refHash
+			}
+		}
+
+		cfg, _ := config.LoadConfig(sharedStore.DriftDir())
+		if cfg == nil {
+			cfg = config.DefaultConfig()
 		}
 
 		id := "v" + strconv.Itoa(len(commits)+1)
-		commit := core.NewCommit(id, message, parentHash, branch, tree.Hash)
+		author := core.Signature{
+			Name:  cfg.User.Name,
+			Email: cfg.User.Email,
+		}
+		commit := core.NewCommit(id, message, parentHash, branch, tree.Hash, author)
 
-		if err := store.PutCommit(commit); err != nil {
+		if err := sharedStore.PutCommit(commit); err != nil {
 			return fmt.Errorf("failed to store commit: %w", err)
 		}
 
-		if err := store.SaveRef(branch, commit.Hash); err != nil {
+		if err := sharedStore.SaveRef(branch, commit.Hash); err != nil {
 			return fmt.Errorf("failed to update ref: %w", err)
 		}
 
 		emptyIdx := &core.Index{}
-		if err := store.SaveIndex(emptyIdx); err != nil {
+		if err := sharedStore.SaveIndex(emptyIdx); err != nil {
 			return fmt.Errorf("failed to clear index: %w", err)
 		}
 
-		fmt.Printf("Saved version %s: %s\n", id, message)
+		if message != "" {
+			fmt.Printf("Saved version %s: %s\n", id, message)
+		} else {
+			fmt.Printf("Saved version %s\n", id)
+		}
 		return nil
 	},
 }

@@ -2,277 +2,211 @@
 
 ## 技术栈
 
-| 项目 | 选择 | 原因 |
-|------|------|------|
-| **语言** | Go | 开发效率高、跨平台、编译为单一二进制 |
-| **版本** | Go 1.26.4 | 最新稳定版 |
-| **哈希算法** | SHA-256 | 安全性高，避免碰撞 |
-| **存储方式** | 内容寻址 + JSON元数据 | 简单可靠 |
-| **CLI框架** | cobra | Go标准CLI库 |
-| **压缩** | 可选gzip | 节省存储空间 |
+| 项 | 选择 | 原因 |
+|----|------|------|
+| **语言** | Go 1.26+ | 编译为单一二进制、跨平台 |
+| **哈希** | SHA-256 | 安全性高，纯摘要（不兼容 Git header） |
+| **存储** | 内容寻址 + 二进制格式 | 去重、性能 |
+| **CLI** | cobra | Go 标准 CLI 库 |
+| **压缩** | zlib（tar.gz） | 仅 export 使用，存储不压缩 |
 
-## 架构设计
+## 架构
 
 ### 对象模型
 
-Drift借鉴Git的对象模型，但进行简化：
+借鉴 Git 三种核心对象，做了适配创意工作者的简化：
 
 ```
-对象类型：
-├── Blob  - 存储文件内容（二进制/文本）
-├── Tree  - 存储目录结构（递归）
-└── Commit - 存储版本信息
+Blob    — 文件内容（二进制 / 文本），SHA-256 寻址
+Tree    — 目录结构，递归（每个子目录是独立 Tree 对象）
+Commit  — 版本快照，指向根 Tree，单亲节点（线性历史）
 ```
-
-### 对象关系
 
 ```
 Commit
-  └── Tree (根目录)
-        ├── Tree (子目录1)
-        │     ├── Blob (文件1)
-        │     └── Blob (文件2)
-        ├── Tree (子目录2)
-        │     └── Blob (文件3)
-        └── Blob (文件4)
+  └── Tree（根目录）
+        ├── Tree（子目录1）
+        │     ├── Blob（文件1）
+        │     └── Blob（文件2）
+        ├── Tree（子目录2）
+        │     └── Blob（文件3）
+        └── Blob（文件4）
 ```
 
 ## 目录结构
 
-### 项目目录
-
 ```
 .drift/
-├── objects/              # 内容寻址存储
-│   ├── blobs/           # 文件内容
-│   │   ├── ab/cdef1234...
-│   │   └── 56/7890abcd...
-│   └── trees/           # 目录结构
-│       ├── 12/34567890...
-│       └── ef/ghijklmn...
-├── commits/             # 版本记录
-│   ├── v1.json
-│   └── v2.json
-├── refs/                # 分支引用
-│   ├── main.json
-│   └── 方案A.json
-├── index                # 暂存区
-└── config.json          # 项目配置
+├── objects/
+│   ├── blobs/          # SHA-256 前 2 位分片
+│   │   ├── ab/
+│   │   │   └── cdef... # 原始内容
+│   │   └── 56/
+│   │       └── 7890...
+│   └── trees/          # *.dre（DREE 格式）
+│       └── abcdef....dre
+├── commits/            # *.dcm（DCMT 格式）
+│   ├── v1.dcm
+│   └── v2.dcm
+├── refs/               # 分支引用（JSON）
+│   └── main.json
+├── index               # 暂存区（DRIX 格式）
+├── config.json         # 项目配置
+└── lock                # 文件锁标记
 ```
 
-## 数据结构
+## 二进制格式
 
-### Blob对象
+所有持久化数据使用二进制格式（`encoding/binary` + `encoding/hex`，little-endian）。
 
-存储文件的实际内容，使用SHA-256哈希作为文件名。
-
-```
-objects/blobs/ab/cdef1234567890...
-```
-
-### Tree对象
-
-```json
-{
-  "hash": "tree_xyz789",
-  "entries": [
-    {
-      "name": "章节",
-      "type": "tree",
-      "hash": "tree_abc111"
-    },
-    {
-      "name": "素材",
-      "type": "tree",
-      "hash": "tree_def222"
-    },
-    {
-      "name": "大纲.txt",
-      "type": "blob",
-      "hash": "blob_ghi333"
-    }
-  ]
-}
-```
-
-### Commit对象
-
-```json
-{
-  "hash": "commit_v1",
-  "id": "v1",
-  "message": "完成前四章",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "parent": null,
-  "branch": "main",
-  "tree": "tree_xyz789"
-}
-```
-
-### 暂存区（index）
-
-```json
-{
-  "staged": [
-    {
-      "path": "章节/第一章.txt",
-      "hash": "blob_abc123",
-      "status": "modified"
-    },
-    {
-      "path": "章节/第四章.txt",
-      "hash": "blob_def456",
-      "status": "added"
-    }
-  ]
-}
-```
-
-### 分支引用
-
-```json
-{
-  "name": "main",
-  "current_commit": "commit_v3",
-  "created_at": "2024-01-15T10:00:00Z"
-}
-```
-
-## 存储方案
-
-### 内容寻址
-
-- 文件内容使用SHA-256哈希作为标识
-- 相同内容的文件只存储一次
-- 自动去重，节省空间
-
-### 硬链接优化
-
-- 未修改的文件使用硬链接
-- 避免重复存储
-- 节省磁盘空间
-
-### 文件组织
+### DRIX — Index（暂存区）
 
 ```
-objects/blobs/
-├── ab/
-│   └── cdef1234...   # 前2位作为子目录
-└── 56/
-    └── 7890abcd...
+Header:  magic[4]="DRIX" | version:uint32(1) | count:uint32
+Entry:   path_len:uint16 | path:[]byte
+         hash:[32]byte（SHA-256）
+         modified_at:int64（Unix ms）
+         size:int64
+         mode:uint32
 ```
 
-## 核心模块
+### DREE — Tree（目录）
 
-### 1. 对象存储引擎（internal/storage）
+```
+Header:  magic[4]="DREE" | count:uint32
+Entry:   name_len:uint16 | name:[]byte
+         type:uint8（0=blob, 1=tree）
+         hash:[32]byte
+         mode:uint32
+```
 
-负责：
-- Blob对象的读写
-- Tree对象的构建和解析
-- 内容哈希计算
-- 硬链接管理
+排序：子目录先于文件，同类型按名称字母序（保证确定性哈希）。
 
-### 2. 暂存区管理（internal/core）
+### DCMT — Commit（版本）
 
-负责：
-- 文件变更检测
-- 暂存区状态管理
-- 文件添加/移除
+```
+Header:  magic[4]="DCMT" | version:uint32(1)
+Field:   id_len:uint16 | id:[]byte
+         hash:[32]byte
+         tree_hash:[32]byte
+         parent_hash:[32]byte（全零 = 无父版本）
+         timestamp:int64（Unix ms）
+         branch_len:uint16 | branch:[]byte
+         message_len:uint16 | message:[]byte
+         author_name_len:uint16 | author_name:[]byte
+         author_email_len:uint16 | author_email:[]byte
+```
 
-### 3. 版本管理（internal/core）
+## 内容寻址
 
-负责：
-- Commit对象创建
-- 版本历史管理
-- 分支管理
-
-### 4. CLI命令（internal/cli）
-
-负责：
-- 命令解析
-- 用户交互
-- 输出格式化
+- 相同内容 → 相同 SHA-256 → 同一存储位置 → 自动去重
+- 原子写入：先写 `.tmp` 文件，再 `os.Rename`
+- Blob 分片存储：`hash[:2]` 子目录避免单目录文件过多
 
 ## 哈希算法
 
-### SHA-256
+纯 SHA-256，不添加 Git 风格的 type+size header。
 
-- 输出长度：256位（32字节）
-- 十六进制表示：64字符
-- 安全性高，避免碰撞
-- 适合文件内容标识
-
-### 哈希计算
-
-```go
-func CalculateHash(data []byte) string {
-    hash := sha256.Sum256(data)
-    return hex.EncodeToString(hash[:])
-}
+```
+CalculateHash(data) = hex(sha256.Sum256(data))  → 64 字符 hex string
 ```
 
-## 跨平台支持
+## 跨平台
 
-### 编译目标
+### FileMode 规范化
 
-```bash
-# Windows
-GOOS=windows GOARCH=amd64 go build -o drift.exe
+已实现。存储时将 `os.FileMode` 归一化为标准值：
 
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o drift
+| 平台原始 | 归一化值 | 含义 |
+|----------|----------|------|
+| 各种 Regular | `0100644` | 普通文件 |
+| 各种 Dir | `0040000` | 目录 |
+| 有执行位的 Regular | `0100755` | 可执行文件 |
 
-# Linux
-GOOS=linux GOARCH=amd64 go build -o drift
+详见 `internal/core/filemode.go`。
+
+### 换行符归一化
+
+计划实现（当前未做）：
+
+```
+PutBlobFromFile  → 读取文件时 CRLF → LF 归一化
+GetBlob          → 写入工作区时 LF → CRLF（Windows）/ 保持 LF（Unix）
 ```
 
-### 文件路径处理
+确保同一文件在 Windows / macOS / Linux 上哈希一致。
 
-- 使用`filepath.Join`处理路径
-- 支持Windows/Linux/macOS路径分隔符
-- 统一使用`/`作为内部路径分隔符
+### 文件锁
+
+已实现 OS 级排他锁，防止多实例并发操作 `.drift/`：
+
+- Windows: `LockFileEx`（`internal/storage/lock_windows.go`）
+- Unix: `flock`（`internal/storage/lock_unix.go`）
+
+详见 `internal/storage/lock.go`。
+
+### 路径处理
+
+- 内部统一使用 `/` 分隔符
+- 读写文件系统时用 `filepath.FromSlash` / `filepath.ToSlash` 转换
+- 路径长度上限：65535 字节（二进制格式 uint16 限制）
+
+## 核心模块
+
+### 对象存储（`internal/storage/store.go`）
+
+- `PutBlob(data)` / `GetBlob(hash)` — 内容寻址 Blob 读写
+- `PutBlobFromFile(path)` — 从文件系统流式写入，自动 CRLF→LF
+- `PutTree(t)` / `GetTree(hash)` — DREE 格式读写
+- `PutCommit(c)` / `GetCommit(id)` — DCMT 格式读写
+- `ListCommits()` — 时间戳升序列表
+- `SaveRef` / `GetRef` — 分支引用
+- `SaveIndex` / `LoadIndex` — 暂存区
+
+### 状态检测（`internal/core/change.go`）
+
+三层比较模型（参考 go-git）：
+
+```
+暂存区有内容：Commit ↔ Index（staging 状态） + Index ↔ Workdir（worktree 状态）
+暂存区为空：  Commit ↔ Workdir（worktree 状态）
+
+Untracked：既不在 Commit 也不在 Index 中的文件
+```
+
+### 目录遍历（`internal/core/walker.go`）
+
+基于 `filepath.Walk`，跳过 `.drift/` 和 `.git/`。支持 `.driftignore` 文件进行 glob 规则过滤。
+
+### Tree 构建（`internal/core/tree_builder.go`）
+
+从扁平 Index 构建递归 Tree：
+1. 拆分路径为层级
+2. 自底向上构建子树
+3. 每个目录作为独立 Tree 对象存储
+4. 父目录引用子目录的 Tree hash
 
 ## 性能考虑
 
-### 大文件处理
+### 大文件
 
-- 流式计算哈希，避免一次性加载到内存
-- 分块读取，支持GB级文件
-- 进度条显示
+- 流式计算哈希（`io.Copy` + `sha256.New()`），不一次性加载到内存
+- 进度回调：大文件操作时通知用户进度（`internal/core/progress.go`）
+- 内容对比用 `bytes.Equal`，避免 `string()` 内存复制
 
-### 目录遍历
+### Index 查找
 
-- 并发遍历目录
-- 忽略.drift目录本身
-- 支持.gitignore类似的忽略规则（后续版本）
+已优化为 O(1) 查找。使用 `map[string]int` 路径索引（`internal/core/index.go`）。
 
-## 安全考虑
+## 安全
 
 ### 数据完整性
 
-- 哈希校验确保文件完整
-- 写入原子性（先写临时文件，再重命名）
+- 写入原子性：`tmp + Rename`
+- 哈希校验：读取 Blob 和 Tree 时验证内容 hash（`internal/storage/store.go`）
+- 暂存区保护：`restore` 检测非空暂存区，需 `--force`
 
 ### 并发安全
 
-- 文件锁保护.drift目录
-- 防止多实例同时操作
-
-## 扩展性
-
-### 插件机制（后续版本）
-
-- 支持自定义文件预览
-- 支持自定义导出格式
-- 支持远程存储后端
-
-### 配置文件
-
-```json
-{
-  "version": "1.0.0",
-  "hash_algorithm": "sha256",
-  "compression": false,
-  "auto_save_interval": 0
-}
-```
+- OS 级文件锁：`flock`（Unix）/ `LockFileEx`（Windows）
+- 详见 `internal/storage/lock.go`, `lock_windows.go`, `lock_unix.go`

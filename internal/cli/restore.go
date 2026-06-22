@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 
 	"github.com/drift/drift/internal/core"
-	"github.com/drift/drift/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -23,35 +23,25 @@ Use --force to discard staged changes.`,
 		version := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
-		dir, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-
-		store := storage.NewStore(dir)
-		if !store.IsInitialized() {
-			return fmt.Errorf("not a drift project (run 'drift init')")
-		}
-
 		var oldIdx core.Index
-		if err := store.LoadIndex(&oldIdx); err != nil {
+		if err := sharedStore.LoadIndex(&oldIdx); err != nil {
 			return err
 		}
 		if len(oldIdx.Entries) > 0 && !force {
 			return fmt.Errorf("staging area has pending changes (use --force to discard)")
 		}
 
-		commit, err := findCommitByPrefix(store, version)
+		commit, err := findCommitByPrefix(sharedStore, version)
 		if err != nil {
 			return err
 		}
 
-		targetTree, err := store.GetTree(commit.TreeHash)
+		targetTree, err := sharedStore.GetTree(commit.TreeHash)
 		if err != nil {
 			return fmt.Errorf("failed to load target tree: %w", err)
 		}
 
-		reader := core.NewTreeReader(store)
+		reader := core.NewTreeReader(sharedStore)
 		targetBlobs, err := reader.ListBlobs(targetTree, "")
 		if err != nil {
 			return err
@@ -63,14 +53,18 @@ Use --force to discard staged changes.`,
 		}
 
 		prevBlobs := make(map[string]bool)
-		allCommits, err := store.ListCommits()
-		if err == nil && len(allCommits) > 0 {
-			latest := allCommits[len(allCommits)-1]
-			if latest.Hash != commit.Hash {
-				if t, err := store.GetTree(latest.TreeHash); err == nil {
-					prevBlobsList, _ := reader.ListBlobs(t, "")
-					for _, b := range prevBlobsList {
-						prevBlobs[b.Path] = true
+		currentBranch, _ := sharedStore.GetRef("HEAD")
+		if currentBranch == "" {
+			currentBranch = "main"
+		}
+		if currentHash, err := sharedStore.GetRef(currentBranch); err == nil {
+			if currentHash != commit.Hash {
+				if currentCommit, err := findCommitByHash(sharedStore, currentHash); err == nil {
+					if t, err := sharedStore.GetTree(currentCommit.TreeHash); err == nil {
+						prevBlobsList, _ := reader.ListBlobs(t, "")
+						for _, b := range prevBlobsList {
+							prevBlobs[b.Path] = true
+						}
 					}
 				}
 			}
@@ -80,14 +74,14 @@ Use --force to discard staged changes.`,
 		var added, modified, deleted int
 
 		for _, b := range targetBlobs {
-			fullPath := filepath.Join(dir, filepath.FromSlash(b.Path))
-			data, err := store.GetBlob(b.Hash)
+			fullPath := filepath.Join(sharedDir, filepath.FromSlash(b.Path))
+			data, err := sharedStore.GetBlob(b.Hash)
 			if err != nil {
 				return err
 			}
 
 			existing, err := os.ReadFile(fullPath)
-			if err == nil && string(existing) == string(data) {
+			if err == nil && bytes.Equal(existing, data) {
 				info, _ := os.Stat(fullPath)
 				newIdx.Add(core.IndexEntry{
 					Path:       b.Path,
@@ -108,7 +102,7 @@ Use --force to discard staged changes.`,
 			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(fullPath, data, os.FileMode(b.Mode)); err != nil {
+			if err := os.WriteFile(fullPath, data, os.FileMode(core.ToOSFileMode(b.Mode))); err != nil {
 				return err
 			}
 
@@ -124,7 +118,7 @@ Use --force to discard staged changes.`,
 
 		for path := range prevBlobs {
 			if !targetPaths[path] {
-				fullPath := filepath.Join(dir, filepath.FromSlash(path))
+				fullPath := filepath.Join(sharedDir, filepath.FromSlash(path))
 				if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 					return err
 				}
@@ -135,7 +129,7 @@ Use --force to discard staged changes.`,
 		for _, entry := range oldIdx.Entries {
 			if !targetPaths[entry.Path] {
 				if _, inPrev := prevBlobs[entry.Path]; !inPrev {
-					fullPath := filepath.Join(dir, filepath.FromSlash(entry.Path))
+					fullPath := filepath.Join(sharedDir, filepath.FromSlash(entry.Path))
 					if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 						return err
 					}
@@ -144,9 +138,9 @@ Use --force to discard staged changes.`,
 			}
 		}
 
-		cleanEmptyDirs(dir, newIdx)
+		cleanEmptyDirs(sharedDir, newIdx)
 
-		if err := store.SaveIndex(newIdx); err != nil {
+		if err := sharedStore.SaveIndex(newIdx); err != nil {
 			return fmt.Errorf("failed to update index: %w", err)
 		}
 

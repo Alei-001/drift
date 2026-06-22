@@ -2,10 +2,8 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/drift/drift/internal/core"
-	"github.com/drift/drift/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -13,32 +11,24 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the working tree status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dir, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-
-		store := storage.NewStore(dir)
-		if !store.IsInitialized() {
-			return fmt.Errorf("not a drift project (run 'drift init')")
-		}
-
 		var idx core.Index
-		_ = store.LoadIndex(&idx)
+		if err := sharedStore.LoadIndex(&idx); err != nil {
+			return fmt.Errorf("failed to load index: %w", err)
+		}
 
 		var commitTree *core.Tree
-		commits, _ := store.ListCommits()
+		commits, _ := sharedStore.ListCommits()
 		if len(commits) > 0 {
 			latest := commits[len(commits)-1]
 			if latest.TreeHash != "" {
-				t, err := store.GetTree(latest.TreeHash)
+				t, err := sharedStore.GetTree(latest.TreeHash)
 				if err == nil {
 					commitTree = t
 				}
 			}
 		}
 
-		status, err := core.ComputeStatus(commitTree, &idx, dir)
+		status, err := core.ComputeStatus(commitTree, &idx, sharedDir, sharedStore)
 		if err != nil {
 			return fmt.Errorf("failed to compute status: %w", err)
 		}

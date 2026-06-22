@@ -1,6 +1,9 @@
 # Reference code
 reference/
 
+# CodeGraph index
+.codegraph/
+
 # Build artifacts
 dist/
 *.exe

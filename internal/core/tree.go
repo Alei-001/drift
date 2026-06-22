@@ -1,6 +1,9 @@
 package core
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 type TreeEntry struct {
 	Name string
@@ -14,7 +17,7 @@ type Tree struct {
 	Entries []TreeEntry
 }
 
-func NewTree(entries []TreeEntry) *Tree {
+func NewTree(entries []TreeEntry) (*Tree, error) {
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Type == TreeObject && entries[j].Type != TreeObject {
 			return true
@@ -26,14 +29,10 @@ func NewTree(entries []TreeEntry) *Tree {
 	})
 
 	t := &Tree{Entries: entries}
-	t.Hash = t.calculateHash()
-	return t
-}
-
-func (t *Tree) calculateHash() string {
 	data, err := t.Marshal()
 	if err != nil {
-		return ""
+		return nil, fmt.Errorf("failed to marshal tree: %w", err)
 	}
-	return CalculateHash(data)
+	t.Hash = CalculateHash(data)
+	return t, nil
 }

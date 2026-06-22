@@ -1,242 +1,153 @@
 # Drift - 开发进度
 
-## Phase 1：基础框架
+## Phase 1：基础框架 ✅
 
-**状态：** 已完成
-
-**目标：** 搭建项目骨架，实现 Blob/Tree/Commit 对象存储引擎和 CLI 入口
+**目标：** 搭建项目骨架，实现 Blob / Tree / Commit 对象存储引擎和 CLI 入口。
 
 ### 设计决策
 
-| 方面 | 简化方案 | 原版 Git | 理由 |
-|------|----------|----------|------|
-| 存储格式 | 直接文件 + JSON 元数据 | Packfile + Delta | 实现简单，MVP 够用 |
-| 哈希算法 | 纯 SHA-256 | Git Header + Hash | 不需要兼容 Git |
-| 文件系统 | os 标准库 | billy (VFS) | 减少依赖 |
-| 缓存 | 无 | LRU 缓存 | MVP 阶段性能可接受 |
+| 方面 | Drift | Git / go-git | 理由 |
+|------|-------|-------------|------|
+| 哈希 | 纯 SHA-256 | Git header + SHA-1/SHA-256 | 不兼容 Git |
+| 存储 | 内容寻址 + 二进制格式 | Packfile + Delta | MVP 简洁 |
+| 文件系统 | `os` 标准库 | billy VFS | 减少依赖 |
 
-### 已保证的特性
+### 已完成
 
-- [x] 内容寻址去重（相同文件只存一次）
-- [x] 原子写入（先写临时文件，再重命名）
-- [x] 文件锁（防止并发损坏）
-
-### 任务清单
-
-| 任务 | 文件 | 状态 |
-|------|------|------|
-| SHA-256 哈希计算 | `internal/core/hash.go` | 已完成 |
-| 对象类型定义 | `internal/core/object.go` | 已完成 |
-| Blob 对象 | `internal/core/blob.go` | 已完成 |
-| Tree 对象 | `internal/core/tree.go` | 已完成 |
-| Commit 对象 | `internal/core/commit.go` | 已完成 |
-| 对象存储引擎 | `internal/storage/store.go` | 已完成 |
-| CLI 根命令 | `internal/cli/root.go` | 已完成 |
-| 程序入口 | `cmd/drift/main.go` | 已完成 |
-
-### 验证结果
-
-- [x] `go build ./...` 编译通过
-- [x] `go vet ./...` 无警告
-- [x] `drift init` 能创建 `.drift/` 目录结构
-- [x] 可以存储和读取 Blob/Tree/Commit 对象（API 已实现）
-
-### 测试命令
-
-```bash
-# 编译
-go build ./...
-
-# 测试 init
-drift init
-```
+| 任务 | 文件 |
+|------|------|
+| SHA-256 哈希计算 | `internal/core/hash.go` |
+| 对象类型定义 | `internal/core/object.go` |
+| Blob / Tree / Commit 对象 | `internal/core/blob.go, tree.go, commit.go` |
+| 对象存储引擎 | `internal/storage/store.go` |
+| CLI 根命令 + `drift init` | `internal/cli/root.go` |
 
 ---
 
-## Phase 2：暂存区
+## Phase 2：暂存区 ✅
 
-**状态：** 已完成
-
-**目标：** 实现文件变更检测和暂存区管理
+**目标：** 实现文件变更检测和暂存区管理。
 
 ### 设计决策
 
-| 方面 | Drift | go-git | 理由 |
-|------|-------|--------|------|
-| Index 格式 | 二进制 (DRIX) | 二进制 (DIRC) | 性能优先，支持大量文件 |
-| 元数据 | path, hash, mtime, size, mode | hash, name, mtime, size, mode, uid/gid | 去掉不需要的字段 |
-| Status 存储 | 动态计算（不存储） | 动态计算 | Status 是派生状态 |
-| 变更检测 | mtime+size 快速判断，必要时计算 hash | 同左 | 学习 go-git 的正确做法 |
+| 方面 | Drift | go-git |
+|------|-------|--------|
+| Index 格式 | 二进制 DRIX | 二进制 DIRC |
+| Status 存储 | 动态计算（不存储） | 同 |
+| 变更检测 | mtime+size 快速判断 → hash 确认 | 同 |
 
-### 二进制格式 (DRIX)
+### 已完成
 
-```
-Header:
-  - Magic: "DRIX" (4 bytes)
-  - Version: uint32 (4 bytes)
-  - Entry count: uint32 (4 bytes)
-
-Entry:
-  - Path length: uint16 (2 bytes)
-  - Path: []byte (variable)
-  - Hash: [32]byte (SHA-256)
-  - ModifiedAt: int64 (Unix ms)
-  - Size: int64
-  - Mode: uint32
-```
-
-### 核心架构
-
-```
-Status = diffCommitWithStaging + diffStagingWithWorktree
-
-commit tree ↔ index  →  Staging 状态（已暂存）
-index ↔ working dir  →  Worktree 状态（未暂存）
-```
-
-### 任务清单
-
-| 任务 | 文件 | 状态 |
-|------|------|------|
-| Index 结构 | `internal/core/index.go` | 已完成 |
-| Status 类型 | `internal/core/status.go` | 已完成 |
-| 目录遍历 | `internal/core/walker.go` | 已完成 |
-| 变更检测 | `internal/core/change.go` | 已完成 |
-| drift add | `internal/cli/add.go` | 已完成 |
-| drift status | `internal/cli/status.go` | 已完成 |
-| drift reset | `internal/cli/reset.go` | 已完成 |
-
-### 验证结果
-
-- [x] `go build ./...` 编译通过
-- [x] `go vet ./...` 无警告
-- [x] `drift add file.txt` 能将文件添加到暂存区
-- [x] `drift add .` 能递归添加目录下所有文件
-- [x] `drift status` 能正确显示新增/修改/删除/未跟踪状态
-- [x] `drift reset` 能清空暂存区
+| 任务 | 文件 |
+|------|------|
+| Index 结构 + DRIX 编解码 | `internal/core/index.go, index_codec.go` |
+| Status 类型 | `internal/core/status.go` |
+| 目录遍历 | `internal/core/walker.go` |
+| 变更检测 + 状态计算 | `internal/core/change.go` |
+| `drift add` / `status` / `reset` | `internal/cli/add.go, status.go, reset.go` |
 
 ---
 
-## Phase 3：版本管理
+## Phase 3：版本管理 ✅
 
-**状态：** 已完成
-
-**目标：** 实现版本提交和历史管理
+**目标：** 实现版本提交和历史管理。
 
 ### 设计决策
 
-| 方面 | Drift | go-git | 理由 |
-|------|-------|--------|------|
-| Tree 格式 | 二进制 (DREE) | 二进制 (mode+name+\0+hash) | 性能优先，与 Index 一致 |
-| Commit 格式 | 二进制 (DCMT) | 二进制 (headers+message) | 性能优先，与 Index 一致 |
-| Tree 结构 | 递归（每个目录独立对象） | 递归 | 语义正确，便于 diff/export |
-| Author 信息 | 无（简化） | 有 | 个人工具，不需要多人协作 |
+| 方面 | Drift | go-git |
+|------|-------|--------|
+| Tree 格式 | 二进制 DREE | 文本（mode name\0hash） |
+| Commit 格式 | 二进制 DCMT | headers + message |
+| Tree 结构 | 递归（每个目录独立对象） | 同 |
+| Commit 哈希 | 含时间戳（同一输入不同时间 → 不同哈希） | 含作者时间 |
 
-### 二进制格式 (DREE - Tree)
+### 已完成
 
-```
-Header:
-  - Magic: "DREE" (4 bytes)
-  - Entry count: uint32 (4 bytes)
-
-Entry:
-  - Name length: uint16 (2 bytes)
-  - Name: []byte (variable)
-  - Type: uint8 (1 byte) - BlobObject 或 TreeObject
-  - Hash: [32]byte (SHA-256)
-  - Mode: uint32 (4 bytes)
-```
-
-### 二进制格式 (DCMT - Commit)
-
-```
-Header:
-  - Magic: "DCMT" (4 bytes)
-  - Version: uint32 (4 bytes)
-
-Fields:
-  - ID length: uint16 (2 bytes)
-  - ID: []byte (variable)
-  - Hash: [32]byte
-  - TreeHash: [32]byte
-  - ParentHash: [32]byte (全零表示无父)
-  - Timestamp: int64 (Unix ms)
-  - Branch length: uint16 (2 bytes)
-  - Branch: []byte (variable)
-  - Message length: uint16 (2 bytes)
-  - Message: []byte (variable)
-```
-
-### 任务清单
-
-| 任务 | 文件 | 状态 |
-|------|------|------|
-| Tree 二进制编解码 | `internal/core/tree_codec.go` | 已完成 |
-| Commit 二进制编解码 | `internal/core/commit_codec.go` | 已完成 |
-| Tree 构建器 | `internal/core/tree_builder.go` | 已完成 |
-| drift save | `internal/cli/save.go` | 已完成 |
-| drift list | `internal/cli/list.go` | 已完成 |
-
-### 验证结果
-
-- [x] `go build ./...` 编译通过
-- [x] `go vet ./...` 无警告
-- [x] `drift save -m "message"` 能创建版本
-- [x] `drift list` 能显示版本历史
+| 任务 | 文件 |
+|------|------|
+| Tree 编解码 (DREE) | `internal/core/tree_codec.go` |
+| Commit 编解码 (DCMT) | `internal/core/commit_codec.go` |
+| Tree 构建器（递归） | `internal/core/tree_builder.go` |
+| Tree 遍历（递归展平 + Diff） | `internal/core/tree_walker.go` |
+| `drift save` / `list` | `internal/cli/save.go, list.go` |
 
 ---
 
-## Phase 4：导出和回退
+## Phase 4：导出与回退 ✅
 
-**状态：** 已完成
-
-**目标：** 实现版本导出和回退功能
+**目标：** 实现版本导出和回退功能。
 
 ### 设计决策
 
-| 方面 | Drift | go-git | 理由 |
-|------|-------|--------|------|
-| 导出格式 | 目录 + zip + tar.gz | tar/zip | 支持多种场景，使用标准库 |
-| 回退方式 | index ↔ worktree 对比（增量） | tree diff + index diff | 学习 go-git 的正确做法 |
-| 冲突检测 | 检查 index 是否为空 | 检查 unstaged changes | MVP 简化版，防止数据丢失 |
+| 方面 | Drift | go-git |
+|------|-------|--------|
+| 导出格式 | dir / zip / tar.gz | tar / zip |
+| 回退方式 | index ↔ worktree 对比（增量） | tree diff + index diff |
+| 冲突检测 | 暂存区非空需 `--force` | check unstaged changes |
 
-### go-git 的 HardReset 流程（参考）
+### 已完成
 
-```
-1. resetIndex()          → index = target tree
-2. resetWorktreeToTree()
-   ├── diffTrees(prev, to)  删除旧有新的文件
-   └── diffStagingWorktree  覆盖工作区差异文件
-```
-
-### 任务清单
-
-| 任务 | 文件 | 状态 |
-|------|------|------|
-| Tree 遍历 | `internal/core/tree_walker.go` | 已完成 |
-| drift export (dir) | `internal/cli/export.go` | 已完成 |
-| drift export (zip) | `internal/cli/export.go` | 已完成 |
-| drift export (tar.gz) | `internal/cli/export.go` | 已完成 |
-| drift restore | `internal/cli/restore.go` | 已完成 |
-| ListCommits 排序 | `internal/storage/store.go` | 已完成 |
-
-### 验证结果
-
-- [x] `go build ./...` 编译通过
-- [x] `go vet ./...` 无警告
-- [x] `drift export v1 -o dir` 导出到目录
-- [x] `drift export v1 -o file.zip -f zip` 导出到 zip
-- [x] `drift export v1 -o file.tar.gz -f tar` 导出到 tar.gz
-- [x] `drift restore v1` 恢复工作区
-- [x] `drift restore v1` 带未提交更改时报错
-- [x] `drift restore v1 --force` 强制恢复
+| 任务 | 文件 |
+|------|------|
+| `drift export`（dir/zip/tar.gz） | `internal/cli/export.go` |
+| `drift restore`（增量 + conflict） | `internal/cli/restore.go` |
 
 ---
 
-## 后续阶段
+## Phase A：Bug 修复 ✅
 
-| 阶段 | 状态 | 预计时间 |
-|------|------|----------|
-| Phase 5：分支功能 | 待开始 | 2 周 |
-| Phase 6：对比功能 | 待开始 | 1 周 |
-| Phase 7：优化完善 | 待开始 | 2 周 |
+基于 go-git 差距分析，优先修复已知缺陷。详见 [issues.md](issues.md)。
+
+| 编号 | 任务 | 文件 | 状态 |
+|------|------|------|------|
+| A1 | commitFiles 递归展平（子目录文件误判） | `change.go` | ✅ 已完成 |
+| A2 | LoadIndex 错误处理（静默吞错） | `add.go` | ✅ 已完成 |
+| A3 | NewTree 返回 error（静默空 hash） | `tree.go, tree_builder.go` | ✅ 已完成 |
+| A4 | parent hash sentinel 健壮化 | `commit_codec.go, commit.go` | ✅ 已完成 |
+| A5 | bytes.Equal 替代 string() 比较 | `restore.go` | ✅ 已完成 |
+
+---
+
+## Phase B：架构加固 ✅
+
+| 编号 | 任务 | 影响范围 | 状态 |
+|------|------|----------|------|
+| B1 | Storage interface | 新增 `storage.go` | ✅ 已完成 |
+| B2 | Index byPath map 索引 | `index.go` | ✅ 已完成 |
+| B3 | FileMode 规范化 | 新增 `filemode.go` | ✅ 已完成 |
+| B4 | Object 完整性校验 | `store.go` | ✅ 已完成 |
+| B5 | OS 级文件锁 | 新增 `lock.go`, `lock_windows.go`, `lock_unix.go` | ✅ 已完成 |
+
+---
+
+## Phase C：功能补全 ✅
+
+| 编号 | 任务 | 影响范围 | 状态 |
+|------|------|----------|------|
+| C1 | Config 系统 | 新增 `config/config.go` | ✅ 已完成 |
+| C2 | .driftignore | 新增 `driftignore.go`, 更新 `walker.go` | ✅ 已完成 |
+| C3 | 进度回调 | `progress.go`, `export.go` | ✅ 已完成 |
+| C4 | Branch / Switch | 新增 `branch.go`, `switch.go` | ✅ 已完成 |
+| C5 | Diff 命令 | 新增 `diff.go` | ✅ 已完成 |
+| C6 | Signature 模型 | `commit.go`, `commit_codec.go` | ✅ 已完成 |
+
+---
+
+## Phase D：性能与规模 🔧
+
+| 编号 | 任务 | 触发条件 | 状态 |
+|------|------|----------|------|
+| D1 | 迭代器模式 | 提交>1000时 | ⏸ 推迟 |
+| D2 | 进度回调 | 所有大文件操作 | ✅ 已完成 |
+| D3 | 并行 diff | 性能瓶颈时 | ⏸ 推迟 |
+| D4 | Mmap 大文件 | 文件>1GB时 | ⏸ 推迟 |
+
+---
+
+## 后续阶段（原计划，已整合到以上 Phase）
+
+| 原阶段 | 内容 | 整合到 |
+|--------|------|--------|
+| Phase 5：分支功能 | branch / switch | Phase C |
+| Phase 6：对比功能 | diff | Phase C |
+| Phase 7：优化完善 | 忽略规则、性能 | Phase B / C / D |

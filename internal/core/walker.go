@@ -9,6 +9,8 @@ import (
 type WalkFunc func(path string, info os.FileInfo) error
 
 func WalkWorkingDir(root string, fn WalkFunc) error {
+	ignore := LoadDriftIgnore(root)
+
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -32,6 +34,13 @@ func WalkWorkingDir(root string, fn WalkFunc) error {
 			return nil
 		}
 
+		if ignore.IsIgnored(rel) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
 		if info.IsDir() {
 			return nil
 		}
@@ -45,10 +54,6 @@ func shouldSkip(relPath string, info os.FileInfo) bool {
 		return true
 	}
 	if relPath == ".git" || strings.HasPrefix(relPath, ".git/") {
-		return true
-	}
-	name := info.Name()
-	if !info.IsDir() && len(name) > 0 && name[0] == '.' {
 		return true
 	}
 	return false

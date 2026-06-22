@@ -88,7 +88,10 @@ func (b *TreeBuilder) buildTree(treePath string) (*Tree, error) {
 		}
 	}
 
-	result := NewTree(t.Entries)
+	result, err := NewTree(t.Entries)
+	if err != nil {
+		return nil, err
+	}
 
 	if b.store != nil {
 		if err := b.store(result); err != nil {
