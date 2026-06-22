@@ -13,11 +13,12 @@ import (
 
 var diffCmd = &cobra.Command{
 	Use:   "diff [v1] [v2]",
-	Short: "Show differences between versions or working tree",
+	Short: "Show differences between versions, branches, or working tree",
 	Long: `Show file differences.
-Without arguments: compares working tree against the latest version.
-With one argument: compares working tree against the specified version.
-With two arguments: compares two versions.`,
+Version arguments can be version IDs (e.g., v1) or branch names (e.g., main).
+Without arguments: compares working tree against the current branch.
+With one argument: compares working tree against the specified version/branch.
+With two arguments: compares two versions/branches.`,
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reader := core.NewTreeReader(sharedStore)

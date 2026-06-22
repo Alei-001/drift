@@ -62,6 +62,8 @@ drift status
 **输出示例：**
 
 ```
+On branch main, version v2
+
 Staged changes:
   A 章节/第一章.txt
   M 章节/第二章.txt
@@ -79,12 +81,12 @@ Untracked files:
 - `D` — Deleted（删除）
 - `?` — Untracked（未跟踪）
 
-### `drift reset` ✅
+### `drift unstage` ✅
 
 清空暂存区。
 
 ```bash
-drift reset
+drift unstage
 ```
 
 **行为：** 清空暂存区内容，不影响工作区文件。
@@ -106,7 +108,7 @@ drift save -m "备注信息"       # 带备注
 
 **行为：**
 - 从暂存区构建 Tree 对象
-- 创建 Commit 对象（ID 自动递增：v1, v2, v3...）
+- 创建 Commit 对象（每个分支独立递增：main 的 v1, v2...；feature 的 v1, v2...）
 - 更新当前分支引用
 - 清空暂存区
 
@@ -121,10 +123,16 @@ drift list
 **输出示例：**
 
 ```
-v3  2024-06-15 10:30  完成前四章
-v2  2024-06-15 09:00  修改配色
-v1  2024-06-14 15:00  初稿完成
+v2  [main]     2024-06-15 10:30  完成前四章
+v1  [main]     2024-06-15 09:00  修改配色
+v1  [feature]  2024-06-14 15:00  方案A初稿
 ```
+
+**格式说明：**
+- `v1` — 版本号（每个分支独立递增）
+- `[main]` — 提交所属分支
+- `2024-06-15 10:30` — 提交时间
+- `完成前四章` — 备注信息
 
 ### `drift export` ✅
 
@@ -136,27 +144,31 @@ drift export <版本> -o <输出路径> [-f <格式>]
 drift export v1 -o ./交付客户           # 导出到目录（默认）
 drift export v1 -o ./交付.zip -f zip    # 导出为 zip
 drift export v1 -o ./交付.tar.gz -f tar # 导出为 tar.gz
+drift export main -o ./main-branch     # 导出分支最新版本
 ```
 
 **参数：**
-- `<版本>` — 版本 ID（如 v1、v2）
+- `<版本>` — 版本 ID（如 v1、v2）或分支名（如 main、feature）
 - `-o` / `--output` — **必填**，输出路径
 - `-f` / `--format` — 可选，`dir`（默认）/ `zip` / `tar`
 
 ### `drift restore` ✅
 
-回退工作区到指定版本。
+恢复工作区到指定版本。
 
 ```bash
 drift restore <版本>
 drift restore <版本> --force    # 强制恢复（丢弃暂存区改动）
+drift restore main              # 恢复到分支最新版本
 ```
 
 **行为：**
 - 将工作区文件恢复到目标版本状态
-- 不创建新版本（只是工作区变更）
-- 暂存区非空时需 `--force`
+- **不改变分支引用**（只改变工作树内容）
+- 暂存区与当前版本不同时需 `--force`
 - 未跟踪文件不受影响（保留）
+
+> **注意**：`restore` 只改变工作树内容，分支引用保持不变。如果需要改变分支引用（类似 Git 的 reset），目前需要手动操作。
 
 ---
 
@@ -204,10 +216,14 @@ drift switch <名称> --force    # 强制切换（丢弃暂存区改动）
 查看文件差异。
 
 ```bash
-drift diff                # 工作区 vs 最新版本
-drift diff <v1>           # 工作区 vs 指定版本
-drift diff <v1> <v2>     # 两个版本之间
+drift diff                # 工作区 vs 当前分支最新版本
+drift diff <v1>           # 工作区 vs 指定版本/分支
+drift diff <v1> <v2>     # 两个版本/分支之间
+drift diff main feature  # 两个分支之间对比
 ```
+
+**参数说明：**
+- `<版本>` 可以是版本 ID（如 v1、v2）或分支名（如 main、feature）
 
 **输出示例（文本文件）：**
 
@@ -241,7 +257,7 @@ drift diff <v1> <v2>     # 两个版本之间
 | `drift: file not found` | 路径错误 | 检查文件路径 |
 | `drift: staging area is empty` | 未添加文件 | 运行 `drift add` |
 | `drift: version not found` | 版本 ID 错误 | 运行 `drift list` |
-| `drift: staging area has pending changes` | 暂存区非空 | 运行 `drift reset` 或使用 `--force` |
+| `drift: staging area has pending changes` | 暂存区非空 | 运行 `drift unstage` 或使用 `--force` |
 | `drift: branch not found` | 分支名错误 | 运行 `drift branch list` |
 | `drift: could not acquire lock` | 另一个 drift 进程正在运行 | 等待或删除 `.drift/lock` |
 

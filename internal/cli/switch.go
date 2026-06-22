@@ -25,8 +25,11 @@ The staging area must be empty (or use --force to discard).`,
 		if err := sharedStore.LoadIndex(&idx); err != nil {
 			return err
 		}
-		if len(idx.Entries) > 0 && !force {
-			return fmt.Errorf("staging area has pending changes (use --force to discard)")
+
+		if !force {
+			if hasPendingChanges, err := hasPendingStagedChanges(&idx); err == nil && hasPendingChanges {
+				return fmt.Errorf("staging area has pending changes (use --force to discard)")
+			}
 		}
 
 		commitHash, err := sharedStore.GetRef(branch)

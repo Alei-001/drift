@@ -54,7 +54,14 @@ var saveCmd = &cobra.Command{
 			}
 		}
 
-		id := "v" + strconv.Itoa(len(commits)+1)
+		// Calculate version number for current branch only
+		branchCommitCount := 0
+		for _, c := range commits {
+			if c.Branch == branch {
+				branchCommitCount++
+			}
+		}
+		id := "v" + strconv.Itoa(branchCommitCount+1)
 		author := core.Signature{
 			Name:  sharedConfig.User.Name,
 			Email: sharedConfig.User.Email,

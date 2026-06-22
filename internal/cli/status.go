@@ -9,8 +9,21 @@ import (
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show the working tree status",
+	Short: "Show current branch, version, and working tree status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Show current branch and version
+		currentBranch, _ := sharedStore.GetRef("HEAD")
+		if currentBranch == "" {
+			currentBranch = "main"
+		}
+
+		commit, _ := currentBranchCommit(sharedStore)
+		if commit != nil {
+			fmt.Printf("On branch %s, version %s\n\n", currentBranch, commit.ID)
+		} else {
+			fmt.Printf("On branch %s, no commits yet\n\n", currentBranch)
+		}
+
 		var idx core.Index
 		if err := sharedStore.LoadIndex(&idx); err != nil {
 			return fmt.Errorf("failed to load index: %w", err)

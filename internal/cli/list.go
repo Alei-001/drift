@@ -9,7 +9,7 @@ import (
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "Show version history",
+	Short: "Show version history with branch information",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		commits, err := sharedStore.ListCommits()
 		if err != nil {
@@ -28,7 +28,7 @@ var listCmd = &cobra.Command{
 		fmt.Println("Version history:")
 		fmt.Println()
 		for _, c := range commits {
-			fmt.Printf("  %s  %s  %s\n", c.ID, c.Timestamp.Format("2006-01-02 15:04"), c.Message)
+			fmt.Printf("  %s  [%s]  %s  %s\n", c.ID, c.Branch, c.Timestamp.Format("2006-01-02 15:04"), c.Message)
 		}
 
 		return nil

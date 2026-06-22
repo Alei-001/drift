@@ -185,12 +185,12 @@ func (h *TestHelper) RunStatus() (string, error) {
 	})
 }
 
-// RunReset runs the reset command.
-func (h *TestHelper) RunReset() (string, error) {
+// RunUnstage runs the unstage command.
+func (h *TestHelper) RunUnstage() (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	return CaptureOutput(func() error {
-		return resetCmd.RunE(resetCmd, nil)
+		return unstageCmd.RunE(unstageCmd, nil)
 	})
 }
 
@@ -344,7 +344,7 @@ func init() {
 	initCmd.SetOutput(&bytes.Buffer{})
 	addCmd.SetOutput(&bytes.Buffer{})
 	statusCmd.SetOutput(&bytes.Buffer{})
-	resetCmd.SetOutput(&bytes.Buffer{})
+	unstageCmd.SetOutput(&bytes.Buffer{})
 	saveCmd.SetOutput(&bytes.Buffer{})
 	listCmd.SetOutput(&bytes.Buffer{})
 	exportCmd.SetOutput(&bytes.Buffer{})

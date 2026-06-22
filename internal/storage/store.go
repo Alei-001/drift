@@ -261,7 +261,8 @@ func (s *Store) PutCommit(c *core.Commit) error {
 	}
 	defer unlock()
 
-	path := s.commitPath(c.ID)
+	// Use hash as filename to avoid conflicts when different branches have same ID
+	path := s.commitPath(c.Hash)
 
 	data, err := c.Marshal()
 	if err != nil {
@@ -312,10 +313,11 @@ func (s *Store) ListCommits() ([]*core.Commit, error) {
 			continue
 		}
 
-		id := entry.Name()[:len(entry.Name())-4]
-		c, err := s.GetCommit(id)
+		// File name is the commit hash
+		hash := entry.Name()[:len(entry.Name())-4]
+		c, err := s.GetCommit(hash)
 		if err != nil {
-			return nil, fmt.Errorf("corrupted commit %s: %w", id, err)
+			return nil, fmt.Errorf("corrupted commit %s: %w", hash, err)
 		}
 		commits = append(commits, c)
 	}

@@ -53,9 +53,9 @@ func TestFlow_TypicalCreativeWorkflow(t *testing.T) {
 	output, _ = h.RunList()
 	h.AssertContains(output, "结局A")
 
-	// 7. Export a version
+	// 7. Export using branch name (main's v1)
 	outputDir := filepath.Join(h.Dir, "export")
-	output, err = h.RunExport("v1", "-o", outputDir)
+	output, err = h.RunExport("main", "-o", outputDir)
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported")
 
@@ -70,7 +70,7 @@ func TestFlow_DesignerColorScheme(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
-	// 1. Create red theme
+	// 1. Create red theme on main branch
 	h.WriteFile("theme.css", "color: red;")
 	h.WriteFile("logo.png", string([]byte{0, 1, 2, 3, 0, 5})) // binary
 	h.AddAndSave([]string{"theme.css", "logo.png"}, "红色主题")
@@ -83,8 +83,8 @@ func TestFlow_DesignerColorScheme(t *testing.T) {
 	h.WriteFile("theme.css", "color: blue;")
 	h.AddAndSave([]string{"theme.css"}, "蓝色主题")
 
-	// 3. Diff between versions
-	output, _ := h.RunDiff("v1", "v2")
+	// 3. Diff between branches (each branch has its own v1)
+	output, _ := h.RunDiff("main", "blue-theme")
 	h.AssertContains(output, "color: red")
 	h.AssertContains(output, "color: blue")
 }
@@ -147,7 +147,7 @@ func TestFlow_BranchExploration(t *testing.T) {
 	h.WriteFile("design.txt", "variant B design")
 	h.AddAndSave([]string{"design.txt"}, "variant B")
 
-	// Compare variants
+	// Compare variants using branch names
 	output, _ := h.RunDiff("variant-a", "variant-b")
 	h.AssertContains(output, "variant A design")
 	h.AssertContains(output, "variant B design")

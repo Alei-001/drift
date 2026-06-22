@@ -15,7 +15,9 @@ var restoreCmd = &cobra.Command{
 	Use:   "restore <version>",
 	Short: "Restore working tree to a specific version",
 	Long: `Restore the working tree to the state of a given version.
+Version can be a version ID (e.g., v1) or branch name (e.g., main).
 Files that differ from the target version will be overwritten.
+Branch reference is NOT changed - only working tree is updated.
 Untracked files are preserved.
 Use --force to discard staged changes.`,
 	Args: cobra.ExactArgs(1),
@@ -27,8 +29,11 @@ Use --force to discard staged changes.`,
 		if err := sharedStore.LoadIndex(&oldIdx); err != nil {
 			return err
 		}
-		if len(oldIdx.Entries) > 0 && !force {
-			return fmt.Errorf("staging area has pending changes (use --force to discard)")
+
+		if !force {
+			if hasPendingChanges, err := hasPendingStagedChanges(&oldIdx); err == nil && hasPendingChanges {
+				return fmt.Errorf("staging area has pending changes (use --force to discard)")
+			}
 		}
 
 		commit, err := findCommitByPrefix(sharedStore, version)
@@ -186,4 +191,50 @@ func cleanEmptyDirs(root string, idx *core.Index) {
 			os.Remove(filepath.Join(root, d))
 		}
 	}
+}
+
+func hasPendingStagedChanges(idx *core.Index) (bool, error) {
+	if len(idx.Entries) == 0 {
+		return false, nil
+	}
+
+	commit, err := currentBranchCommit(sharedStore)
+	if err != nil {
+		return false, err
+	}
+
+	if commit == nil {
+		return len(idx.Entries) > 0, nil
+	}
+
+	tree, err := sharedStore.GetTree(commit.TreeHash)
+	if err != nil {
+		return false, err
+	}
+
+	reader := core.NewTreeReader(sharedStore)
+	blobs, err := reader.ListBlobs(tree, "")
+	if err != nil {
+		return false, err
+	}
+
+	commitFiles := make(map[string]string)
+	for _, b := range blobs {
+		commitFiles[b.Path] = b.Hash
+	}
+
+	for _, entry := range idx.Entries {
+		commitHash, exists := commitFiles[entry.Path]
+		if !exists || commitHash != entry.Hash {
+			return true, nil
+		}
+	}
+
+	for path := range commitFiles {
+		if _, err := idx.Entry(path); err != nil {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

@@ -16,7 +16,7 @@ import (
 
 var exportCmd = &cobra.Command{
 	Use:   "export <version>",
-	Short: "Export a version to a directory or archive",
+	Short: "Export a version or branch to a directory or archive",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		version := args[0]

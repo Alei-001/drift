@@ -217,8 +217,8 @@ func TestStatus_MixedStatus(t *testing.T) {
 	h.AssertContains(output, "untracked.txt")
 }
 
-// TC-RESET-001: Clear staging area
-func TestReset_ClearStaging(t *testing.T) {
+// TC-UNSTAGE-001: Clear staging area
+func TestUnstage_ClearStaging(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -226,7 +226,7 @@ func TestReset_ClearStaging(t *testing.T) {
 	_, err := h.RunAdd("note.txt")
 	h.AssertNoError(err)
 
-	output, err := h.RunReset()
+	output, err := h.RunUnstage()
 	h.AssertNoError(err)
 	h.AssertContains(output, "Staging area cleared")
 
@@ -237,12 +237,12 @@ func TestReset_ClearStaging(t *testing.T) {
 	h.AssertContains(output, "note.txt")
 }
 
-// TC-RESET-002: Reset on empty staging area
-func TestReset_EmptyStaging(t *testing.T) {
+// TC-UNSTAGE-002: Unstage on empty staging area
+func TestUnstage_EmptyStaging(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
-	output, err := h.RunReset()
+	output, err := h.RunUnstage()
 	h.AssertNoError(err)
 	h.AssertContains(output, "Staging area cleared")
 }

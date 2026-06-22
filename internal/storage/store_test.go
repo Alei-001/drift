@@ -259,7 +259,8 @@ func TestStore_PutCommit_GetCommit(t *testing.T) {
 	if err := s.PutCommit(c); err != nil {
 		t.Fatalf("PutCommit failed: %v", err)
 	}
-	got, err := s.GetCommit("v1")
+	// GetCommit now uses hash as the file identifier
+	got, err := s.GetCommit(c.Hash)
 	if err != nil {
 		t.Fatalf("GetCommit failed: %v", err)
 	}
