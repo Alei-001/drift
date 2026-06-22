@@ -63,6 +63,14 @@ func listBranches() error {
 }
 
 func createBranch(name string) error {
+	// Issue 12: refuse to overwrite an existing branch.
+	if existing, err := sharedStore.GetRef(name); err == nil || existing != "" {
+		// GetRef returns ErrObjectNotFound for missing refs; any other result
+		// means the branch already exists.
+		_ = existing
+		return fmt.Errorf("branch %q already exists", name)
+	}
+
 	currentBranch, _ := sharedStore.GetRef("HEAD")
 	if currentBranch == "" {
 		currentBranch = "main"

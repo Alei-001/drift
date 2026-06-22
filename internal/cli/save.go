@@ -32,11 +32,6 @@ var saveCmd = &cobra.Command{
 			return fmt.Errorf("failed to build tree: %w", err)
 		}
 
-		commits, err := sharedStore.ListCommits()
-		if err != nil {
-			return fmt.Errorf("failed to list commits: %w", err)
-		}
-
 		branch, _ := sharedStore.GetRef("HEAD")
 		if branch == "" {
 			// HEAD was not initialized (e.g. project created before the init fix).
@@ -47,20 +42,20 @@ var saveCmd = &cobra.Command{
 			}
 		}
 
+		// Issue 22: derive version number from the parent chain depth, not from
+		// counting all commits in the branch (which includes orphaned commits
+		// after a reset). Walking the chain gives the correct depth.
+		branchCommits, err := sharedStore.ListBranchCommits(branch)
+		if err != nil {
+			return fmt.Errorf("failed to list branch commits: %w", err)
+		}
+		branchCommitCount := len(branchCommits)
+
 		parentHash := ""
-		if len(commits) > 0 {
-			if refHash, err := sharedStore.GetRef(branch); err == nil {
-				parentHash = refHash
-			}
+		if branchCommitCount > 0 {
+			parentHash = branchCommits[0].Hash
 		}
 
-		// Calculate version number for current branch only
-		branchCommitCount := 0
-		for _, c := range commits {
-			if c.Branch == branch {
-				branchCommitCount++
-			}
-		}
 		id := "v" + strconv.Itoa(branchCommitCount+1)
 		author := core.Signature{
 			Name:  sharedConfig.User.Name,
@@ -68,17 +63,11 @@ var saveCmd = &cobra.Command{
 		}
 		commit := core.NewCommit(id, message, parentHash, branch, tree.Hash, author)
 
-		if err := sharedStore.PutCommit(commit); err != nil {
-			return fmt.Errorf("failed to store commit: %w", err)
-		}
-
-		if err := sharedStore.SaveRef(branch, commit.Hash); err != nil {
-			return fmt.Errorf("failed to update ref: %w", err)
-		}
-
+		// Issue 6: use atomic transaction to prevent orphan commits or
+		// duplicate saves if one of the steps fails.
 		emptyIdx := &core.Index{}
-		if err := sharedStore.SaveIndex(emptyIdx); err != nil {
-			return fmt.Errorf("failed to clear index: %w", err)
+		if err := sharedStore.SaveCommitTransaction(commit, branch, emptyIdx); err != nil {
+			return fmt.Errorf("failed to save commit: %w", err)
 		}
 
 		if message != "" {

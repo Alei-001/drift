@@ -75,10 +75,34 @@ func findCommitByPrefix(store *storage.Store, prefix string) (*core.Commit, erro
 		return nil, err
 	}
 
+	// Try to resolve as version ID, preferring the current branch
+	currentBranch, _ := store.GetRef("HEAD")
+	if currentBranch == "" {
+		currentBranch = "main"
+	}
+
+	// First try current branch
 	for _, c := range commits {
-		if c.ID == prefix {
+		if c.ID == prefix && c.Branch == currentBranch {
 			return c, nil
 		}
+	}
+
+	// If not found in current branch, try any branch (but warn about ambiguity)
+	var found *core.Commit
+	var foundBranch string
+	for _, c := range commits {
+		if c.ID == prefix {
+			if found != nil {
+				return nil, fmt.Errorf("ambiguous version %s: exists in both %s and %s branches. Use branch/version format (e.g., %s/%s)", prefix, foundBranch, c.Branch, foundBranch, prefix)
+			}
+			found = c
+			foundBranch = c.Branch
+		}
+	}
+
+	if found != nil {
+		return found, nil
 	}
 
 	return nil, fmt.Errorf("version not found: %s", prefix)
@@ -110,6 +134,10 @@ func exportZip(store *storage.Store, blobs []core.BlobEntry, output string) erro
 		output += ".zip"
 	}
 
+	if _, err := os.Stat(output); err == nil {
+		return fmt.Errorf("file already exists: %s", output)
+	}
+
 	f, err := os.Create(output)
 	if err != nil {
 		return err
@@ -132,6 +160,10 @@ func exportZip(store *storage.Store, blobs []core.BlobEntry, output string) erro
 func exportTar(store *storage.Store, blobs []core.BlobEntry, output string) error {
 	if !strings.HasSuffix(output, ".tar.gz") {
 		output += ".tar.gz"
+	}
+
+	if _, err := os.Stat(output); err == nil {
+		return fmt.Errorf("file already exists: %s", output)
 	}
 
 	f, err := os.Create(output)
@@ -157,6 +189,10 @@ func exportTar(store *storage.Store, blobs []core.BlobEntry, output string) erro
 }
 
 func writeBlobToFile(store *storage.Store, blob core.BlobEntry, outputDir string) error {
+	if err := core.ValidateTreePath(blob.Path); err != nil {
+		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
+	}
+
 	data, err := store.GetBlob(blob.Hash)
 	if err != nil {
 		return err
@@ -167,7 +203,11 @@ func writeBlobToFile(store *storage.Store, blob core.BlobEntry, outputDir string
 		return err
 	}
 
-	return os.WriteFile(fullPath, data, os.FileMode(blob.Mode))
+	perm := os.FileMode(core.ToOSFileMode(blob.Mode))
+	if err := os.WriteFile(fullPath, data, perm); err != nil {
+		return err
+	}
+	return os.Chmod(fullPath, perm)
 }
 
 func addBlobToZip(store *storage.Store, blob core.BlobEntry, w *zip.Writer) error {

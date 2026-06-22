@@ -14,8 +14,8 @@ var (
 	commitMagic   = [4]byte{'D', 'C', 'M', 'T'}
 	commitVersion = uint32(1)
 
-	ErrInvalidCommit  = errors.New("invalid commit file")
-	ErrCommitCorrupt  = errors.New("commit file corrupted")
+	ErrInvalidCommit      = errors.New("invalid commit file")
+	ErrCommitCorrupt      = errors.New("commit file corrupted")
 	ErrCommitHashMismatch = errors.New("commit hash mismatch")
 )
 
@@ -52,12 +52,13 @@ func (c *Commit) Marshal() ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid parent hash %q: %w", c.Parent, err)
 		}
+		// Issue 15: hex.DecodeString of a valid 64-char hex string always
+		// returns exactly 32 bytes. The padding logic below was dead code
+		// that masked invalid input. Validate explicitly instead.
+		if len(pb) != 32 {
+			return nil, fmt.Errorf("invalid parent hash length: got %d, want 32", len(pb))
+		}
 		parentBytes = pb
-	}
-	if len(parentBytes) < 32 {
-		padded := make([]byte, 32)
-		copy(padded[32-len(parentBytes):], parentBytes)
-		parentBytes = padded
 	}
 	if _, err := buf.Write(parentBytes); err != nil {
 		return nil, err
@@ -138,17 +139,24 @@ func (c *Commit) Unmarshal(data []byte) error {
 	}
 	c.Message = message
 
-	if r.Len() > 0 {
-		authorName, err := c.readString(r)
-		if err == nil {
-			c.Author.Name = authorName
-		}
-		if r.Len() > 0 {
-			authorEmail, err := c.readString(r)
-			if err == nil {
-				c.Author.Email = authorEmail
-			}
-		}
+	// Issue 14: author fields are part of the format (always written by
+	// Marshal). Treat their absence as corruption rather than silently
+	// producing a commit with an empty author.
+	authorName, err := c.readString(r)
+	if err != nil {
+		return ErrCommitCorrupt
+	}
+	c.Author.Name = authorName
+
+	authorEmail, err := c.readString(r)
+	if err != nil {
+		return ErrCommitCorrupt
+	}
+	c.Author.Email = authorEmail
+
+	// Reject any trailing bytes after the author email.
+	if r.Len() != 0 {
+		return ErrCommitCorrupt
 	}
 
 	storedHash := c.Hash

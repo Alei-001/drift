@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/spf13/cobra"
@@ -19,7 +17,7 @@ Version can be a version ID (e.g., v1) or branch name (e.g., main).
 Files that differ from the target version will be overwritten.
 Branch reference is NOT changed - only working tree is updated.
 Untracked files are preserved.
-Use --force to discard staged changes.`,
+Use --force to discard staged changes and unstaged modifications.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		version := args[0]
@@ -33,6 +31,9 @@ Use --force to discard staged changes.`,
 		if !force {
 			if hasPendingChanges, err := hasPendingStagedChanges(&oldIdx); err == nil && hasPendingChanges {
 				return fmt.Errorf("staging area has pending changes (use --force to discard)")
+			}
+			if dirty, err := hasWorktreeModifications(); err == nil && dirty {
+				return fmt.Errorf("working tree has unstaged modifications (use --force to discard)")
 			}
 		}
 
@@ -77,73 +78,67 @@ Use --force to discard staged changes.`,
 
 		newIdx := &core.Index{}
 		var added, modified, deleted int
+		var deletedPaths []string
 
 		for _, b := range targetBlobs {
-			fullPath := filepath.Join(sharedDir, filepath.FromSlash(b.Path))
-			data, err := sharedStore.GetBlob(b.Hash)
+			entry, err := writeBlobToWorktree(sharedStore, sharedDir, b)
 			if err != nil {
 				return err
 			}
 
-			existing, err := os.ReadFile(fullPath)
-			if err == nil && bytes.Equal(existing, data) {
-				info, _ := os.Stat(fullPath)
-				newIdx.Add(core.IndexEntry{
-					Path:       b.Path,
-					Hash:       b.Hash,
-					ModifiedAt: info.ModTime(),
-					Size:       info.Size(),
-					Mode:       b.Mode,
-				})
-				continue
-			}
-
-			if err != nil {
+			// Determine if this was an add or modify.
+			fullPath := filepath.Join(sharedDir, filepath.FromSlash(b.Path))
+			if _, statErr := os.Lstat(fullPath); statErr != nil {
 				added++
 			} else {
+				// File existed before; check if content changed.
 				modified++
 			}
 
-			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(fullPath, data, os.FileMode(core.ToOSFileMode(b.Mode))); err != nil {
-				return err
-			}
+			newIdx.Add(entry)
+		}
 
-			info, _ := os.Stat(fullPath)
-			newIdx.Add(core.IndexEntry{
-				Path:       b.Path,
-				Hash:       b.Hash,
-				ModifiedAt: info.ModTime(),
-				Size:       info.Size(),
-				Mode:       b.Mode,
-			})
+		// Recompute added/modified accurately by comparing against prevBlobs.
+		added, modified = 0, 0
+		for _, b := range targetBlobs {
+			if prevBlobs[b.Path] {
+				modified++
+			} else {
+				added++
+			}
 		}
 
 		for path := range prevBlobs {
 			if !targetPaths[path] {
+				if err := core.ValidateTreePath(path); err != nil {
+					continue
+				}
 				fullPath := filepath.Join(sharedDir, filepath.FromSlash(path))
 				if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 					return err
 				}
 				deleted++
+				deletedPaths = append(deletedPaths, path)
 			}
 		}
 
 		for _, entry := range oldIdx.Entries {
 			if !targetPaths[entry.Path] {
 				if _, inPrev := prevBlobs[entry.Path]; !inPrev {
+					if err := core.ValidateTreePath(entry.Path); err != nil {
+						continue
+					}
 					fullPath := filepath.Join(sharedDir, filepath.FromSlash(entry.Path))
 					if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 						return err
 					}
 					deleted++
+					deletedPaths = append(deletedPaths, entry.Path)
 				}
 			}
 		}
 
-		cleanEmptyDirs(sharedDir, newIdx)
+		cleanEmptyDirsAffected(sharedDir, deletedPaths)
 
 		if err := sharedStore.SaveIndex(newIdx); err != nil {
 			return fmt.Errorf("failed to update index: %w", err)
@@ -155,42 +150,8 @@ Use --force to discard staged changes.`,
 }
 
 func init() {
-	restoreCmd.Flags().Bool("force", false, "Discard staged changes and force restore")
+	restoreCmd.Flags().Bool("force", false, "Discard staged changes and unstaged modifications, then force restore")
 	rootCmd.AddCommand(restoreCmd)
-}
-
-func cleanEmptyDirs(root string, idx *core.Index) {
-	tracked := make(map[string]bool)
-	for _, e := range idx.Entries {
-		dir := filepath.Dir(e.Path)
-		for dir != "." {
-			tracked[dir] = true
-			dir = filepath.Dir(dir)
-		}
-	}
-
-	var dirs []string
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || !info.IsDir() {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		if rel == "." || rel == ".drift" || len(rel) > 0 && rel[0] == '.' {
-			return nil
-		}
-		dirs = append(dirs, rel)
-		return nil
-	})
-
-	sort.Slice(dirs, func(i, j int) bool {
-		return len(dirs[i]) > len(dirs[j])
-	})
-
-	for _, d := range dirs {
-		if !tracked[filepath.ToSlash(d)] {
-			os.Remove(filepath.Join(root, d))
-		}
-	}
 }
 
 func hasPendingStagedChanges(idx *core.Index) (bool, error) {

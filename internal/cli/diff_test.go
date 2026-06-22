@@ -17,8 +17,8 @@ func TestDiff_NoDifferences(t *testing.T) {
 	h.AssertContains(output, "No differences")
 }
 
-// TC-DIFF-002: Text differences
-func TestDiff_TextDifferences(t *testing.T) {
+// TC-DIFF-002: Text differences (summary mode)
+func TestDiff_TextDifferences_Summary(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -30,13 +30,34 @@ func TestDiff_TextDifferences(t *testing.T) {
 
 	output, err := h.RunDiff()
 	h.AssertNoError(err)
-	h.AssertContains(output, "--- note.txt")
-	h.AssertContains(output, "+++ note.txt")
+	// Summary mode shows file status and line counts
+	h.AssertContains(output, "M note.txt")
+	h.AssertContains(output, "+1 -1")
+	h.AssertContains(output, "(text)")
+	h.AssertContains(output, "Summary:")
+}
+
+// TC-DIFF-002b: Text differences (patch mode)
+func TestDiff_TextDifferences_Patch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "line 1\nline 2\nline 3")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Modify file
+	h.WriteFile("note.txt", "line 1\nline two\nline 3")
+
+	output, err := h.RunDiffWithPatch()
+	h.AssertNoError(err)
+	// Patch mode shows detailed diff
+	h.AssertContains(output, "---")
+	h.AssertContains(output, "+++")
 	h.AssertContains(output, "-line 2")
 	h.AssertContains(output, "+line two")
 }
 
-// TC-DIFF-003: New file (not tracked in version, won't show in diff)
+// TC-DIFF-003: New file (untracked, now shown in worktree diff per Issue 10 fix)
 func TestDiff_NewFile(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
@@ -49,12 +70,12 @@ func TestDiff_NewFile(t *testing.T) {
 
 	output, err := h.RunDiff()
 	h.AssertNoError(err)
-	// New uncommitted files don't appear in diff (only tracked files)
-	h.AssertContains(output, "No differences")
+	// Issue 10: untracked files now appear in worktree diff as added.
+	h.AssertContains(output, "A new.txt")
 }
 
-// TC-DIFF-004: Deleted file
-func TestDiff_DeletedFile(t *testing.T) {
+// TC-DIFF-004: Deleted file (summary mode)
+func TestDiff_DeletedFile_Summary(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -66,13 +87,31 @@ func TestDiff_DeletedFile(t *testing.T) {
 
 	output, err := h.RunDiff()
 	h.AssertNoError(err)
-	h.AssertContains(output, "--- note.txt")
-	h.AssertContains(output, "+++ /dev/null")
-	h.AssertContains(output, "(deleted)")
+	// Summary mode shows deleted status
+	h.AssertContains(output, "D note.txt")
+	h.AssertContains(output, "Summary:")
 }
 
-// TC-DIFF-005: Diff against specific version
-func TestDiff_AgainstSpecificVersion(t *testing.T) {
+// TC-DIFF-004b: Deleted file (patch mode)
+func TestDiff_DeletedFile_Patch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Delete file
+	h.DeleteFile("note.txt")
+
+	output, err := h.RunDiffWithPatch()
+	h.AssertNoError(err)
+	// Patch mode shows deleted content
+	h.AssertContains(output, "---")
+	h.AssertContains(output, "-content")
+}
+
+// TC-DIFF-005: Diff against specific version (summary mode)
+func TestDiff_AgainstSpecificVersion_Summary(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -87,15 +126,38 @@ func TestDiff_AgainstSpecificVersion(t *testing.T) {
 	// Modify worktree
 	h.WriteFile("note.txt", "worktree content")
 
-	// Diff against v1
+	// Diff against v1 (summary)
 	output, err := h.RunDiff("v1")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M note.txt")
+	h.AssertContains(output, "Summary:")
+}
+
+// TC-DIFF-005b: Diff against specific version (patch mode)
+func TestDiff_AgainstSpecificVersion_Patch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create v1
+	h.WriteFile("note.txt", "v1 content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Create v2
+	h.WriteFile("note.txt", "v2 content")
+	h.AddAndSave([]string{"note.txt"}, "v2")
+
+	// Modify worktree
+	h.WriteFile("note.txt", "worktree content")
+
+	// Diff against v1 (patch)
+	output, err := h.RunDiffWithPatch("v1")
 	h.AssertNoError(err)
 	h.AssertContains(output, "-v1 content")
 	h.AssertContains(output, "+worktree content")
 }
 
-// TC-DIFF-006: Diff between two versions
-func TestDiff_BetweenVersions(t *testing.T) {
+// TC-DIFF-006: Diff between two versions (summary mode)
+func TestDiff_BetweenVersions_Summary(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -109,12 +171,31 @@ func TestDiff_BetweenVersions(t *testing.T) {
 
 	output, err := h.RunDiff("v1", "v2")
 	h.AssertNoError(err)
+	h.AssertContains(output, "M note.txt")
+	h.AssertContains(output, "Summary:")
+}
+
+// TC-DIFF-006b: Diff between two versions (patch mode)
+func TestDiff_BetweenVersions_Patch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create v1
+	h.WriteFile("note.txt", "v1 content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Create v2
+	h.WriteFile("note.txt", "v2 content")
+	h.AddAndSave([]string{"note.txt"}, "v2")
+
+	output, err := h.RunDiffWithPatch("v1", "v2")
+	h.AssertNoError(err)
 	h.AssertContains(output, "-v1 content")
 	h.AssertContains(output, "+v2 content")
 }
 
-// TC-DIFF-007: Binary file differences
-func TestDiff_BinaryFile(t *testing.T) {
+// TC-DIFF-007: Binary file differences (summary mode)
+func TestDiff_BinaryFile_Summary(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -127,7 +208,29 @@ func TestDiff_BinaryFile(t *testing.T) {
 
 	output, err := h.RunDiff()
 	h.AssertNoError(err)
-	h.AssertContains(output, "Binary file changed")
+	// Summary mode shows size change
+	h.AssertContains(output, "M image.bin")
+	h.AssertContains(output, "(binary)")
+	h.AssertContains(output, "8 -> 10 bytes")
+}
+
+// TC-DIFF-007b: Binary file differences (patch mode)
+func TestDiff_BinaryFile_Patch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create binary file (contains null byte)
+	h.WriteFile("image.bin", string([]byte{0, 1, 2, 3, 0, 5, 6, 7}))
+	h.AddAndSave([]string{"image.bin"}, "v1")
+
+	// Modify binary file
+	h.WriteFile("image.bin", string([]byte{0, 1, 2, 3, 0, 5, 6, 7, 8, 9}))
+
+	output, err := h.RunDiffWithPatch()
+	h.AssertNoError(err)
+	// Patch mode shows binary file message
+	h.AssertContains(output, "Binary file")
+	h.AssertContains(output, "changed")
 }
 
 // TC-DIFF-008: No versions to compare
@@ -137,4 +240,69 @@ func TestDiff_NoVersions(t *testing.T) {
 
 	_, err := h.RunDiff()
 	h.AssertError(err)
+}
+
+// TC-DIFF-009: Cross-branch comparison (summary mode)
+func TestDiff_CrossBranch_Summary(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create main branch with v1
+	h.WriteFile("note.txt", "main content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Create feature branch
+	h.RunBranch("feature")
+	h.RunSwitch("feature")
+	h.WriteFile("note.txt", "feature content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Compare branches (summary)
+	output, err := h.RunDiff("main", "feature")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M note.txt")
+	h.AssertContains(output, "Summary:")
+}
+
+// TC-DIFF-009b: Cross-branch comparison (patch mode)
+func TestDiff_CrossBranch_Patch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create main branch with v1
+	h.WriteFile("note.txt", "main content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Create feature branch
+	h.RunBranch("feature")
+	h.RunSwitch("feature")
+	h.WriteFile("note.txt", "feature content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Compare branches (patch)
+	output, err := h.RunDiffWithPatch("main", "feature")
+	h.AssertNoError(err)
+	h.AssertContains(output, "-main content")
+	h.AssertContains(output, "+feature content")
+}
+
+// TC-DIFF-010: Specific file filter
+func TestDiff_SpecificFile(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create multiple files
+	h.WriteFile("note.txt", "note content")
+	h.WriteFile("other.txt", "other content")
+	h.AddAndSave([]string{"note.txt", "other.txt"}, "v1")
+
+	// Modify both files
+	h.WriteFile("note.txt", "new note")
+	h.WriteFile("other.txt", "new other")
+
+	// Diff only note.txt
+	output, err := h.RunDiffWithFile("note.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M note.txt")
+	h.AssertNotContains(output, "other.txt")
 }

@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/core"
 )
 
@@ -60,12 +62,10 @@ func (s *Store) Init() error {
 		}
 	}
 
-	config := map[string]interface{}{
-		"version":        "1.0.0",
-		"hash_algorithm": "sha256",
-	}
-	data, _ := json.MarshalIndent(config, "", "  ")
-	if err := os.WriteFile(filepath.Join(s.DriftDir(), configFile), data, 0644); err != nil {
+	// Issue 13: use the same config schema as config.LoadConfig expects
+	// (user + core), not an ad-hoc map. Issue 23: write atomically.
+	cfg := config.DefaultConfig()
+	if err := config.SaveConfig(s.DriftDir(), cfg); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -147,6 +147,32 @@ func (s *Store) GetBlob(hash string) ([]byte, error) {
 	return data, nil
 }
 
+// GetBlobToWriter streams a blob's content to the given writer without loading
+// the entire blob into memory. This is essential for large files (PSD, video)
+// that creative workers handle. The hash is verified via a streaming hasher.
+func (s *Store) GetBlobToWriter(hash string, w io.Writer) error {
+	path := s.blobPath(hash)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrObjectNotFound
+		}
+		return err
+	}
+	defer f.Close()
+
+	h := core.NewHasher()
+	if _, err := io.Copy(io.MultiWriter(w, h), f); err != nil {
+		return err
+	}
+
+	if core.HexSum(h) != hash {
+		return ErrObjectCorrupted
+	}
+
+	return nil
+}
+
 func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 	unlock, err := s.lock()
 	if err != nil {
@@ -160,41 +186,38 @@ func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 	}
 	defer src.Close()
 
-	tmp := filepath.Join(s.DriftDir(), blobsDir, ".puttmp")
-	dst, err := os.Create(tmp)
+	// Issue 16: use a unique temp file to avoid collisions on concurrent calls.
+	tmp, err := os.CreateTemp(s.DriftDir(), "putblob-*.tmp")
 	if err != nil {
 		return "", err
 	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
 
-	if _, err := dst.ReadFrom(src); err != nil {
-		dst.Close()
-		_ = os.Remove(tmp)
+	if _, err := tmp.ReadFrom(src); err != nil {
+		tmp.Close()
 		return "", err
 	}
-	dst.Close()
+	tmp.Close()
 
 	// Stream-hash the tmp file instead of reading it all into memory.
 	// This avoids OOM on large files (the core use case for creative workers).
-	hash, err := core.CalculateHashFromFile(tmp)
+	hash, err := core.CalculateHashFromFile(tmpName)
 	if err != nil {
-		_ = os.Remove(tmp)
 		return "", err
 	}
 
 	path := s.blobPath(hash)
 
 	if _, err := os.Stat(path); err == nil {
-		_ = os.Remove(tmp)
 		return hash, nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		_ = os.Remove(tmp)
 		return "", err
 	}
 
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	if err := os.Rename(tmpName, path); err != nil {
 		return "", err
 	}
 
@@ -443,4 +466,91 @@ func (s *Store) LoadIndex(idx *core.Index) error {
 	}
 
 	return idx.Unmarshal(data)
+}
+
+// SaveCommitTransaction atomically writes a commit, updates the branch ref,
+// and clears the index, all under a single lock. This prevents orphan commits
+// or duplicate saves if one of the steps fails (Issue 6).
+func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, emptyIdx *core.Index) error {
+	unlock, err := s.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	// 1. Write commit object.
+	commitPath := s.commitPath(c.Hash)
+	commitData, err := c.Marshal()
+	if err != nil {
+		return err
+	}
+	commitTmp := commitPath + ".tmp"
+	if err := os.WriteFile(commitTmp, commitData, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(commitTmp, commitPath); err != nil {
+		_ = os.Remove(commitTmp)
+		return err
+	}
+
+	// 2. Update branch ref.
+	refPath := filepath.Join(s.DriftDir(), refsDir, branch+".json")
+	refData, err := json.MarshalIndent(map[string]string{
+		"name":        branch,
+		"commit_hash": c.Hash,
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	refTmp := refPath + ".tmp"
+	if err := os.WriteFile(refTmp, refData, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(refTmp, refPath); err != nil {
+		_ = os.Remove(refTmp)
+		return err
+	}
+
+	// 3. Clear index.
+	idxPath := filepath.Join(s.DriftDir(), indexFile)
+	idxData, err := emptyIdx.Marshal()
+	if err != nil {
+		return err
+	}
+	idxTmp := idxPath + ".tmp"
+	if err := os.WriteFile(idxTmp, idxData, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(idxTmp, idxPath); err != nil {
+		_ = os.Remove(idxTmp)
+		return err
+	}
+
+	return nil
+}
+
+// ListBranchCommits walks the parent chain from the given branch ref and
+// returns commits in reverse-chronological order (newest first). This avoids
+// scanning and deserializing ALL commit files (Issue 7).
+func (s *Store) ListBranchCommits(branch string) ([]*core.Commit, error) {
+	hash, err := s.GetRef(branch)
+	if err != nil {
+		if err == ErrObjectNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var commits []*core.Commit
+	current := hash
+	for current != "" {
+		c, err := s.GetCommit(current)
+		if err != nil {
+			return nil, fmt.Errorf("corrupted commit %s: %w", current, err)
+		}
+		commits = append(commits, c)
+		current = c.Parent
+	}
+
+	return commits, nil
 }

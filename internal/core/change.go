@@ -58,56 +58,67 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 		}
 	}
 
-	if hasStagedChanges {
-		for _, entry := range idx.Entries {
-			fullPath := filepath.Join(workDir, filepath.FromSlash(entry.Path))
-			info, err := os.Lstat(fullPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					fs := s.File(entry.Path)
-					fs.Worktree = Deleted
-				}
-				continue
-			}
+	// Worktree status: always check both staged entries and committed files.
+	// Previously, when hasStagedChanges was true, committed-but-unstaged files
+	// were skipped, hiding their unstaged modifications.
+	stagedPaths := make(map[string]bool, len(idx.Entries))
+	for _, entry := range idx.Entries {
+		stagedPaths[entry.Path] = true
+	}
 
-			if info.ModTime().Equal(entry.ModifiedAt) && info.Size() == entry.Size {
-				if s[entry.Path] == nil {
-					s.File(entry.Path)
-				}
-				continue
-			}
-
-			hash, err := CalculateHashFromFile(fullPath)
-			if err != nil {
-				continue
-			}
-
-			if hash != entry.Hash {
+	// Check staged entries: compare worktree against staged content.
+	for _, entry := range idx.Entries {
+		fullPath := filepath.Join(workDir, filepath.FromSlash(entry.Path))
+		info, err := os.Lstat(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
 				fs := s.File(entry.Path)
-				fs.Worktree = Modified
+				fs.Worktree = Deleted
 			}
+			continue
 		}
-	} else {
-		for path, hash := range commitFiles {
-			fullPath := filepath.Join(workDir, filepath.FromSlash(path))
-			_, err := os.Lstat(fullPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					fs := s.File(path)
-					fs.Worktree = Deleted
-				}
-				continue
-			}
 
-			fileHash, err := CalculateHashFromFile(fullPath)
-			if err != nil {
-				continue
+		if info.ModTime().Equal(entry.ModifiedAt) && info.Size() == entry.Size {
+			if s[entry.Path] == nil {
+				s.File(entry.Path)
 			}
+			continue
+		}
 
-			if fileHash != hash {
+		hash, err := CalculateHashFromFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		if hash != entry.Hash {
+			fs := s.File(entry.Path)
+			fs.Worktree = Modified
+		}
+	}
+
+	// Check committed-but-not-staged files: compare worktree against commit.
+	for path, hash := range commitFiles {
+		if stagedPaths[path] {
+			continue
+		}
+		fullPath := filepath.Join(workDir, filepath.FromSlash(path))
+		_, err := os.Lstat(fullPath)
+		if err != nil {
+			if os.IsNotExist(err) {
 				fs := s.File(path)
-				fs.Worktree = Modified
+				fs.Worktree = Deleted
 			}
+			continue
+		}
+
+		fileHash, err := CalculateHashFromFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		if fileHash != hash {
+			fs := s.File(path)
+			fs.Worktree = Modified
 		}
 	}
 

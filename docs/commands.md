@@ -215,37 +215,87 @@ drift switch <名称> --force    # 强制切换（丢弃暂存区改动）
 
 查看文件差异。
 
+**默认显示摘要统计：**
+
 ```bash
-drift diff                # 工作区 vs 当前分支最新版本
-drift diff <v1>           # 工作区 vs 指定版本/分支
-drift diff <v1> <v2>     # 两个版本/分支之间
-drift diff main feature  # 两个分支之间对比
+drift diff                # 工作区 vs 当前分支最新版本（摘要）
+drift diff v1             # 工作区 vs v1（摘要）
+drift diff v1 v2          # v1 vs v2（摘要）
+drift diff main feature   # main 最新 vs feature 最新（摘要）
+drift diff main/v1 feature/v1  # 跨分支精确比较（摘要）
 ```
 
-**参数说明：**
-- `<版本>` 可以是版本 ID（如 v1、v2）或分支名（如 main、feature）
-
-**输出示例（文本文件）：**
+**摘要输出示例：**
 
 ```
---- 章节/第一章.txt
-+++ 章节/第一章.txt
+Changed files between v1 and v2:
+
+  M 章节/第一章.txt    +15 -3   (text)
+  M 章节/第二章.txt    +8 -2    (text)
+  M 素材/封面.psd      1.2MB -> 1.5MB  (binary)
+  D 笔记/旧笔记.txt    1024 bytes  (text)
+  A 笔记/新笔记.txt    2048 bytes  (text)
+
+Summary: 5 files changed (3 text, 1 binary), 23 insertions(+), 5 deletions(-)
+```
+
+**查看详细差异：**
+
+```bash
+drift diff -p             # 工作区 vs 当前分支（详细）
+drift diff v1 v2 -p       # v1 vs v2（详细）
+```
+
+**详细输出示例（文本文件）：**
+
+```
+--- v1/章节/第一章.txt
++++ v2/章节/第一章.txt
+@@ -1,5 +1,8 @@
  第一章 开始
-
+ 
 -这是一个故事的开始。
 +这是一个关于冒险的故事。
 +
 +主角是一个年轻的旅行者。
-
+ 
  天气晴朗。
 ```
 
-**输出示例（二进制文件）：**
+**二进制文件输出：**
 
 ```
-二进制文件：素材/封面.psd
-  1234567 bytes -> 1567890 bytes
+Binary file 素材/封面.psd changed (1234567 -> 1567890 bytes)
 ```
+
+**指定文件：**
+
+```bash
+drift diff v1 v2 --file 章节/第一章.txt    # 只看指定文件
+drift diff v1 v2 --file 章节/ --file 笔记/  # 多个文件/目录
+```
+
+**输出到文件：**
+
+```bash
+drift diff v1 v2 -p --output diff.txt      # 保存差异到文件
+```
+
+**参数说明：**
+
+| 参数 | 说明 |
+|------|------|
+| `-p` / `--patch` | 显示详细行级差异 |
+| `--file <路径>` | 只比较指定文件（可重复使用） |
+| `-o` / `--output <文件>` | 输出到文件而非命令行 |
+
+**版本标识符格式：**
+
+| 格式 | 示例 | 说明 |
+|------|------|------|
+| 版本 ID | `v1` | 当前分支的版本（如有歧义会提示） |
+| 分支名 | `main` | 该分支的最新版本 |
+| 分支/版本 | `main/v1` | 精确指定某分支的某版本 |
 
 ---
 

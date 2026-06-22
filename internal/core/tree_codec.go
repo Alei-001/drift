@@ -44,6 +44,11 @@ func (t *Tree) Unmarshal(data []byte) error {
 		}
 	}
 
+	// Issue 24: reject trailing bytes after entries (indicates corruption).
+	if r.Len() != 0 {
+		return ErrTreeCorrupt
+	}
+
 	return nil
 }
 

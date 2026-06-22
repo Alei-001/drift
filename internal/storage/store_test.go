@@ -421,8 +421,13 @@ func TestStore_Init_WritesConfig(t *testing.T) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg["hash_algorithm"] != "sha256" {
-		t.Fatalf("expected hash_algorithm sha256, got %v", cfg["hash_algorithm"])
+	// Issue 13: Init now writes the standard config schema (user + core).
+	user, ok := cfg["user"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected user object, got %v", cfg["user"])
+	}
+	if user["name"] == nil {
+		t.Fatalf("expected user.name to be set, got %v", user["name"])
 	}
 }
 

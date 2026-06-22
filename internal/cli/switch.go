@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +20,16 @@ The staging area must be empty (or use --force to discard).`,
 		branch := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
+		// Issue 27: no-op if already on this branch.
+		currentBranch, _ := sharedStore.GetRef("HEAD")
+		if currentBranch == "" {
+			currentBranch = "main"
+		}
+		if branch == currentBranch {
+			fmt.Printf("Already on branch: %s\n", branch)
+			return nil
+		}
+
 		var idx core.Index
 		if err := sharedStore.LoadIndex(&idx); err != nil {
 			return err
@@ -29,6 +38,9 @@ The staging area must be empty (or use --force to discard).`,
 		if !force {
 			if hasPendingChanges, err := hasPendingStagedChanges(&idx); err == nil && hasPendingChanges {
 				return fmt.Errorf("staging area has pending changes (use --force to discard)")
+			}
+			if dirty, err := hasWorktreeModifications(); err == nil && dirty {
+				return fmt.Errorf("working tree has unstaged modifications (use --force to discard)")
 			}
 		}
 
@@ -54,9 +66,20 @@ The staging area must be empty (or use --force to discard).`,
 			return fmt.Errorf("failed to update HEAD: %w", err)
 		}
 
-		// Handle case where branch has no commits yet
+		// Issue 2: handle empty branch — clear old branch's files from worktree.
 		if commitHash == "" {
-			// Empty working tree - clear index
+			var deletedPaths []string
+			for path := range currentBlobs {
+				if err := core.ValidateTreePath(path); err != nil {
+					continue
+				}
+				fullPath := filepath.Join(sharedDir, filepath.FromSlash(path))
+				if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				deletedPaths = append(deletedPaths, path)
+			}
+			cleanEmptyDirsAffected(sharedDir, deletedPaths)
 			newIdx := &core.Index{}
 			if err := sharedStore.SaveIndex(newIdx); err != nil {
 				return fmt.Errorf("failed to update index: %w", err)
@@ -87,52 +110,28 @@ The staging area must be empty (or use --force to discard).`,
 
 		newIdx := &core.Index{}
 		for _, b := range targetBlobs {
-			fullPath := filepath.Join(sharedDir, filepath.FromSlash(b.Path))
-			data, err := sharedStore.GetBlob(b.Hash)
+			entry, err := writeBlobToWorktree(sharedStore, sharedDir, b)
 			if err != nil {
 				return err
 			}
-
-			existing, err := os.ReadFile(fullPath)
-			if err == nil && bytes.Equal(existing, data) {
-				info, _ := os.Stat(fullPath)
-				newIdx.Add(core.IndexEntry{
-					Path:       b.Path,
-					Hash:       b.Hash,
-					ModifiedAt: info.ModTime(),
-					Size:       info.Size(),
-					Mode:       b.Mode,
-				})
-				continue
-			}
-
-			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(fullPath, data, os.FileMode(core.ToOSFileMode(b.Mode))); err != nil {
-				return err
-			}
-
-			info, _ := os.Stat(fullPath)
-			newIdx.Add(core.IndexEntry{
-				Path:       b.Path,
-				Hash:       b.Hash,
-				ModifiedAt: info.ModTime(),
-				Size:       info.Size(),
-				Mode:       b.Mode,
-			})
+			newIdx.Add(entry)
 		}
 
+		var deletedPaths []string
 		for path := range currentBlobs {
 			if !targetPaths[path] {
+				if err := core.ValidateTreePath(path); err != nil {
+					continue
+				}
 				fullPath := filepath.Join(sharedDir, filepath.FromSlash(path))
 				if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 					return err
 				}
+				deletedPaths = append(deletedPaths, path)
 			}
 		}
 
-		cleanEmptyDirs(sharedDir, newIdx)
+		cleanEmptyDirsAffected(sharedDir, deletedPaths)
 
 		if err := sharedStore.SaveIndex(newIdx); err != nil {
 			return fmt.Errorf("failed to update index: %w", err)
@@ -144,7 +143,7 @@ The staging area must be empty (or use --force to discard).`,
 }
 
 func init() {
-	switchCmd.Flags().Bool("force", false, "Discard staged changes and force switch")
+	switchCmd.Flags().Bool("force", false, "Discard staged changes and unstaged modifications, then force switch")
 	rootCmd.AddCommand(switchCmd)
 }
 

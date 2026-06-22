@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 type Signature struct {
 	Name  string
@@ -39,6 +42,9 @@ func (c *Commit) isRoot() bool {
 }
 
 func (c *Commit) calculateHash() string {
-	data := c.ID + c.Message + c.Timestamp.Format(time.RFC3339) + c.Parent + c.Branch + c.TreeHash + c.Author.Name + c.Author.Email
+	// Issue 29: use UnixMilli (matches the stored precision) instead of
+	// RFC3339 (second-level). RFC3339 would collide for two commits in the
+	// same second with otherwise identical fields.
+	data := c.ID + c.Message + strconv.FormatInt(c.Timestamp.UnixMilli(), 10) + c.Parent + c.Branch + c.TreeHash + c.Author.Name + c.Author.Email
 	return CalculateHash([]byte(data))
 }

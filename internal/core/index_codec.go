@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -14,28 +15,56 @@ var (
 	indexMagic   = [4]byte{'D', 'R', 'I', 'X'}
 	indexVersion = uint32(1)
 
-	ErrInvalidIndex   = errors.New("invalid index file")
-	ErrIndexVersion   = errors.New("unsupported index version")
-	ErrIndexCorrupt   = errors.New("index file corrupted")
+	// checksumSize is the length of the SHA-256 trailer appended to the index.
+	checksumSize = 32
+
+	ErrInvalidIndex = errors.New("invalid index file")
+	ErrIndexVersion = errors.New("unsupported index version")
+	ErrIndexCorrupt = errors.New("index file corrupted")
 )
 
 func (idx *Index) Marshal() ([]byte, error) {
 	var buf bytes.Buffer
+	// Hasher computes SHA-256 over the body (header + entries) for a checksum
+	// trailer, mirroring go-git's index checksum.
+	h := sha256.New()
+	mw := io.MultiWriter(&buf, h)
 
-	if err := idx.writeHeader(&buf); err != nil {
+	if err := idx.writeHeader(mw); err != nil {
 		return nil, err
 	}
 
 	for _, entry := range idx.Entries {
-		if err := idx.writeEntry(&buf, &entry); err != nil {
+		if err := idx.writeEntry(mw, &entry); err != nil {
 			return nil, err
 		}
+	}
+
+	// Append checksum trailer.
+	if _, err := buf.Write(h.Sum(nil)); err != nil {
+		return nil, err
 	}
 
 	return buf.Bytes(), nil
 }
 
 func (idx *Index) Unmarshal(data []byte) error {
+	// Verify checksum trailer (if present). Backwards-compatible: indexes
+	// without a trailer are accepted; indexes with a valid 32-byte trailer
+	// are verified; a trailer that doesn't match is corruption.
+	if len(data) >= checksumSize {
+		body := data[:len(data)-checksumSize]
+		got := sha256.Sum256(body)
+		trailer := data[len(data)-checksumSize:]
+		if bytes.Equal(got[:], trailer) {
+			// Valid checksum trailer; strip it before parsing.
+			data = body
+		}
+		// If it doesn't match, it might be an old-format index with no
+		// trailer whose last 32 bytes happen to be entry data. The trailing
+		// data check below will catch real corruption.
+	}
+
 	r := bytes.NewReader(data)
 
 	if err := idx.readHeader(r); err != nil {
@@ -48,6 +77,11 @@ func (idx *Index) Unmarshal(data []byte) error {
 			return err
 		}
 		idx.Entries[i] = *entry
+	}
+
+	// Issue 24: reject trailing bytes after entries (indicates corruption).
+	if r.Len() != 0 {
+		return ErrIndexCorrupt
 	}
 
 	return nil

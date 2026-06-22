@@ -59,52 +59,40 @@ func printStatus(s core.Status) {
 		return
 	}
 
-	hasStaged := false
-	hasUnstaged := false
-
+	// Issue 25: single pass to collect groups, avoiding repeated iteration.
+	var staged, unstaged, untracked []string
 	for path, fs := range s {
 		if fs.Staging != core.Unmodified && fs.Staging != core.Untracked {
-			hasStaged = true
-			_ = path
+			staged = append(staged, fmt.Sprintf("  %s %s", fs.Staging, path))
 		}
 		if fs.Worktree != core.Unmodified && fs.Worktree != core.Untracked {
-			hasUnstaged = true
+			unstaged = append(unstaged, fmt.Sprintf("  %s %s", fs.Worktree, path))
 		}
-	}
-
-	if hasStaged {
-		fmt.Println("Staged changes:")
-		for path, fs := range s {
-			if fs.Staging != core.Unmodified && fs.Staging != core.Untracked {
-				fmt.Printf("  %s %s\n", fs.Staging, path)
-			}
-		}
-		fmt.Println()
-	}
-
-	if hasUnstaged {
-		fmt.Println("Unstaged changes:")
-		for path, fs := range s {
-			if fs.Worktree != core.Unmodified && fs.Worktree != core.Untracked {
-				fmt.Printf("  %s %s\n", fs.Worktree, path)
-			}
-		}
-		fmt.Println()
-	}
-
-	hasUntracked := false
-	for _, fs := range s {
 		if fs.Worktree == core.Untracked {
-			hasUntracked = true
-			break
+			untracked = append(untracked, "  "+path)
 		}
 	}
-	if hasUntracked {
+
+	if len(staged) > 0 {
+		fmt.Println("Staged changes:")
+		for _, line := range staged {
+			fmt.Println(line)
+		}
+		fmt.Println()
+	}
+
+	if len(unstaged) > 0 {
+		fmt.Println("Unstaged changes:")
+		for _, line := range unstaged {
+			fmt.Println(line)
+		}
+		fmt.Println()
+	}
+
+	if len(untracked) > 0 {
 		fmt.Println("Untracked files:")
-		for path, fs := range s {
-			if fs.Worktree == core.Untracked {
-				fmt.Printf("  %s\n", path)
-			}
+		for _, line := range untracked {
+			fmt.Println(line)
 		}
 	}
 }

@@ -77,6 +77,31 @@ func (h *TestHelper) SetupSharedState() {
 	sharedDir = h.Dir
 	sharedStore = storage.NewStore(h.Dir)
 	sharedConfig = h.Config
+
+	// Reset all Cobra flags to default values to avoid state leakage between tests
+	// This is critical because Cobra flags are global and persist across tests
+	resetAllFlags()
+}
+
+// resetAllFlags resets all command flags to their default values
+func resetAllFlags() {
+	// diff command flags - reset global variables directly
+	diffPatch = false
+	diffOutput = ""
+	diffFilePaths = nil
+
+	// export command flags
+	exportCmd.Flags().Set("output", "")
+	exportCmd.Flags().Set("format", "dir")
+
+	// restore command flags
+	restoreCmd.Flags().Set("force", "false")
+
+	// switch command flags
+	switchCmd.Flags().Set("force", "false")
+
+	// save command flags - message should be set per call
+	saveCmd.Flags().Set("message", "")
 }
 
 // WriteFile creates a file with the given content.
@@ -293,6 +318,26 @@ func (h *TestHelper) RunSwitch(args ...string) (string, error) {
 func (h *TestHelper) RunDiff(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
+	return CaptureOutput(func() error {
+		return diffCmd.RunE(diffCmd, args)
+	})
+}
+
+// RunDiffWithPatch runs the diff command with --patch flag.
+func (h *TestHelper) RunDiffWithPatch(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	diffPatch = true
+	return CaptureOutput(func() error {
+		return diffCmd.RunE(diffCmd, args)
+	})
+}
+
+// RunDiffWithFile runs the diff command with --file flag.
+func (h *TestHelper) RunDiffWithFile(filePath string, args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	diffFilePaths = []string{filePath}
 	return CaptureOutput(func() error {
 		return diffCmd.RunE(diffCmd, args)
 	})

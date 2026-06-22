@@ -112,9 +112,30 @@ func addAll(store *storage.Store, root string) error {
 }
 
 func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileInfo, idx *core.Index) error {
-	hash, err := store.PutBlobFromFile(fullPath)
+	mode, err := core.NormalizeMode(info.Mode())
 	if err != nil {
-		return fmt.Errorf("failed to store %s: %w", relPath, err)
+		// Skip unsupported file types (sockets, pipes, devices) with a notice.
+		fmt.Printf("Skipped (unsupported type): %s\n", relPath)
+		return nil
+	}
+
+	var hash string
+	if mode == core.ModeSymlink {
+		// Issue 17: store symlink target string as blob content, not the
+		// dereferenced target file content.
+		target, err := os.Readlink(fullPath)
+		if err != nil {
+			return fmt.Errorf("failed to read symlink %s: %w", relPath, err)
+		}
+		hash, err = store.PutBlob([]byte(target))
+		if err != nil {
+			return fmt.Errorf("failed to store symlink %s: %w", relPath, err)
+		}
+	} else {
+		hash, err = store.PutBlobFromFile(fullPath)
+		if err != nil {
+			return fmt.Errorf("failed to store %s: %w", relPath, err)
+		}
 	}
 
 	entry := core.IndexEntry{
@@ -122,7 +143,7 @@ func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileI
 		Hash:       hash,
 		ModifiedAt: info.ModTime(),
 		Size:       info.Size(),
-		Mode:       core.NormalizeMode(info.Mode()),
+		Mode:       mode,
 	}
 
 	idx.Add(entry)
