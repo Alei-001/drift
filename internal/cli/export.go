@@ -63,6 +63,13 @@ func init() {
 }
 
 func findCommitByPrefix(store *storage.Store, prefix string) (*core.Commit, error) {
+	// First, try to resolve as a branch/ref name.
+	if hash, err := store.GetRef(prefix); err == nil && hash != "" {
+		if commit, err := findCommitByHash(store, hash); err == nil && commit != nil {
+			return commit, nil
+		}
+	}
+
 	commits, err := store.ListCommits()
 	if err != nil {
 		return nil, err
