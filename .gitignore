@@ -1,7 +1,8 @@
 # Reference code
 reference/
 
-# Go build artifacts
+# Build artifacts
+dist/
 *.exe
 *.exe~
 *.dll
