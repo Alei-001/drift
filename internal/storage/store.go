@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/drift/drift/internal/core"
@@ -271,6 +272,10 @@ func (s *Store) ListCommits() ([]*core.Commit, error) {
 		}
 		commits = append(commits, c)
 	}
+
+	sort.Slice(commits, func(i, j int) bool {
+		return commits[i].Timestamp.Before(commits[j].Timestamp)
+	})
 
 	return commits, nil
 }

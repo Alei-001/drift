@@ -186,12 +186,57 @@ Fields:
 
 ---
 
+## Phase 4：导出和回退
+
+**状态：** 已完成
+
+**目标：** 实现版本导出和回退功能
+
+### 设计决策
+
+| 方面 | Drift | go-git | 理由 |
+|------|-------|--------|------|
+| 导出格式 | 目录 + zip + tar.gz | tar/zip | 支持多种场景，使用标准库 |
+| 回退方式 | index ↔ worktree 对比（增量） | tree diff + index diff | 学习 go-git 的正确做法 |
+| 冲突检测 | 检查 index 是否为空 | 检查 unstaged changes | MVP 简化版，防止数据丢失 |
+
+### go-git 的 HardReset 流程（参考）
+
+```
+1. resetIndex()          → index = target tree
+2. resetWorktreeToTree()
+   ├── diffTrees(prev, to)  删除旧有新的文件
+   └── diffStagingWorktree  覆盖工作区差异文件
+```
+
+### 任务清单
+
+| 任务 | 文件 | 状态 |
+|------|------|------|
+| Tree 遍历 | `internal/core/tree_walker.go` | 已完成 |
+| drift export (dir) | `internal/cli/export.go` | 已完成 |
+| drift export (zip) | `internal/cli/export.go` | 已完成 |
+| drift export (tar.gz) | `internal/cli/export.go` | 已完成 |
+| drift restore | `internal/cli/restore.go` | 已完成 |
+| ListCommits 排序 | `internal/storage/store.go` | 已完成 |
+
+### 验证结果
+
+- [x] `go build ./...` 编译通过
+- [x] `go vet ./...` 无警告
+- [x] `drift export v1 -o dir` 导出到目录
+- [x] `drift export v1 -o file.zip -f zip` 导出到 zip
+- [x] `drift export v1 -o file.tar.gz -f tar` 导出到 tar.gz
+- [x] `drift restore v1` 恢复工作区
+- [x] `drift restore v1` 带未提交更改时报错
+- [x] `drift restore v1 --force` 强制恢复
+
+---
+
 ## 后续阶段
 
 | 阶段 | 状态 | 预计时间 |
 |------|------|----------|
-| Phase 3：版本管理 | 待开始 | 2 周 |
-| Phase 4：导出和回退 | 待开始 | 2 周 |
 | Phase 5：分支功能 | 待开始 | 2 周 |
 | Phase 6：对比功能 | 待开始 | 1 周 |
 | Phase 7：优化完善 | 待开始 | 2 周 |
