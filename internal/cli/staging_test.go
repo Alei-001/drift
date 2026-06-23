@@ -321,6 +321,7 @@ func TestAdd_AutoCRLF_BinarySkipped(t *testing.T) {
 		t.Errorf("binary content should be preserved, got %x, want %x", data, []byte(binaryContent))
 	}
 }
+
 // TC-ADD-007: Re-adding unchanged file skips it
 func TestAdd_SkipUnchangedFile(t *testing.T) {
 	h := NewTestHelper(t)
@@ -360,4 +361,63 @@ func TestUnstage_EmptyStaging(t *testing.T) {
 	output, err := h.RunUnstage()
 	h.AssertNoError(err)
 	h.AssertContains(output, "Staging area cleared")
+}
+
+// TC-UNSTAGE-003: Unstage single file from staging
+func TestUnstage_SingleFile(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "file a")
+	h.WriteFile("b.txt", "file b")
+	_, err := h.RunAdd("a.txt")
+	h.AssertNoError(err)
+	_, err = h.RunAdd("b.txt")
+	h.AssertNoError(err)
+
+	// Verify both are staged
+	output, err := h.RunStatus()
+	h.AssertNoError(err)
+	h.AssertContains(output, "A a.txt")
+	h.AssertContains(output, "A b.txt")
+
+	// Unstage a.txt only
+	output, err = h.RunUnstage("a.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Unstaged: a.txt")
+
+	// Verify a.txt is no longer staged
+	output, err = h.RunStatus()
+	h.AssertNoError(err)
+	h.AssertContains(output, "Untracked files:")
+	h.AssertContains(output, "a.txt")
+	h.AssertNotContains(output, "A a.txt")
+	// b.txt should still be staged
+	h.AssertContains(output, "A b.txt")
+}
+
+// TC-UNSTAGE-004: Unstage single file not in staging
+func TestUnstage_FileNotStaged(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+
+	output, err := h.RunUnstage("note.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "note.txt is not staged")
+}
+
+// TC-UNSTAGE-005: Unstage with invalid path
+func TestUnstage_InvalidPath(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Path with traversal (rejected by ValidateTreePath)
+	_, err := h.RunUnstage("../outside.txt")
+	h.AssertError(err)
+
+	// Path with null byte (rejected by ValidateTreePath)
+	_, err = h.RunUnstage("file\x00.txt")
+	h.AssertError(err)
 }

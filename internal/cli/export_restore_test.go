@@ -106,6 +106,38 @@ func TestExport_DirAlreadyExists(t *testing.T) {
 	h.AssertError(err)
 }
 
+// TC-EXPORT-007: Export zip file already exists
+func TestExport_ZipAlreadyExists(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Create the zip file first
+	zipPath := filepath.Join(h.Dir, "output.zip")
+	os.WriteFile(zipPath, []byte("dummy"), 0644)
+
+	_, err := h.RunExport("v1", "-o", zipPath, "-f", "zip")
+	h.AssertError(err)
+}
+
+// TC-EXPORT-008: Export tar.gz file already exists
+func TestExport_TarGzAlreadyExists(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Create the tar.gz file first
+	tarPath := filepath.Join(h.Dir, "output.tar.gz")
+	os.WriteFile(tarPath, []byte("dummy"), 0644)
+
+	_, err := h.RunExport("v1", "-o", tarPath, "-f", "tar")
+	h.AssertError(err)
+}
+
 // TC-RESTORE-001: Restore to specific version
 func TestRestore_ToVersion(t *testing.T) {
 	h := NewTestHelper(t)

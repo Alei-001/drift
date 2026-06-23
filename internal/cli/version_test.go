@@ -152,6 +152,27 @@ func TestSave_EmptyStaging(t *testing.T) {
 	h.AssertError(err)
 }
 
+// TC-SAVE-009: Save with special characters in message
+func TestSave_SpecialCharsInMessage(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Unicode characters
+	h.WriteFile("note.txt", "content v2")
+	h.AddAndSave([]string{"note.txt"}, "章节 1：开始 🎨")
+
+	// Save with multi-line message
+	h.WriteFile("note.txt", "content v3")
+	_, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+	output, err := h.RunSave("line1\nline2\nline3")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Saved version v3")
+}
+
 // TC-SAVE-004: Version number auto-increment
 func TestSave_VersionIncrement(t *testing.T) {
 	h := NewTestHelper(t)

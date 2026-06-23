@@ -69,6 +69,78 @@ func TestConfig_GetDefaultAutoCRLF(t *testing.T) {
 	}
 }
 
+// TC-CONFIG-007: Set and get user.email
+func TestConfig_SetAndGetEmail(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("user.email", "test@example.com")
+	h.AssertNoError(err)
+
+	output, err := h.RunConfig("user.email")
+	h.AssertNoError(err)
+	h.AssertContains(output, "test@example.com")
+}
+
+// TC-CONFIG-008: Set and get core.default_branch
+func TestConfig_SetAndGetDefaultBranch(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("core.default_branch", "develop")
+	h.AssertNoError(err)
+
+	output, err := h.RunConfig("core.default_branch")
+	h.AssertNoError(err)
+	h.AssertContains(output, "develop")
+}
+
+// TC-CONFIG-009: Config get default values (all empty)
+func TestConfig_GetDefaults(t *testing.T) {
+	h := NewTestHelper(t)
+
+	// user.name default empty
+	output, err := h.RunConfig("user.name")
+	h.AssertNoError(err)
+	if output != "" && output != "\n" {
+		t.Errorf("expected empty default for user.name, got %q", output)
+	}
+
+	// user.email default empty
+	output, err = h.RunConfig("user.email")
+	h.AssertNoError(err)
+	if output != "" && output != "\n" {
+		t.Errorf("expected empty default for user.email, got %q", output)
+	}
+
+	// core.default_branch default is "main"
+	output, err = h.RunConfig("core.default_branch")
+	h.AssertNoError(err)
+	h.AssertContains(output, "main")
+}
+
+// TC-CONFIG-010: Set multiple config keys in sequence
+func TestConfig_SetMultipleKeys(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("user.name", "Alice")
+	h.AssertNoError(err)
+	_, err = h.RunConfig("user.email", "alice@example.com")
+	h.AssertNoError(err)
+	_, err = h.RunConfig("core.autocrlf", "true")
+	h.AssertNoError(err)
+
+	output, err := h.RunConfig("user.name")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Alice")
+
+	output, err = h.RunConfig("user.email")
+	h.AssertNoError(err)
+	h.AssertContains(output, "alice@example.com")
+
+	output, err = h.RunConfig("core.autocrlf")
+	h.AssertNoError(err)
+	h.AssertContains(output, "true")
+}
+
 // TC-IGNORE-001: .driftignore ignores specific files
 func TestIgnore_SpecificFiles(t *testing.T) {
 	h := NewTestHelper(t)

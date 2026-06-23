@@ -212,6 +212,20 @@ func TestSwitch_CreateShorthand(t *testing.T) {
 	h.AssertContains(output, "Created branch: feat")
 	h.AssertContains(output, "Switched to branch: feat")
 }
+
+// TC-SWITCH-005b: Switch to same branch (no-op)
+func TestSwitch_AlreadyOnBranch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	output, err := h.RunSwitch("main")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Already on branch: main")
+}
+
 // TC-SWITCH-006: Independent version lines on branches
 func TestSwitch_IndependentVersionLines(t *testing.T) {
 	h := NewTestHelper(t)

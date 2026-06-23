@@ -219,12 +219,12 @@ func (h *TestHelper) RunStatus() (string, error) {
 	})
 }
 
-// RunUnstage runs the unstage command.
-func (h *TestHelper) RunUnstage() (string, error) {
+// RunUnstage runs the unstage command with optional path args.
+func (h *TestHelper) RunUnstage(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	return CaptureOutput(func() error {
-		return unstageCmd.RunE(unstageCmd, nil)
+		return unstageCmd.RunE(unstageCmd, args)
 	})
 }
 
