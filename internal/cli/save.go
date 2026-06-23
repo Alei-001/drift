@@ -23,6 +23,12 @@ var saveCmd = &cobra.Command{
 			return fmt.Errorf("nothing to save (use 'drift add' first)")
 		}
 
+		// Capture staged paths before the transaction clears the index.
+		stagedPaths := make([]string, len(idx.Entries))
+		for i, e := range idx.Entries {
+			stagedPaths[i] = e.Path
+		}
+
 		builder := core.NewTreeBuilder(func(t *core.Tree) error {
 			return sharedStore.PutTree(t)
 		})
@@ -74,6 +80,11 @@ var saveCmd = &cobra.Command{
 			fmt.Printf("Saved version %s: %s\n", id, message)
 		} else {
 			fmt.Printf("Saved version %s\n", id)
+		}
+
+		fmt.Printf("\n  %d file(s) saved:\n", len(stagedPaths))
+		for _, p := range stagedPaths {
+			fmt.Printf("    %s\n", p)
 		}
 		return nil
 	},

@@ -29,6 +29,7 @@ var listCmd = &cobra.Command{
 			ts        int64
 		}
 		var all []commitInfo
+		seen := make(map[string]bool)
 
 		for branchName := range refs {
 			if branchName == "HEAD" {
@@ -39,6 +40,10 @@ var listCmd = &cobra.Command{
 				continue
 			}
 			for _, c := range commits {
+				if seen[c.Hash] {
+					continue
+				}
+				seen[c.Hash] = true
 				all = append(all, commitInfo{
 					ID:        c.ID,
 					Branch:    c.Branch,
