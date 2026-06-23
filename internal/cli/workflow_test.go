@@ -42,7 +42,7 @@ func TestFlow_TypicalCreativeWorkflow(t *testing.T) {
 	h.AddAndSave([]string{"ending.txt"}, "结局B")
 
 	// 5. Verify branch independence
-	output, _ = h.RunList()
+	output, _ = h.RunLogAll()
 	h.AssertContains(output, "v1")
 	h.AssertContains(output, "修改第一章")
 	h.AssertContains(output, "结局B")
@@ -50,7 +50,7 @@ func TestFlow_TypicalCreativeWorkflow(t *testing.T) {
 	// 6. Switch to ending-a and verify
 	_, err = h.RunSwitch("ending-a")
 	h.AssertNoError(err)
-	output, _ = h.RunList()
+	output, _ = h.RunLogAll()
 	h.AssertContains(output, "结局A")
 
 	// 7. Export using branch name (main's v1)

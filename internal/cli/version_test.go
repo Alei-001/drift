@@ -39,8 +39,8 @@ func TestSave_WithMessage(t *testing.T) {
 	h.AssertContains(output, "Saved version v1: first chapter")
 }
 
-// TC-LIST-004: Filter by branch name
-func TestList_FilterByBranch(t *testing.T) {
+// TC-LOG-004: Filter by branch name (formerly TestList_FilterByBranch)
+func TestLog_FilterByBranch(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -56,29 +56,28 @@ func TestList_FilterByBranch(t *testing.T) {
 	h.WriteFile("feat.txt", "feature content")
 	h.AddAndSave([]string{"feat.txt"}, "v1")
 
-	// List only main branch
-	output, err := h.RunList("main")
+	// Log only main branch
+	output, err := h.RunLog("main")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Version history:")
-	h.AssertContains(output, "v1")
-	h.AssertContains(output, "[main]")
-	h.AssertNotContains(output, "[feature]")
+	h.AssertContains(output, "Version: v1")
+	h.AssertContains(output, "Branch:  main")
+	h.AssertNotContains(output, "feature")
 }
 
-// TC-LIST-005: List nonexistent branch errors
-func TestList_NonexistentBranch(t *testing.T) {
+// TC-LOG-005: Log nonexistent branch errors (formerly TestList_NonexistentBranch)
+func TestLog_NonexistentBranch(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
 	h.AddAndSave([]string{"note.txt"}, "v1")
 
-	_, err := h.RunList("nonexistent")
+	_, err := h.RunLog("nonexistent")
 	h.AssertError(err)
 }
 
-// TC-LIST-006: Deduplicate commits across branches
-func TestList_DeduplicateAcrossBranches(t *testing.T) {
+// TC-LOG-006: Deduplicate commits across branches with --all (formerly TestList_DeduplicateAcrossBranches)
+func TestLog_AllDeduplicateAcrossBranches(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -94,8 +93,8 @@ func TestList_DeduplicateAcrossBranches(t *testing.T) {
 	_, err = h.RunSwitch("main")
 	h.AssertNoError(err)
 
-	// List all should show v1 only once
-	output, err := h.RunList()
+	// Log --all should show v1 only once
+	output, err := h.RunLogAll()
 	h.AssertNoError(err)
 	// Count occurrences of "v1 on main" - should appear exactly once
 	count := 0
@@ -208,8 +207,8 @@ func TestSave_StatusCleanAfterSave(t *testing.T) {
 	h.AssertContains(output, "Nothing to commit, working tree clean")
 }
 
-// TC-LIST-001: Show version history
-func TestList_ShowHistory(t *testing.T) {
+// TC-LOG-007: Show version history with --all (formerly TestList_ShowHistory)
+func TestLog_AllShowHistory(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -223,7 +222,7 @@ func TestList_ShowHistory(t *testing.T) {
 	h.WriteFile("f3.txt", "v3")
 	h.AddAndSave([]string{"f3.txt"}, "v3")
 
-	output, err := h.RunList()
+	output, err := h.RunLogAll()
 	h.AssertNoError(err)
 	h.AssertContains(output, "Version history:")
 	h.AssertContains(output, "v3")
@@ -231,31 +230,31 @@ func TestList_ShowHistory(t *testing.T) {
 	h.AssertContains(output, "v1")
 }
 
-// TC-LIST-002: No versions yet
-func TestList_NoVersions(t *testing.T) {
+// TC-LOG-008: No versions yet with --all (formerly TestList_NoVersions)
+func TestLog_AllNoVersions(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
-	output, err := h.RunList()
+	output, err := h.RunLogAll()
 	h.AssertNoError(err)
 	h.AssertContains(output, "No versions yet")
 }
 
-// TC-LIST-003: Version without message
-func TestList_NoMessage(t *testing.T) {
+// TC-LOG-009: Version without message with --all (formerly TestList_NoMessage)
+func TestLog_AllNoMessage(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
 	h.AddAndSave([]string{"note.txt"}, "")
 
-	output, err := h.RunList()
+	output, err := h.RunLogAll()
 	h.AssertNoError(err)
 	h.AssertContains(output, "v1")
-	// When message is empty, the line should end with the timestamp (no trailing message).
-	// Format: "  v1  2026-06-22 22:10  <message>"
-	// Use regex to extract the message part after the timestamp.
-	re := regexp.MustCompile(`v\d+\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s*(.*)`)
+	// When message is empty, the line should end with the branch (no trailing message).
+	// Format: "  v1  [main]  <message>"
+	// Use regex to extract the message part after the branch.
+	re := regexp.MustCompile(`v\d+\s+\[.*?\]\s*(.*)`)
 	for _, line := range strings.Split(output, "\n") {
 		m := re.FindStringSubmatch(line)
 		if m != nil {

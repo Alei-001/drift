@@ -20,11 +20,11 @@ func TestErr_UninitializedSave(t *testing.T) {
 	h.AssertError(err)
 }
 
-// TC-ERR-003: Uninitialized list
-func TestErr_UninitializedList(t *testing.T) {
+// TC-ERR-003: Uninitialized log --all
+func TestErr_UninitializedLogAll(t *testing.T) {
 	h := NewTestHelper(t)
 
-	_, err := h.RunList()
+	_, err := h.RunLogAll()
 	h.AssertError(err)
 }
 

@@ -107,6 +107,7 @@ func resetAllFlags() {
 
 	// log command package-level vars
 	logOneline = false
+	logAll = false
 	logCount = 0
 
 	// branch command package-level vars
@@ -261,15 +262,6 @@ func (h *TestHelper) RunSaveWithName(message, name string) (string, error) {
 	saveCmd.Flags().Set("name", name)
 	return CaptureOutput(func() error {
 		return saveCmd.RunE(saveCmd, nil)
-	})
-}
-
-// RunList runs the list command.
-func (h *TestHelper) RunList(args ...string) (string, error) {
-	h.T.Helper()
-	h.SetupSharedState()
-	return CaptureOutput(func() error {
-		return listCmd.RunE(listCmd, args)
 	})
 }
 
@@ -489,6 +481,7 @@ func (h *TestHelper) RunLog(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	logOneline = false
+	logAll = false
 	logCount = 0
 	return CaptureOutput(func() error {
 		return logCmd.RunE(logCmd, args)
@@ -500,6 +493,19 @@ func (h *TestHelper) RunLogOneline(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	logOneline = true
+	logAll = false
+	logCount = 0
+	return CaptureOutput(func() error {
+		return logCmd.RunE(logCmd, args)
+	})
+}
+
+// RunLogAll runs the log command with --all (replaces former RunList).
+func (h *TestHelper) RunLogAll(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	logOneline = false
+	logAll = true
 	logCount = 0
 	return CaptureOutput(func() error {
 		return logCmd.RunE(logCmd, args)
@@ -511,6 +517,7 @@ func (h *TestHelper) RunLogLimit(limit int, args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	logOneline = false
+	logAll = false
 	logCount = limit
 	return CaptureOutput(func() error {
 		return logCmd.RunE(logCmd, args)
@@ -586,7 +593,6 @@ func init() {
 	statusCmd.SetOutput(&bytes.Buffer{})
 	unstageCmd.SetOutput(&bytes.Buffer{})
 	saveCmd.SetOutput(&bytes.Buffer{})
-	listCmd.SetOutput(&bytes.Buffer{})
 	exportCmd.SetOutput(&bytes.Buffer{})
 	restoreCmd.SetOutput(&bytes.Buffer{})
 	branchCmd.SetOutput(&bytes.Buffer{})
