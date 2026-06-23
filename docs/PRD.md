@@ -90,8 +90,7 @@
 | `drift status` | 状态 | 显示工作区、暂存区、提交状态 |
 | `drift unstage` | 取消暂存 | 清空暂存区内容 |
 | `drift save` | 保存 | 将暂存区保存为新版本 |
-| `drift list` | 列表 | 查看版本历史（含分支信息） |
-| `drift log` | 日志 | 查看详细提交历史 |
+| `drift log` | 日志 | 查看提交历史（`--all` 跨分支） |
 | `drift export` | 导出 | 导出版本为目录/zip/tar.gz |
 | `drift restore` | 恢复 | 将工作区恢复到指定版本 |
 | `drift branch` | 分支 | 创建、删除、重命名、列出分支 |
@@ -146,7 +145,7 @@ drift save
 drift save -m "完成前四章"
 
 # 查看历史
-drift list
+drift log --all
 
 # 对比版本
 drift diff v1 v2

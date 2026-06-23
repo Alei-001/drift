@@ -101,7 +101,7 @@ var initCmd = &cobra.Command{
 		fmt.Println("\nNext steps:")
 		fmt.Println("  drift add .       # stage your files")
 		fmt.Println("  drift save -m \"first version\"")
-		fmt.Println("  drift list        # view history")
+		fmt.Println("  drift log --all   # view history")
 		return nil
 	},
 }

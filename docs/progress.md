@@ -69,7 +69,7 @@
 | Commit 编解码 (DCMT) | `internal/core/commit_codec.go` |
 | Tree 构建器（递归） | `internal/core/tree_builder.go` |
 | Tree 遍历（递归展平 + Diff） | `internal/core/tree_walker.go` |
-| `drift save` / `list` | `internal/cli/save.go, list.go` |
+| `drift save` / `log` | `internal/cli/save.go, log.go` |
 
 ---
 

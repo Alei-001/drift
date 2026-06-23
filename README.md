@@ -31,7 +31,7 @@ drift add .
 drift save -m "初稿完成"
 
 # 查看历史
-drift list
+drift log --all
 
 # 回到旧版本
 drift restore v1

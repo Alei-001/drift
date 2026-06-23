@@ -561,37 +561,37 @@ Nothing to commit, working tree clean
 
 ---
 
-### TC-LIST-001：查看版本历史
+### TC-LOG-001：查看版本历史（--all）
 
 **前置条件：** 已保存 3 个版本
 
 **操作步骤：**
 ```bash
-drift list
+drift log --all
 ```
 
 **预期输出：**
 ```
 Version history:
 
-  v3  {date} {time}  v3
-  v2  {date} {time}  v2
-  v1  {date} {time}  v1
+  v3  [main]  v3
+  v2  [main]  v2
+  v1  [main]  v1
 ```
 
 **预期行为：**
 - 最新版本在前
-- 每行格式：`  {ID}  {date} {time}  {message}`
+- 每行格式：`  {ID}  [{branch}]  {message}`
 
 ---
 
-### TC-LIST-002：无版本时查看历史
+### TC-LOG-002：无版本时查看历史（--all）
 
 **前置条件：** 刚初始化，无任何版本
 
 **操作步骤：**
 ```bash
-drift list
+drift log --all
 ```
 
 **预期输出：**
@@ -601,20 +601,20 @@ No versions yet
 
 ---
 
-### TC-LIST-003：无备注的版本显示
+### TC-LOG-003：无备注的版本显示（--all）
 
 **前置条件：** 已保存一个无备注的版本
 
 **操作步骤：**
 ```bash
-drift list
+drift log --all
 ```
 
 **预期输出：**
 ```
 Version history:
 
-  v1  {date} {time}
+  v1  [main]
 ```
 
 **预期行为：**
@@ -1003,14 +1003,14 @@ echo "main work" > main.txt
 drift add main.txt
 drift save -m "main work"
 # 查看各分支
-drift list
+drift log
 drift switch experiment
-drift list
+drift log
 ```
 
 **预期行为：**
-- main 上 `drift list` 显示 v1, v3
-- experiment 上 `drift list` 显示 v1, v2
+- main 上 `drift log` 显示 v1, v3
+- experiment 上 `drift log` 显示 v1, v2
 - 两个分支的版本线独立
 
 ---
@@ -1535,13 +1535,13 @@ Error: not a drift project (run 'drift init')
 
 ---
 
-### TC-ERR-003：未初始化执行 list
+### TC-ERR-003：未初始化执行 log --all
 
 **前置条件：** 当前目录无 `.drift/`
 
 **操作步骤：**
 ```bash
-drift list
+drift log --all
 ```
 
 **预期输出：**
@@ -1586,7 +1586,7 @@ New-Item empty.txt -ItemType File
 
 drift add empty.txt
 drift save -m "empty file"
-drift list
+drift log --all
 ```
 
 **预期行为：**
@@ -1660,7 +1660,7 @@ drift export v1 -o ./output
 for i in $(seq 1 100); do echo "file $i" > "file_$i.txt"; done
 drift add .
 drift save -m "100 files"
-drift list
+drift log --all
 drift export v1 -o ./output
 ```
 
@@ -1750,9 +1750,9 @@ drift save -m "结局B"
 # ending-b: v1 → v2 → v4（v4是结局B）
 
 # 6. 查看历史
-drift list             # ending-b 上：显示 v1, v2, v4
+drift log             # ending-b 上：显示 v1, v2, v4
 drift switch ending-a
-drift list             # ending-a 上：显示 v1, v2, v3
+drift log             # ending-a 上：显示 v1, v2, v3
 drift branch list      # 显示 * ending-a, ending-b, main
 
 # 7. 导出给编辑
@@ -1816,7 +1816,7 @@ drift diff v1 v2
 | 13 | `drift save -m` 带备注 | ☐ |
 | 14 | 空暂存区 save 报错 | ☐ |
 | 15 | 版本号自动递增 | ☐ |
-| 16 | `drift list` 显示历史 | ☐ |
+| 16 | `drift log --all` 显示历史 | ☐ |
 | 17 | `drift export` 到目录 | ☐ |
 | 18 | `drift export` 到 zip | ☐ |
 | 19 | `drift export` 到 tar.gz | ☐ |
