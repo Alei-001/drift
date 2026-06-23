@@ -222,12 +222,19 @@ func putBlobForAdd(store *storage.Store, path, autoCRLF string) (string, error) 
 	}
 	defer f.Close()
 
-	head := make([]byte, 8192)
+	// B9: use pooled byte slice for the 8KB head read.
+	headBuf := core.GetByteSlice()
+	if cap(*headBuf) < 8192 {
+		*headBuf = make([]byte, 8192)
+	}
+	head := (*headBuf)[:8192]
 	n, err := io.ReadFull(f, head)
 	if err != nil && err != io.ErrUnexpectedEOF {
+		core.PutByteSlice(headBuf)
 		return "", err
 	}
 	head = head[:n]
+	defer core.PutByteSlice(headBuf)
 
 	r := io.MultiReader(bytes.NewReader(head), f)
 
@@ -235,13 +242,17 @@ func putBlobForAdd(store *storage.Store, path, autoCRLF string) (string, error) 
 		return store.PutBlobFromReader(r)
 	}
 
-	var buf bytes.Buffer
-	w := core.NewLFWriter(&buf)
+	// B9: use pooled buffer for the LF-normalized output.
+	buf := core.GetBuffer()
+	defer core.PutBuffer(buf)
+	buf.Reset()
+
+	w := core.NewLFWriter(buf)
 	if _, err := io.Copy(w, r); err != nil {
 		return "", err
 	}
 	if err := w.Close(); err != nil {
 		return "", err
 	}
-	return store.PutBlobFromReader(&buf)
+	return store.PutBlobFromReader(buf)
 }

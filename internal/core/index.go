@@ -75,8 +75,14 @@ func (idx *Index) Remove(path string) {
 	if !ok {
 		return
 	}
+	// B5: update the map incrementally instead of nil-ing it, avoiding an
+	// O(N) rebuild on the next lookup. Shift entries after i down by one
+	// and fix their map indices.
 	idx.Entries = append(idx.Entries[:i], idx.Entries[i+1:]...)
-	idx.byPath = nil
+	delete(idx.byPath, path)
+	for j := i; j < len(idx.Entries); j++ {
+		idx.byPath[idx.Entries[j].Path] = j
+	}
 }
 
 func (idx *Index) Clear() {

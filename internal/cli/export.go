@@ -147,18 +147,21 @@ func writeBlobToFile(store *storage.Store, blob core.BlobEntry, outputDir string
 		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
 	}
 
-	data, err := store.GetBlob(blob.Hash)
-	if err != nil {
-		return err
-	}
-
 	fullPath := filepath.Join(outputDir, filepath.FromSlash(blob.Path))
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return err
 	}
 
 	perm := os.FileMode(core.ToOSFileMode(blob.Mode))
-	if err := os.WriteFile(fullPath, data, perm); err != nil {
+	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if err := store.GetBlobToWriter(blob.Hash, f); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Chmod(fullPath, perm)
@@ -171,18 +174,13 @@ func addBlobToZip(store *storage.Store, blob core.BlobEntry, w *zip.Writer) erro
 		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
 	}
 
-	data, err := store.GetBlob(blob.Hash)
-	if err != nil {
-		return err
-	}
-
 	f, err := w.Create(blob.Path)
 	if err != nil {
 		return err
 	}
 
-	_, err = f.Write(data)
-	return err
+	// Stream blob content directly to the zip entry.
+	return store.GetBlobToWriter(blob.Hash, f)
 }
 
 func addBlobToTar(store *storage.Store, blob core.BlobEntry, tw *tar.Writer) error {
@@ -191,7 +189,8 @@ func addBlobToTar(store *storage.Store, blob core.BlobEntry, tw *tar.Writer) err
 		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
 	}
 
-	data, err := store.GetBlob(blob.Hash)
+	// Tar requires the size upfront in the header.
+	size, err := store.GetBlobSize(blob.Hash)
 	if err != nil {
 		return err
 	}
@@ -199,13 +198,13 @@ func addBlobToTar(store *storage.Store, blob core.BlobEntry, tw *tar.Writer) err
 	hdr := &tar.Header{
 		Name: blob.Path,
 		Mode: int64(blob.Mode),
-		Size: int64(len(data)),
+		Size: size,
 	}
 
 	if err := tw.WriteHeader(hdr); err != nil {
 		return err
 	}
 
-	_, err = tw.Write(data)
-	return err
+	// Stream blob content directly to the tar writer.
+	return store.GetBlobToWriter(blob.Hash, tw)
 }

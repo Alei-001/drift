@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/core"
@@ -28,14 +29,17 @@ const (
 	indexFile  = "index"
 	configFile = "config.json"
 	lockFile   = "lock"
+	refExt     = ".ref"
+	refJSONExt = ".json" // legacy format for backward compatibility
 )
 
 type Store struct {
-	root string
+	root      string
+	treeCache *treeLRUCache // B4: bounded LRU cache, avoids redundant disk I/O for hot trees
 }
 
 func NewStore(root string) *Store {
-	return &Store{root: root}
+	return &Store{root: root, treeCache: newTreeLRUCache()}
 }
 
 func (s *Store) DriftDir() string {
@@ -91,11 +95,20 @@ func (s *Store) blobPath(hash string) string {
 }
 
 func (s *Store) treePath(hash string) string {
-	return filepath.Join(s.DriftDir(), treesDir, hash+".dre")
+	if len(hash) < 2 {
+		return filepath.Join(s.DriftDir(), treesDir, hash+".dre")
+	}
+	// B10: two-level directory like blobs, avoiding flat directory with
+	// thousands of entries.
+	return filepath.Join(s.DriftDir(), treesDir, hash[:2], hash[2:]+".dre")
 }
 
 func (s *Store) commitPath(id string) string {
-	return filepath.Join(s.DriftDir(), commitsDir, id+".dcm")
+	if len(id) < 2 {
+		return filepath.Join(s.DriftDir(), commitsDir, id+".dcm")
+	}
+	// B10: two-level directory for commits too.
+	return filepath.Join(s.DriftDir(), commitsDir, id[:2], id[2:]+".dcm")
 }
 
 func (s *Store) PutBlob(data []byte) (string, error) {
@@ -145,6 +158,21 @@ func (s *Store) GetBlob(hash string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// GetBlobSize returns the on-disk size of the stored blob without reading
+// its content into memory. B2: avoids loading large blobs (PSD, video)
+// just to compare file sizes in ComputeStatus.
+func (s *Store) GetBlobSize(hash string) (int64, error) {
+	path := s.blobPath(hash)
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, ErrObjectNotFound
+		}
+		return 0, err
+	}
+	return fi.Size(), nil
 }
 
 // GetBlobToWriter streams a blob's content to the given writer without loading
@@ -250,6 +278,10 @@ func (s *Store) PutTree(t *core.Tree) error {
 		return nil
 	}
 
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+
 	data, err := t.Marshal()
 	if err != nil {
 		return err
@@ -269,13 +301,24 @@ func (s *Store) PutTree(t *core.Tree) error {
 }
 
 func (s *Store) GetTree(hash string) (*core.Tree, error) {
+	// B4: check cache before disk read.
+	if cached, ok := s.treeCache.Load(hash); ok {
+		return cached, nil
+	}
+
+	// Try new two-level path; fall back to old flat path (B10).
 	path := s.treePath(hash)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrObjectNotFound
+		// Try old flat path for backward compatibility.
+		oldPath := filepath.Join(s.DriftDir(), treesDir, hash+".dre")
+		data, err = os.ReadFile(oldPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrObjectNotFound
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 
 	t := &core.Tree{}
@@ -288,6 +331,7 @@ func (s *Store) GetTree(hash string) (*core.Tree, error) {
 		return nil, ErrObjectCorrupted
 	}
 
+	s.treeCache.Store(hash, t)
 	return t, nil
 }
 
@@ -300,6 +344,10 @@ func (s *Store) PutCommit(c *core.Commit) error {
 
 	// Use hash as filename to avoid conflicts when different branches have same ID
 	path := s.commitPath(c.Hash)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 
 	data, err := c.Marshal()
 	if err != nil {
@@ -320,13 +368,19 @@ func (s *Store) PutCommit(c *core.Commit) error {
 }
 
 func (s *Store) GetCommit(id string) (*core.Commit, error) {
+	// Try new two-level path; fall back to old flat path (B10).
 	path := s.commitPath(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrObjectNotFound
+		// Try old flat path for backward compatibility.
+		oldPath := filepath.Join(s.DriftDir(), commitsDir, id+".dcm")
+		data, err = os.ReadFile(oldPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrObjectNotFound
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 
 	c := &core.Commit{}
@@ -348,19 +402,55 @@ func (s *Store) GetCommit(id string) (*core.Commit, error) {
 
 func (s *Store) ListCommits() ([]*core.Commit, error) {
 	dir := filepath.Join(s.DriftDir(), commitsDir)
+
+	var files []string
+
+	// B4: single ReadDir pass — collect both flat .dcm files and two-level
+	// subdirectories from one directory listing.
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				// Two-level directory (B10): 2-char prefix subdir.
+				if len(entry.Name()) != 2 {
+					continue
+				}
+				subDir := filepath.Join(dir, entry.Name())
+				subEntries, err := os.ReadDir(subDir)
+				if err != nil {
+					continue
+				}
+				for _, se := range subEntries {
+					if se.IsDir() || filepath.Ext(se.Name()) != ".dcm" {
+						continue
+					}
+					hash := entry.Name() + se.Name()[:len(se.Name())-4]
+					files = append(files, hash)
+				}
+				continue
+			}
+			// Flat directory: old-style .dcm file.
+			if filepath.Ext(entry.Name()) != ".dcm" {
+				continue
+			}
+			hash := entry.Name()[:len(entry.Name())-4]
+			files = append(files, hash)
+		}
+	}
+
+	// Remove duplicates (same hash in both old and new locations).
+	seen := make(map[string]bool, len(files))
+	unique := make([]string, 0, len(files))
+	for _, h := range files {
+		if seen[h] {
+			continue
+		}
+		seen[h] = true
+		unique = append(unique, h)
 	}
 
 	var commits []*core.Commit
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".dcm" {
-			continue
-		}
-
-		// File name is the commit hash
-		hash := entry.Name()[:len(entry.Name())-4]
+	for _, hash := range unique {
 		c, err := s.GetCommit(hash)
 		if err != nil {
 			return nil, fmt.Errorf("corrupted commit %s: %w", hash, err)
@@ -395,14 +485,10 @@ func (s *Store) SaveRef(name, commitHash string) error {
 	}
 	defer unlock()
 
-	path := filepath.Join(s.DriftDir(), refsDir, name+".json")
-	data, err := json.MarshalIndent(map[string]string{
-		"name":        name,
-		"commit_hash": commitHash,
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
+	// B5: use plain-text .ref format (just the 64-char hex hash) instead of JSON.
+	// Mirrors Git's lightweight ref format: a single line of hex hash.
+	path := filepath.Join(s.DriftDir(), refsDir, name+refExt)
+	data := []byte(commitHash + "\n")
 
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
@@ -414,12 +500,29 @@ func (s *Store) SaveRef(name, commitHash string) error {
 		return err
 	}
 
+	// Remove legacy JSON ref if it exists.
+	jsonPath := filepath.Join(s.DriftDir(), refsDir, name+refJSONExt)
+	os.Remove(jsonPath)
+
 	return nil
 }
 
 func (s *Store) GetRef(name string) (string, error) {
-	path := filepath.Join(s.DriftDir(), refsDir, name+".json")
+	// B5: try new .ref format first, fall back to legacy .json.
+	path := filepath.Join(s.DriftDir(), refsDir, name+refExt)
 	data, err := os.ReadFile(path)
+	if err == nil {
+		// Parse: single line of hex hash or "ref: <name>"
+		ref := strings.TrimSpace(string(data))
+		if strings.HasPrefix(ref, "ref: ") {
+			return ref[5:], nil
+		}
+		return ref, nil
+	}
+
+	// Fall back to legacy JSON format.
+	jsonPath := filepath.Join(s.DriftDir(), refsDir, name+refJSONExt)
+	data, err = os.ReadFile(jsonPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", ErrObjectNotFound
@@ -447,10 +550,18 @@ func (s *Store) ListRefs() (map[string]string, error) {
 
 	refs := make(map[string]string)
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if entry.IsDir() {
 			continue
 		}
-		name := entry.Name()[:len(entry.Name())-5]
+		name := entry.Name()
+		// B5: handle both .ref (new) and .json (legacy) formats.
+		if filepath.Ext(name) == refExt {
+			name = name[:len(name)-len(refExt)]
+		} else if filepath.Ext(name) == refJSONExt {
+			name = name[:len(name)-len(refJSONExt)]
+		} else {
+			continue
+		}
 		commitHash, err := s.GetRef(name)
 		if err != nil {
 			continue
@@ -474,10 +585,19 @@ func (s *Store) DeleteRef(name string) error {
 	}
 	defer unlock()
 
-	path := filepath.Join(s.DriftDir(), refsDir, name+".json")
+	// B5: try .ref first, fall back to .json.
+	path := filepath.Join(s.DriftDir(), refsDir, name+refExt)
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("branch %q not found", name)
+			// Try legacy .json path.
+			jsonPath := filepath.Join(s.DriftDir(), refsDir, name+refJSONExt)
+			if err := os.Remove(jsonPath); err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("branch %q not found", name)
+				}
+				return err
+			}
+			return nil
 		}
 		return err
 	}
@@ -500,35 +620,39 @@ func (s *Store) RenameRef(oldName, newName string) error {
 	}
 	defer unlock()
 
-	oldPath := filepath.Join(s.DriftDir(), refsDir, oldName+".json")
-	newPath := filepath.Join(s.DriftDir(), refsDir, newName+".json")
-
-	// Read old ref.
+	// Read old ref content (try .ref then .json).
+	oldPath := filepath.Join(s.DriftDir(), refsDir, oldName+refExt)
 	data, err := os.ReadFile(oldPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("branch %q not found", oldName)
+		if !os.IsNotExist(err) {
+			return err
 		}
-		return err
+		// Try legacy .json path.
+		oldPath = filepath.Join(s.DriftDir(), refsDir, oldName+refJSONExt)
+		data, err = os.ReadFile(oldPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("branch %q not found", oldName)
+			}
+			return err
+		}
+		// Convert legacy JSON content: extract commit_hash and write as plain text.
+		var ref map[string]string
+		if err := json.Unmarshal(data, &ref); err != nil {
+			return err
+		}
+		data = []byte(ref["commit_hash"] + "\n")
 	}
 
 	// Refuse to overwrite an existing branch.
+	newPath := filepath.Join(s.DriftDir(), refsDir, newName+refExt)
 	if _, err := os.Stat(newPath); err == nil {
 		return fmt.Errorf("branch %q already exists", newName)
 	}
 
-	// Write new ref with updated name field, then remove old.
-	var ref map[string]string
-	if err := json.Unmarshal(data, &ref); err != nil {
-		return err
-	}
-	ref["name"] = newName
-	newData, err := json.MarshalIndent(ref, "", "  ")
-	if err != nil {
-		return err
-	}
+	// Write new ref in plain-text format.
 	tmp := newPath + ".tmp"
-	if err := os.WriteFile(tmp, newData, 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, newPath); err != nil {
@@ -539,17 +663,15 @@ func (s *Store) RenameRef(oldName, newName string) error {
 		return err
 	}
 
+	// Remove legacy .json file if it exists (already converted above if read).
+	jsonPath := filepath.Join(s.DriftDir(), refsDir, oldName+refJSONExt)
+	os.Remove(jsonPath)
+
 	// Update HEAD if it pointed at oldName.
 	// Write directly (not via SaveRef) to avoid re-entrant lock — we already hold it.
 	if head, err := s.GetRef("HEAD"); err == nil && head == oldName {
-		headPath := filepath.Join(s.DriftDir(), refsDir, "HEAD.json")
-		headData, err := json.MarshalIndent(map[string]string{
-			"name":        "HEAD",
-			"commit_hash": newName,
-		}, "", "  ")
-		if err != nil {
-			return err
-		}
+		headPath := filepath.Join(s.DriftDir(), refsDir, "HEAD"+refExt)
+		headData := []byte(newName + "\n")
 		headTmp := headPath + ".tmp"
 		if err := os.WriteFile(headTmp, headData, 0644); err != nil {
 			return err
@@ -558,6 +680,8 @@ func (s *Store) RenameRef(oldName, newName string) error {
 			_ = os.Remove(headTmp)
 			return err
 		}
+		// Remove legacy HEAD.json if it exists.
+		os.Remove(filepath.Join(s.DriftDir(), refsDir, "HEAD"+refJSONExt))
 	}
 
 	return nil
@@ -618,6 +742,9 @@ func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, emptyIdx *c
 
 	// 1. Write commit object.
 	commitPath := s.commitPath(c.Hash)
+	if err := os.MkdirAll(filepath.Dir(commitPath), 0755); err != nil {
+		return err
+	}
 	commitData, err := c.Marshal()
 	if err != nil {
 		return err
@@ -632,14 +759,8 @@ func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, emptyIdx *c
 	}
 
 	// 2. Update branch ref.
-	refPath := filepath.Join(s.DriftDir(), refsDir, branch+".json")
-	refData, err := json.MarshalIndent(map[string]string{
-		"name":        branch,
-		"commit_hash": c.Hash,
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
+	refPath := filepath.Join(s.DriftDir(), refsDir, branch+refExt)
+	refData := []byte(c.Hash + "\n")
 	refTmp := refPath + ".tmp"
 	if err := os.WriteFile(refTmp, refData, 0644); err != nil {
 		return err

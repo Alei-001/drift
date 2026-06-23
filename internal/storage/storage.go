@@ -11,6 +11,7 @@ type Storage interface {
 	PutBlobFromFile(path string) (string, error)
 	PutBlobFromReader(r io.Reader) (string, error)
 	GetBlob(hash string) ([]byte, error)
+	GetBlobSize(hash string) (int64, error)
 
 	PutTree(t *core.Tree) error
 	GetTree(hash string) (*core.Tree, error)

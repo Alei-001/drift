@@ -37,6 +37,14 @@ func (m *memoryStore) GetBlob(hash string) ([]byte, error) {
 	return b, nil
 }
 
+func (m *memoryStore) GetBlobSize(hash string) (int64, error) {
+	b, ok := m.blobs[hash]
+	if !ok {
+		return 0, errTestNotFound
+	}
+	return int64(len(b)), nil
+}
+
 // buildNestedStore builds a store containing:
 //
 //	root
@@ -203,5 +211,209 @@ func TestTreeReader_DiffTrees_Identical(t *testing.T) {
 	}
 	if len(deleted) != 0 || len(added) != 0 || len(modified) != 0 {
 		t.Fatalf("expected no diffs, got deleted=%d added=%d modified=%d", len(deleted), len(added), len(modified))
+	}
+}
+
+// B1: Merkletrie lazy diff tests
+
+func TestLazyDiffTrees_Identical(t *testing.T) {
+	store := newMemoryStore()
+	mkBlob := func(name, content string) TreeEntry {
+		hash := CalculateHash([]byte(content))
+		store.blobs[hash] = []byte(content)
+		return TreeEntry{Name: name, Type: BlobObject, Hash: hash, Mode: ModeRegular}
+	}
+	tree, err := NewTree([]TreeEntry{mkBlob("a.txt", "a"), mkBlob("b.txt", "b")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := NewTreeReader(store)
+	changes, err := reader.LazyDiffTrees(tree, tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected no changes, got %d", len(changes))
+	}
+}
+
+func TestLazyDiffTrees_Added(t *testing.T) {
+	store := newMemoryStore()
+	mkBlob := func(name, content string) TreeEntry {
+		hash := CalculateHash([]byte(content))
+		store.blobs[hash] = []byte(content)
+		return TreeEntry{Name: name, Type: BlobObject, Hash: hash, Mode: ModeRegular}
+	}
+	oldTree, err := NewTree([]TreeEntry{mkBlob("a.txt", "a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newTree, err := NewTree([]TreeEntry{mkBlob("a.txt", "a"), mkBlob("b.txt", "b")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := NewTreeReader(store)
+	changes, err := reader.LazyDiffTrees(oldTree, newTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].Old != nil || changes[0].New == nil || changes[0].New.Path != "b.txt" {
+		t.Fatalf("expected added b.txt, got %+v", changes[0])
+	}
+}
+
+func TestLazyDiffTrees_Deleted(t *testing.T) {
+	store := newMemoryStore()
+	mkBlob := func(name, content string) TreeEntry {
+		hash := CalculateHash([]byte(content))
+		store.blobs[hash] = []byte(content)
+		return TreeEntry{Name: name, Type: BlobObject, Hash: hash, Mode: ModeRegular}
+	}
+	oldTree, err := NewTree([]TreeEntry{mkBlob("a.txt", "a"), mkBlob("b.txt", "b")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newTree, err := NewTree([]TreeEntry{mkBlob("a.txt", "a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := NewTreeReader(store)
+	changes, err := reader.LazyDiffTrees(oldTree, newTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].New != nil || changes[0].Old == nil || changes[0].Old.Path != "b.txt" {
+		t.Fatalf("expected deleted b.txt, got %+v", changes[0])
+	}
+}
+
+func TestLazyDiffTrees_Modified(t *testing.T) {
+	store := newMemoryStore()
+	mkBlob := func(name, content string) TreeEntry {
+		hash := CalculateHash([]byte(content))
+		store.blobs[hash] = []byte(content)
+		return TreeEntry{Name: name, Type: BlobObject, Hash: hash, Mode: ModeRegular}
+	}
+	oldTree, err := NewTree([]TreeEntry{mkBlob("a.txt", "old")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newTree, err := NewTree([]TreeEntry{mkBlob("a.txt", "new")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := NewTreeReader(store)
+	changes, err := reader.LazyDiffTrees(oldTree, newTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
+	}
+	if changes[0].Old == nil || changes[0].New == nil || changes[0].Old.Hash == changes[0].New.Hash {
+		t.Fatalf("expected modified a.txt, got %+v", changes[0])
+	}
+}
+
+func TestLazyDiffTrees_NestedDir_SameHash_Skips(t *testing.T) {
+	store := newMemoryStore()
+
+	// Build a subtree (dir/) with two files.
+	subEntries := []TreeEntry{
+		{Name: "x.txt", Type: BlobObject, Hash: CalculateHash([]byte("x")), Mode: ModeRegular},
+		{Name: "y.txt", Type: BlobObject, Hash: CalculateHash([]byte("y")), Mode: ModeRegular},
+	}
+	store.blobs[CalculateHash([]byte("x"))] = []byte("x")
+	store.blobs[CalculateHash([]byte("y"))] = []byte("y")
+
+	subTree, err := NewTree(subEntries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.trees[subTree.Hash] = subTree
+
+	// Root trees contain the same dir entry (same hash) and a modified root file.
+	oldHash := CalculateHash([]byte("old"))
+	newHash := CalculateHash([]byte("new"))
+	store.blobs[oldHash] = []byte("old")
+	store.blobs[newHash] = []byte("new")
+
+	oldRoot, err := NewTree([]TreeEntry{
+		{Name: "dir", Type: TreeObject, Hash: subTree.Hash, Mode: ModeDir},
+		{Name: "z.txt", Type: BlobObject, Hash: oldHash, Mode: ModeRegular},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRoot, err := NewTree([]TreeEntry{
+		{Name: "dir", Type: TreeObject, Hash: subTree.Hash, Mode: ModeDir},
+		{Name: "z.txt", Type: BlobObject, Hash: newHash, Mode: ModeRegular},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader := NewTreeReader(store)
+	changes, err := reader.LazyDiffTrees(oldRoot, newRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only z.txt should show as modified — dir/ subtree is skipped.
+	if len(changes) != 1 || changes[0].Path != "z.txt" {
+		t.Fatalf("expected 1 change (z.txt), got %d: %+v", len(changes), changes)
+	}
+}
+
+func TestLazyDiffTrees_NestedDir_Modified(t *testing.T) {
+	store := newMemoryStore()
+
+	// Build old subtree dir/ with x.txt.
+	oldSubEntries := []TreeEntry{
+		{Name: "x.txt", Type: BlobObject, Hash: CalculateHash([]byte("old")), Mode: ModeRegular},
+	}
+	store.blobs[CalculateHash([]byte("old"))] = []byte("old")
+	oldSub, err := NewTree(oldSubEntries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.trees[oldSub.Hash] = oldSub
+
+	// Build new subtree dir/ with modified x.txt.
+	newSubEntries := []TreeEntry{
+		{Name: "x.txt", Type: BlobObject, Hash: CalculateHash([]byte("new")), Mode: ModeRegular},
+	}
+	store.blobs[CalculateHash([]byte("new"))] = []byte("new")
+	newSub, err := NewTree(newSubEntries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.trees[newSub.Hash] = newSub
+
+	oldRoot, err := NewTree([]TreeEntry{
+		{Name: "dir", Type: TreeObject, Hash: oldSub.Hash, Mode: ModeDir},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRoot, err := NewTree([]TreeEntry{
+		{Name: "dir", Type: TreeObject, Hash: newSub.Hash, Mode: ModeDir},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader := NewTreeReader(store)
+	changes, err := reader.LazyDiffTrees(oldRoot, newRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].Path != "dir/x.txt" {
+		t.Fatalf("expected 1 change (dir/x.txt), got %d: %+v", len(changes), changes)
 	}
 }

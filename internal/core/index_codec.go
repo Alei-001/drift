@@ -84,6 +84,10 @@ func (idx *Index) Unmarshal(data []byte) error {
 		return ErrIndexCorrupt
 	}
 
+	// B6: eagerly build the byPath map so callers don't pay the O(N) cost
+	// on the first Has()/Entry() call.
+	idx.buildIndex()
+
 	return nil
 }
 

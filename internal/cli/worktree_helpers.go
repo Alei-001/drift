@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +14,10 @@ import (
 // writeBlobToWorktree writes a blob's content to the working tree at the given
 // root directory. It handles symlinks, executable permissions, and path
 // validation. Returns the IndexEntry reflecting the on-disk state.
+//
+// Regular files are streamed via GetBlobToWriter to avoid loading large blobs
+// (PSD, video) into memory. Symlinks still use GetBlob since their target
+// strings are small.
 func writeBlobToWorktree(store *storage.Store, root string, blob core.BlobEntry) (core.IndexEntry, error) {
 	if err := core.ValidateTreePath(blob.Path); err != nil {
 		return core.IndexEntry{}, fmt.Errorf("unsafe path %q: %w", blob.Path, err)
@@ -21,23 +25,12 @@ func writeBlobToWorktree(store *storage.Store, root string, blob core.BlobEntry)
 
 	fullPath := filepath.Join(root, filepath.FromSlash(blob.Path))
 
-	data, err := store.GetBlob(blob.Hash)
-	if err != nil {
-		return core.IndexEntry{}, err
-	}
-
-	if runtime.GOOS == "windows" && blob.Mode != core.ModeSymlink &&
-		sharedConfig != nil && sharedConfig.Core.AutoCRLF == "true" {
-		var buf bytes.Buffer
-		w := core.NewCRLFWriter(&buf)
-		if _, err := w.Write(data); err != nil {
+	// Symlink: load full blob (small — just the target string).
+	if blob.Mode == core.ModeSymlink {
+		data, err := store.GetBlob(blob.Hash)
+		if err != nil {
 			return core.IndexEntry{}, err
 		}
-		data = buf.Bytes()
-	}
-
-	// Symlink: remove existing entry and create a symlink to the stored target.
-	if blob.Mode == core.ModeSymlink {
 		if err := removeExistingPath(fullPath); err != nil {
 			return core.IndexEntry{}, err
 		}
@@ -64,30 +57,60 @@ func writeBlobToWorktree(store *storage.Store, root string, blob core.BlobEntry)
 		}, nil
 	}
 
-	// Regular/executable file.
-	existing, err := os.ReadFile(fullPath)
-	if err == nil && bytes.Equal(existing, data) {
-		// Content matches; ensure permissions are correct.
-		_ = os.Chmod(fullPath, os.FileMode(core.ToOSFileMode(blob.Mode)))
-		info, _ := os.Stat(fullPath)
-		return core.IndexEntry{
-			Path:       blob.Path,
-			Hash:       blob.Hash,
-			ModifiedAt: info.ModTime(),
-			Size:       info.Size(),
-			Mode:       blob.Mode,
-		}, nil
+	// Regular/executable file: stream to disk without loading full blob.
+	perm := os.FileMode(core.ToOSFileMode(blob.Mode))
+
+	// Fast path: if the existing file already matches, skip the write.
+	// Compare via size + hash instead of loading both into memory.
+	if info, err := os.Stat(fullPath); err == nil {
+		blobSize, sizeErr := store.GetBlobSize(blob.Hash)
+		if sizeErr == nil && info.Size() == blobSize {
+			// Size matches. For non-CRLF mode, verify hash to avoid
+			// rewriting identical content. CRLF mode changes content,
+			// so hash comparison doesn't apply — just rewrite.
+			if !(runtime.GOOS == "windows" &&
+				sharedConfig != nil && sharedConfig.Core.AutoCRLF == "true") {
+				fileHash, hashErr := core.CalculateHashFromFile(fullPath)
+				if hashErr == nil && fileHash == blob.Hash {
+					_ = os.Chmod(fullPath, perm)
+					info, _ := os.Stat(fullPath)
+					return core.IndexEntry{
+						Path:       blob.Path,
+						Hash:       blob.Hash,
+						ModifiedAt: info.ModTime(),
+						Size:       info.Size(),
+						Mode:       blob.Mode,
+					}, nil
+				}
+			}
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return core.IndexEntry{}, err
 	}
 
-	perm := os.FileMode(core.ToOSFileMode(blob.Mode))
-	if err := os.WriteFile(fullPath, data, perm); err != nil {
+	// Stream blob content to the file. GetBlobToWriter verifies the hash
+	// during streaming, catching corruption without a separate pass.
+	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
 		return core.IndexEntry{}, err
 	}
-	// WriteFile only applies perm on creation; force-set for existing files.
+
+	var writer io.Writer = f
+	if runtime.GOOS == "windows" &&
+		sharedConfig != nil && sharedConfig.Core.AutoCRLF == "true" {
+		writer = core.NewCRLFWriter(f)
+	}
+
+	if err := store.GetBlobToWriter(blob.Hash, writer); err != nil {
+		f.Close()
+		return core.IndexEntry{}, err
+	}
+	if err := f.Close(); err != nil {
+		return core.IndexEntry{}, err
+	}
+	// Force-set permissions for existing files.
 	if err := os.Chmod(fullPath, perm); err != nil {
 		return core.IndexEntry{}, err
 	}
@@ -169,7 +192,12 @@ func hasWorktreeModifications() (bool, error) {
 			continue
 		}
 
-		// Quick mtime+size check before hashing.
+		// Size fast-path: skip hash computation if sizes differ.
+		blobSize, sizeErr := sharedStore.GetBlobSize(b.Hash)
+		if sizeErr == nil && info.Size() != blobSize {
+			return true, nil
+		}
+
 		fileHash, err := core.CalculateHashFromFile(fullPath)
 		if err != nil {
 			continue

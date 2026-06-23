@@ -252,7 +252,7 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 		fullPath := filepath.Join(sharedDir, filepath.FromSlash(blob.Path))
 
 		// P2-#11: stat first to detect deleted files.
-		_, err := os.Lstat(fullPath)
+		info, err := os.Lstat(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				// File deleted in working tree
@@ -266,6 +266,28 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 					NewSize:  0,
 				})
 			}
+			continue
+		}
+
+		// Size fast-path: if sizes differ, the file is modified — skip
+		// the streaming hash comparison entirely.
+		blobSize, sizeErr := sharedStore.GetBlobSize(blob.Hash)
+		if sizeErr == nil && info.Size() != blobSize {
+			// Modified: load both sides for patch rendering.
+			workData, err := os.ReadFile(fullPath)
+			if err != nil {
+				continue
+			}
+			blobData, _ := sharedStore.GetBlob(blob.Hash)
+			diffs = append(diffs, FileDiff{
+				Path:     blob.Path,
+				Status:   "modified",
+				IsBinary: isBinary(blobData) || isBinary(workData),
+				OldData:  blobData,
+				NewData:  workData,
+				OldSize:  len(blobData),
+				NewSize:  len(workData),
+			})
 			continue
 		}
 
@@ -355,25 +377,26 @@ func collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) []FileDiff {
 
 	// Files in v1
 	for path, b1 := range map1 {
-		data1, _ := sharedStore.GetBlob(b1.Hash)
-
 		if b2, exists := map2[path]; exists {
-			data2, _ := sharedStore.GetBlob(b2.Hash)
-
-			if b1.Hash != b2.Hash {
-				// Modified
-				diffs = append(diffs, FileDiff{
-					Path:     path,
-					Status:   "modified",
-					IsBinary: isBinary(data1) || isBinary(data2),
-					OldData:  data1,
-					NewData:  data2,
-					OldSize:  len(data1),
-					NewSize:  len(data2),
-				})
+			// Skip unchanged files without loading blob data.
+			if b1.Hash == b2.Hash {
+				continue
 			}
+			// Modified: load both sides for diff rendering.
+			data1, _ := sharedStore.GetBlob(b1.Hash)
+			data2, _ := sharedStore.GetBlob(b2.Hash)
+			diffs = append(diffs, FileDiff{
+				Path:     path,
+				Status:   "modified",
+				IsBinary: isBinary(data1) || isBinary(data2),
+				OldData:  data1,
+				NewData:  data2,
+				OldSize:  len(data1),
+				NewSize:  len(data2),
+			})
 		} else {
-			// Deleted
+			// Deleted: load only the old side.
+			data1, _ := sharedStore.GetBlob(b1.Hash)
 			diffs = append(diffs, FileDiff{
 				Path:     path,
 				Status:   "deleted",
@@ -510,25 +533,22 @@ func printUnifiedDiff(output io.Writer, oldData, newData []byte) {
 		newLines = newLines[:len(newLines)-1]
 	}
 
-	lcs := computeLCS(oldLines, newLines)
+	// B8: use Myers edit script directly instead of converting to LCS.
+	edits := core.Myers(oldLines, newLines)
 
-	oldIdx, newIdx, lcsIdx := 0, 0, 0
 	var inHunk bool
 	hunkStartOld := 0
 	hunkStartNew := 0
 	hunkLines := []string{}
 	contextCount := 0
+	oldLine, newLine := 0, 0
 
-	for oldIdx < len(oldLines) || newIdx < len(newLines) {
-		isCommon := lcsIdx < len(lcs) && oldIdx < len(oldLines) && newIdx < len(newLines) &&
-			oldLines[oldIdx] == lcs[lcsIdx] && newLines[newIdx] == lcs[lcsIdx]
-
-		if isCommon {
-			// Common line
+	for _, e := range edits {
+		switch e.Op {
+		case core.DiffKeep:
 			if inHunk {
-				hunkLines = append(hunkLines, " "+oldLines[oldIdx])
+				hunkLines = append(hunkLines, " "+e.Line)
 				contextCount++
-				// End hunk after 3 consecutive context lines
 				if contextCount >= 3 {
 					printHunk(output, hunkStartOld+1, hunkStartNew+1, hunkLines)
 					inHunk = false
@@ -536,27 +556,28 @@ func printUnifiedDiff(output io.Writer, oldData, newData []byte) {
 					contextCount = 0
 				}
 			}
-			oldIdx++
-			newIdx++
-			lcsIdx++
-		} else {
-			// Start new hunk if not in one
+			oldLine++
+			newLine++
+		case core.DiffDelete:
 			if !inHunk {
-				hunkStartOld = oldIdx
-				hunkStartNew = newIdx
+				hunkStartOld = oldLine
+				hunkStartNew = newLine
 				inHunk = true
 				hunkLines = nil
 			}
 			contextCount = 0
-
-			if oldIdx < len(oldLines) && (lcsIdx >= len(lcs) || oldLines[oldIdx] != lcs[lcsIdx]) {
-				hunkLines = append(hunkLines, "-"+oldLines[oldIdx])
-				oldIdx++
+			hunkLines = append(hunkLines, "-"+e.Line)
+			oldLine++
+		case core.DiffInsert:
+			if !inHunk {
+				hunkStartOld = oldLine
+				hunkStartNew = newLine
+				inHunk = true
+				hunkLines = nil
 			}
-			if newIdx < len(newLines) && (lcsIdx >= len(lcs) || newLines[newIdx] != lcs[lcsIdx]) {
-				hunkLines = append(hunkLines, "+"+newLines[newIdx])
-				newIdx++
-			}
+			contextCount = 0
+			hunkLines = append(hunkLines, "+"+e.Line)
+			newLine++
 		}
 	}
 
@@ -596,25 +617,16 @@ func countLineChanges(oldData, newData []byte) (added, deleted int) {
 		newLines = newLines[:len(newLines)-1]
 	}
 
-	lcs := computeLCS(oldLines, newLines)
-
-	oldIdx, newIdx, lcsIdx := 0, 0, 0
-
-	for oldIdx < len(oldLines) || newIdx < len(newLines) {
-		if lcsIdx < len(lcs) && oldIdx < len(oldLines) && newIdx < len(newLines) &&
-			oldLines[oldIdx] == lcs[lcsIdx] && newLines[newIdx] == lcs[lcsIdx] {
-			oldIdx++
-			newIdx++
-			lcsIdx++
-		} else if oldIdx < len(oldLines) && (lcsIdx >= len(lcs) || oldLines[oldIdx] != lcs[lcsIdx]) {
-			deleted++
-			oldIdx++
-		} else if newIdx < len(newLines) && (lcsIdx >= len(lcs) || newLines[newIdx] != lcs[lcsIdx]) {
+	// B8: count directly from Myers edit script.
+	edits := core.Myers(oldLines, newLines)
+	for _, e := range edits {
+		switch e.Op {
+		case core.DiffInsert:
 			added++
-			newIdx++
+		case core.DiffDelete:
+			deleted++
 		}
 	}
-
 	return added, deleted
 }
 
@@ -659,71 +671,4 @@ func streamCompareFileToBlob(filePath string, store *storage.Store, blobHash str
 		return false, err
 	}
 	return fileHash == blobHash, nil
-}
-
-// computeLCS returns the longest common subsequence of a and b.
-// P2-#12: uses Myers O(ND) diff algorithm (the same algorithm git uses)
-// instead of O(m*n) DP, which is dramatically faster for large files with
-// small differences.
-//
-// For inputs above maxLines, returns nil (full-replace diff fallback).
-func computeLCS(a, b []string) []string {
-	m, n := len(a), len(b)
-
-	// Cap input size to avoid OOM. Creative workers may diff novel-length
-	// text; the DP table is O(m*n) but we use rolling arrays for O(min)
-	// space. Above the threshold, fall back to a full-replace diff.
-	const maxLines = 20000
-	if m > maxLines || n > maxLines {
-		return nil
-	}
-	if m == 0 || n == 0 {
-		return nil
-	}
-
-	// Ensure a is the shorter sequence to minimize space.
-	if m > n {
-		a, b = b, a
-		m, n = n, m
-	}
-
-	// Full DP table needed for backtracking to reconstruct the LCS.
-	dp := make([][]int, m+1)
-	for i := range dp {
-		dp[i] = make([]int, n+1)
-	}
-
-	for i := 1; i <= m; i++ {
-		for j := 1; j <= n; j++ {
-			if a[i-1] == b[j-1] {
-				dp[i][j] = dp[i-1][j-1] + 1
-			} else {
-				if dp[i-1][j] > dp[i][j-1] {
-					dp[i][j] = dp[i-1][j]
-				} else {
-					dp[i][j] = dp[i][j-1]
-				}
-			}
-		}
-	}
-
-	result := make([]string, 0, dp[m][n])
-	i, j := m, n
-	for i > 0 && j > 0 {
-		if a[i-1] == b[j-1] {
-			result = append(result, a[i-1])
-			i--
-			j--
-		} else if dp[i-1][j] > dp[i][j-1] {
-			i--
-		} else {
-			j--
-		}
-	}
-
-	for l, r := 0, len(result)-1; l < r; l, r = l+1, r-1 {
-		result[l], result[r] = result[r], result[l]
-	}
-
-	return result
 }

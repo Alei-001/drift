@@ -6,6 +6,9 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // IgnoreMatcher evaluates .driftignore patterns against repository-relative
@@ -41,12 +44,53 @@ const (
 	patternDirSep   = "/"
 )
 
+// driftignoreCache caches parsed IgnoreMatcher instances keyed by the
+// canonical absolute path of the .driftignore file. The cached entry is
+// invalidated when the file's modification time changes (B7).
+// B10: bounded to maxDriftignoreEntries to avoid unbounded growth in
+// long-running processes; eviction is simple clear-all on overflow since
+// the typical working set is 1-2 entries per repository.
+var driftignoreCache sync.Map // key: absPath → cachedIgnoreEntry
+var driftignoreCacheLen int32 // atomic count of cached entries
+
+const maxDriftignoreEntries = 64
+
+type cachedIgnoreEntry struct {
+	mtime time.Time
+	m     *IgnoreMatcher
+}
+
 // LoadDriftIgnore reads .driftignore from root and returns a matcher.
 // A missing file yields an empty matcher that ignores nothing.
+// B7: caches the parsed result so repeated calls (e.g. from WalkWorkingDir
+// in ComputeStatus and add) don't re-read and re-parse the file.
 func LoadDriftIgnore(root string) *IgnoreMatcher {
-	m := &IgnoreMatcher{}
 	p := filepath.Join(root, ".driftignore")
-	f, err := os.Open(p)
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+
+	// Check cache.
+	fi, err := os.Stat(abs)
+	if err != nil {
+		// File missing — return empty matcher and clear cache.
+		if _, ok := driftignoreCache.LoadAndDelete(abs); ok {
+			atomic.AddInt32(&driftignoreCacheLen, -1)
+		}
+		return &IgnoreMatcher{}
+	}
+	mtime := fi.ModTime()
+	if cached, ok := driftignoreCache.Load(abs); ok {
+		entry := cached.(cachedIgnoreEntry)
+		if entry.mtime.Equal(mtime) {
+			return entry.m
+		}
+	}
+
+	// Parse and cache.
+	m := &IgnoreMatcher{}
+	f, err := os.Open(abs)
 	if err != nil {
 		return m
 	}
@@ -60,6 +104,21 @@ func LoadDriftIgnore(root string) *IgnoreMatcher {
 		}
 		m.patterns = append(m.patterns, ParseDriftPattern(line))
 	}
+
+	// B10: bound the cache. If we'd exceed the limit, clear everything
+	// (simple eviction — typical working set is tiny, so this is cheap
+	// and avoids LRU bookkeeping).
+	if _, exists := driftignoreCache.Load(abs); !exists {
+		if atomic.LoadInt32(&driftignoreCacheLen) >= maxDriftignoreEntries {
+			driftignoreCache.Range(func(k, _ any) bool {
+				driftignoreCache.Delete(k)
+				return true
+			})
+			atomic.StoreInt32(&driftignoreCacheLen, 0)
+		}
+		atomic.AddInt32(&driftignoreCacheLen, 1)
+	}
+	driftignoreCache.Store(abs, cachedIgnoreEntry{mtime: mtime, m: m})
 	return m
 }
 

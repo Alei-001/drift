@@ -5,9 +5,15 @@ import (
 	"path/filepath"
 )
 
+// ComputeStatus compares the commit tree, staging index, and working tree to
+// produce a Status describing the state of every tracked and untracked file.
+//
+// B3: merged the original 3 independent worktree passes into a single union
+// loop over staged + committed paths, reducing redundant stat/hash calls.
 func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreReader) (Status, error) {
 	s := make(Status)
 
+	// 1. Build the set of committed files (path → hash).
 	commitFiles := make(map[string]string)
 	if commitTree != nil && store != nil {
 		reader := NewTreeReader(store)
@@ -20,147 +26,137 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 		}
 	}
 
-	hasStagedChanges := len(idx.Entries) > 0
+	// 2. Staging status: compare index entries against committed files.
+	//
+	//    For each file in the index:
+	//      - not in commit → Added
+	//      - different hash → Modified
+	//    For each file in commit:
+	//      - not in index  → Deleted
+	//      - (same hash is Unmodified, handled by s.File default)
+	//
+	//    While iterating committed files for the Deleted check, also check
+	//    the worktree for modifications to deleted-from-index files (B3:
+	//    folded into the same pass instead of a separate loop).
+	if len(idx.Entries) > 0 {
+		idxSet := make(map[string]int, len(idx.Entries))
+		for i, e := range idx.Entries {
+			idxSet[e.Path] = i
+		}
 
-	if hasStagedChanges {
 		for path, hash := range commitFiles {
-			entry, err := idx.Entry(path)
-			if err != nil {
-				fs := s.File(path)
-				fs.Staging = Deleted
-
-				fullPath := filepath.Join(workDir, filepath.FromSlash(path))
-				info, statErr := os.Lstat(fullPath)
-				if statErr == nil {
-					fileHash, hashErr := CalculateHashFromFile(fullPath)
-					if hashErr == nil && fileHash != hash {
-						fs.Worktree = Modified
-					}
-					_ = info
+			if idxIdx, inIdx := idxSet[path]; inIdx {
+				if idx.Entries[idxIdx].Hash != hash {
+					s.File(path).Staging = Modified
 				}
-				continue
-			}
-			if entry.Hash != hash {
-				fs := s.File(path)
-				fs.Staging = Modified
+			} else {
+				// Deleted from index.
+				s.File(path).Staging = Deleted
+				// Also check if worktree was modified since the last commit.
+				if h, err := hashWorktreeFile(workDir, path, store, hash); err == nil {
+					if h != hash {
+						s.File(path).Worktree = Modified
+					}
+				}
 			}
 		}
 
 		for _, entry := range idx.Entries {
-			hash, inCommit := commitFiles[entry.Path]
-			if !inCommit {
-				fs := s.File(entry.Path)
-				fs.Staging = Added
-			} else if hash != entry.Hash {
-				fs := s.File(entry.Path)
-				fs.Staging = Modified
+			if _, inCommit := commitFiles[entry.Path]; !inCommit {
+				s.File(entry.Path).Staging = Added
 			}
 		}
 	}
 
-	// Worktree status: always check both staged entries and committed files.
-	// Previously, when hasStagedChanges was true, committed-but-unstaged files
-	// were skipped, hiding their unstaged modifications.
-	stagedPaths := make(map[string]bool, len(idx.Entries))
-	for _, entry := range idx.Entries {
-		stagedPaths[entry.Path] = true
-	}
-
-	// Check staged entries: compare worktree against staged content.
-	for _, entry := range idx.Entries {
-		fullPath := filepath.Join(workDir, filepath.FromSlash(entry.Path))
-		info, err := os.Lstat(fullPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				fs := s.File(entry.Path)
-				fs.Worktree = Deleted
-			}
-			continue
-		}
-
-		if info.ModTime().Equal(entry.ModifiedAt) && info.Size() == entry.Size {
-			if s[entry.Path] == nil {
-				s.File(entry.Path)
-			}
-			continue
-		}
-
-		hash, err := CalculateHashFromFile(fullPath)
-		if err != nil {
-			continue
-		}
-
-		if hash != entry.Hash {
-			fs := s.File(entry.Path)
-			fs.Worktree = Modified
-		}
-	}
-
-	// Check committed-but-not-staged files: compare worktree against commit.
-	// P1-#10: use mtime+size fast path before hashing, mirroring go-git's
-	// indexEntry comparison. Creative workers have large files (PSD/video);
-	// hashing every committed file on every `drift status` is prohibitively
-	// slow. We cache nothing here (the commit tree has no mtime), so we
-	// compare against the filesystem's current mtime+size — if they match
-	// the values from the last `add`, the file is unchanged.
+	// 3. Worktree status: union of staged + committed paths.
 	//
-	// Since committed files don't have a stored mtime in the tree, we can
-	// only use size as a fast reject. If size differs, it's definitely
-	// modified; if size matches, we must hash to be sure.
-	for path, hash := range commitFiles {
-		if stagedPaths[path] {
-			continue
-		}
-		fullPath := filepath.Join(workDir, filepath.FromSlash(path))
-		info, err := os.Lstat(fullPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				fs := s.File(path)
-				fs.Worktree = Deleted
-			}
-			continue
-		}
+	//    B3: single loop instead of separate staged/committed passes. For
+	//    staged paths we can use mtime+size fast-path; for committed-only
+	//    paths we fall back to size comparison (no stored mtime).
+	{
+		seen := make(map[string]bool, len(idx.Entries)+len(commitFiles))
 
-		// Symlink: compare target string.
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(fullPath)
+		// Check staged entries.
+		for _, entry := range idx.Entries {
+			seen[entry.Path] = true
+			fullPath := filepath.Join(workDir, filepath.FromSlash(entry.Path))
+			info, err := os.Lstat(fullPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					s.File(entry.Path).Worktree = Deleted
+				}
+				continue
+			}
+
+			// mtime+size fast-path (only available for staged files).
+			if info.ModTime().Equal(entry.ModifiedAt) && info.Size() == entry.Size {
+				continue
+			}
+
+			hash, err := CalculateHashFromFile(fullPath)
 			if err != nil {
 				continue
 			}
-			data, err := store.GetBlob(hash)
+
+			if hash != entry.Hash {
+				s.File(entry.Path).Worktree = Modified
+			}
+		}
+
+		// Check committed-but-not-staged files.
+		for path, hash := range commitFiles {
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+
+			fullPath := filepath.Join(workDir, filepath.FromSlash(path))
+			info, err := os.Lstat(fullPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					s.File(path).Worktree = Deleted
+				}
+				continue
+			}
+
+			// Symlink: compare target string.
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, err := os.Readlink(fullPath)
+				if err != nil {
+					continue
+				}
+				data, err := store.GetBlob(hash)
+				if err != nil {
+					continue
+				}
+				if target != string(data) {
+					s.File(path).Worktree = Modified
+				}
+				continue
+			}
+
+			// Size fast-path (no mtime for committed files).
+			blobSize, err := store.GetBlobSize(hash)
 			if err != nil {
 				continue
 			}
-			if target != string(data) {
-				fs := s.File(path)
-				fs.Worktree = Modified
+			if info.Size() != blobSize {
+				s.File(path).Worktree = Modified
+				continue
 			}
-			continue
-		}
 
-		// Size fast-path: different size ⇒ definitely modified.
-		// Same size ⇒ must hash to be certain.
-		blobData, err := store.GetBlob(hash)
-		if err != nil {
-			continue
-		}
-		if info.Size() != int64(len(blobData)) {
-			fs := s.File(path)
-			fs.Worktree = Modified
-			continue
-		}
+			fileHash, err := CalculateHashFromFile(fullPath)
+			if err != nil {
+				continue
+			}
 
-		fileHash, err := CalculateHashFromFile(fullPath)
-		if err != nil {
-			continue
-		}
-
-		if fileHash != hash {
-			fs := s.File(path)
-			fs.Worktree = Modified
+			if fileHash != hash {
+				s.File(path).Worktree = Modified
+			}
 		}
 	}
 
+	// 4. Walk working dir for untracked files.
 	err := WalkWorkingDir(workDir, func(path string, info os.FileInfo) error {
 		if idx.Has(path) {
 			return nil
@@ -178,4 +174,33 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 	}
 
 	return s, nil
+}
+
+// hashWorktreeFile computes the SHA-256 of the worktree file at relPath
+// relative to workDir. The file is expected to be tracked (its blob hash
+// is oldHash). Returns the computed hash or an error.
+func hashWorktreeFile(workDir, relPath string, store StoreReader, oldHash string) (string, error) {
+	fullPath := filepath.Join(workDir, filepath.FromSlash(relPath))
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return "", err
+	}
+
+	// Symlink: compare target string.
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(fullPath)
+		if err != nil {
+			return "", err
+		}
+		data, err := store.GetBlob(oldHash)
+		if err != nil {
+			return "", err
+		}
+		if target == string(data) {
+			return oldHash, nil
+		}
+		return CalculateHash([]byte(target)), nil
+	}
+
+	return CalculateHashFromFile(fullPath)
 }
