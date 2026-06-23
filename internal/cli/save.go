@@ -119,6 +119,9 @@ var saveCmd = &cobra.Command{
 					fmt.Printf("Warning: failed to assign name '%s': %v\n", nameLabel, err)
 				}
 			}
+
+			// Auto-sync after a successful amend (no-op if sync is disabled).
+			AutoSyncAfterSave(sharedDir, sharedConfig, sharedStore)
 			return nil
 		}
 
@@ -164,6 +167,9 @@ var saveCmd = &cobra.Command{
 				fmt.Printf("Warning: failed to assign name '%s': %v\n", nameLabel, err)
 			}
 		}
+
+		// Auto-sync after a successful save (no-op if sync is disabled).
+		AutoSyncAfterSave(sharedDir, sharedConfig, sharedStore)
 		return nil
 	},
 }

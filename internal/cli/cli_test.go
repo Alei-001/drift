@@ -130,6 +130,8 @@ func resetAllFlags() {
 	// sync command flags
 	syncShowRemote = false
 	syncUnsetRemote = false
+	syncWebDAVUser = ""
+	syncWebDAVPass = ""
 }
 
 // WriteFile creates a file with the given content.

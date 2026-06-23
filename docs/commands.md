@@ -30,6 +30,8 @@
 | `history` | 操作历史 | ✅ |
 | `undo` | 撤销操作 | ✅ |
 | `wip` | 工作进度管理 | ✅ |
+| `sync` | 远程同步（NAS/WebDAV） | ✅ |
+| `clone` | 从远程克隆项目 | ✅ |
 
 ---
 
@@ -613,6 +615,150 @@ drift config core.default_branch dev  # 设置默认分支为 dev
 drift config core.autocrlf true       # 开启 CRLF 归一化
 drift config core.autocrlf input      # 仅 add 时 CRLF→LF
 ```
+
+---
+
+## 远程同步命令
+
+### `drift sync` ✅
+
+管理远程同步，支持本地路径（NAS 挂载、网盘同步文件夹）和 WebDAV 服务器（Nextcloud、ownCloud、群晖 NAS、坚果云等）。
+
+#### `drift sync remote` — 配置远程根路径
+
+```bash
+# 本地路径（NAS 挂载、网盘文件夹）
+drift sync remote /mnt/nas
+
+# WebDAV 服务器（交互式输入用户名密码）
+drift sync remote https://cloud.example.com/dav
+
+# WebDAV 服务器（通过参数指定凭据）
+drift sync remote https://cloud.example.com/dav --user alice --pass secret
+
+# 查看当前远程
+drift sync remote --show
+
+# 取消远程配置
+drift sync remote --unset
+```
+
+**参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `<path>` | 本地目录路径（NAS 挂载点等） |
+| `<url>` | WebDAV 服务器 URL（`http://` 或 `https://` 开头） |
+| `--user` | WebDAV 用户名（可选） |
+| `--pass` | WebDAV 密码（可选） |
+| `--show` | 显示当前远程配置 |
+| `--unset` | 清除远程配置 |
+
+**行为：**
+- 远程根路径是全局配置，存在 `~/.drift/global.json`，所有项目共享
+- 本地路径模式：验证目录存在，远程项目以子目录形式存储（可直接浏览文件）
+- WebDAV 模式：项目以子目录形式存储在 WebDAV 服务器上
+- WebDAV 凭据通过参数或交互式输入提供
+
+#### `drift sync enable` — 为当前项目启用同步
+
+```bash
+drift sync enable
+```
+
+**行为：**
+- 使用当前目录名作为远程项目名
+- 生成项目唯一 ID（UUID），存在 `.drift/config.json`
+- 本地远程模式会自动创建远程项目目录
+- 启用后，`drift save` 会自动触发同步
+
+#### `drift sync disable` — 禁用同步
+
+```bash
+drift sync disable
+```
+
+#### `drift sync status` — 查看同步状态
+
+```bash
+drift sync status
+```
+
+**输出示例：**
+
+```
+Project:  my-novel
+Remote:   /mnt/nas/my-novel
+Type:     local
+Enabled:  yes
+Last sync: 2026-06-24T10:30:00Z
+```
+
+#### `drift sync now` — 立即同步
+
+```bash
+drift sync now
+```
+
+**行为：**
+- 双向同步：推送本地变更，拉取远程变更
+- 增量同步：基于文件内容哈希（SHA-256），只传输变更的文件
+- 删除追踪：通过远程 manifest 文件记录文件状态，正确同步删除操作
+- 跳过 `.drift/lock` 和 `.drift/sync/` 目录（机器本地文件）
+- 冲突策略：本地版本优先（"最后保存胜出"），远程版本被覆盖
+
+**输出示例：**
+
+```
+Syncing to /mnt/nas/my-novel...
+  Pushed 2 file(s):
+    章节/第三章.txt
+    .drift/refs/main
+  Pulled 1 file(s):
+    章节/第四章.txt
+Sync complete
+```
+
+### `drift clone` ✅
+
+从远程克隆项目到本地。
+
+```bash
+drift clone <项目名>              # 克隆到 ./<项目名>
+drift clone <项目名> <目标目录>    # 克隆到指定目录
+```
+
+**示例：**
+
+```bash
+# 首次配置远程根路径（全局，一次性）
+drift sync remote /mnt/nas
+
+# 在另一台设备上克隆项目
+drift clone my-novel
+
+# 克隆到自定义目录名
+drift clone my-novel my-book
+```
+
+**行为：**
+- 完整复制项目：包括 `.drift/`（版本历史）和工作区文件
+- 克隆后立即可用：`cd my-novel && drift status`
+- 目标目录必须不存在或为空
+- 本地文件夹名可随意修改，不影响同步（项目通过 UUID 识别）
+
+**同步架构说明：**
+
+| 组件 | 说明 |
+|------|------|
+| **Transport 接口** | 抽象传输层，支持本地文件系统和 WebDAV |
+| **LocalTransport** | 本地文件系统传输（NAS 挂载、网盘文件夹） |
+| **WebDAVTransport** | WebDAV 协议传输（Nextcloud、ownCloud 等） |
+| **Engine** | 同步引擎，处理增量同步和删除追踪 |
+| **Manifest** | 远程清单文件（`.drift/sync/manifest.json`），记录文件状态 |
+| **项目 ID** | UUID，在 `drift init` 时生成，用于跨设备识别同一项目 |
+
+**自动同步：** 启用同步后，每次 `drift save` 会自动触发后台同步。如果同步失败（如 NAS 未连接），会显示警告但不影响 save 操作，下次 save 时自动重试。
 
 ---
 

@@ -16,13 +16,25 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 // GlobalConfig stores drift-wide settings that apply across all projects.
 // It lives at ~/.drift/global.json so it survives project cloning.
 type GlobalConfig struct {
-	RemoteRoot string `json:"remote_root,omitempty"`
+	RemoteRoot string         `json:"remote_root,omitempty"`
+	WebDAV     *WebDAVConfig  `json:"webdav,omitempty"`
+}
+
+// WebDAVConfig holds credentials for a WebDAV remote.
+type WebDAVConfig struct {
+	URL      string `json:"url"`
+	Username string `json:"username,omitempty"`
+	// Password is stored in plaintext for now. A future improvement could
+	// use the OS keychain. This is acceptable for self-hosted NAS setups
+	// where the config file is already on a trusted machine.
+	Password string `json:"password,omitempty"`
 }
 
 // globalConfigPathOverride allows tests to redirect the global config to a
@@ -111,8 +123,43 @@ func NewProjectID() string {
 	return hex.EncodeToString(b)
 }
 
+// RemoteType indicates what kind of remote is configured.
+type RemoteType int
+
+const (
+	RemoteNone    RemoteType = iota
+	RemoteLocal              // local filesystem (NAS mount, etc.)
+	RemoteWebDAV             // WebDAV server
+)
+
+// GetRemoteType returns the currently configured remote type.
+func (g *GlobalConfig) GetRemoteType() RemoteType {
+	if g.WebDAV != nil && g.WebDAV.URL != "" {
+		return RemoteWebDAV
+	}
+	if g.RemoteRoot != "" {
+		return RemoteLocal
+	}
+	return RemoteNone
+}
+
+// ProjectTransportForConfig returns a Transport scoped to a project, based
+// on the global config. Returns nil if no remote is configured.
+func ProjectTransportForConfig(gcfg *GlobalConfig, remoteName string) Transport {
+	switch gcfg.GetRemoteType() {
+	case RemoteLocal:
+		return NewLocalTransport(gcfg.RemoteRoot).ProjectTransport(remoteName)
+	case RemoteWebDAV:
+		// For WebDAV, the project is a subdirectory under the base URL.
+		baseURL := strings.TrimRight(gcfg.WebDAV.URL, "/") + "/" + remoteName
+		return NewWebDAVTransport(baseURL, gcfg.WebDAV.Username, gcfg.WebDAV.Password)
+	}
+	return nil
+}
+
 // LocalTransport implements sync over a local filesystem path (NAS mount,
-// cloud-drive synced folder, USB drive, etc.).
+// cloud-drive synced folder, USB drive, etc.). It implements the Transport
+// interface for use with the sync Engine.
 type LocalTransport struct {
 	remoteRoot string
 }
@@ -198,6 +245,120 @@ func (t *LocalTransport) Clone(remoteName, destDir string) error {
 	}
 
 	return copyDir(src, destDir)
+}
+
+// --- Transport interface implementation ---
+//
+// For LocalTransport, the "remote" is a project subdirectory under
+// remoteRoot. The Transport interface methods operate on paths relative
+// to a project root, so the transport must be scoped to a specific project
+// via WithProject before being used with the Engine.
+
+// ProjectTransport returns a Transport scoped to a specific project on the
+// remote. The Engine uses this to sync files within one project.
+func (t *LocalTransport) ProjectTransport(remoteName string) Transport {
+	return &localProjectTransport{
+		root: filepath.Join(t.remoteRoot, remoteName),
+	}
+}
+
+// localProjectTransport is a Transport scoped to a project directory.
+type localProjectTransport struct {
+	root string
+}
+
+func (t *localProjectTransport) abs(remotePath string) string {
+	return filepath.Join(t.root, filepath.FromSlash(remotePath))
+}
+
+func (t *localProjectTransport) Get(remotePath string, dst io.Writer) error {
+	f, err := os.Open(t.abs(remotePath))
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(dst, f)
+	return err
+}
+
+func (t *localProjectTransport) Put(remotePath string, src io.Reader) error {
+	abs := t.abs(remotePath)
+	if err := os.MkdirAll(filepath.Dir(abs), 0755); err != nil {
+		return err
+	}
+	tmp := abs + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, src); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	// Close before rename to release the file handle on Windows.
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, abs)
+}
+
+func (t *localProjectTransport) Stat(remotePath string) (*RemoteStat, error) {
+	info, err := os.Stat(t.abs(remotePath))
+	if err != nil {
+		return nil, err
+	}
+	return &RemoteStat{
+		Size:    info.Size(),
+		ModTime: info.ModTime(),
+	}, nil
+}
+
+func (t *localProjectTransport) List(prefix string) ([]string, error) {
+	root := t.root
+	if prefix != "" {
+		root = filepath.Join(t.root, filepath.FromSlash(prefix))
+	}
+	var files []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		rel, err := filepath.Rel(t.root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		files = append(files, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func (t *localProjectTransport) Delete(remotePath string) error {
+	err := os.Remove(t.abs(remotePath))
+	if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func (t *localProjectTransport) Mkdir(remotePath string) error {
+	return os.MkdirAll(t.abs(remotePath), 0755)
 }
 
 // copyDir recursively copies src into dst. dst is created if it does not

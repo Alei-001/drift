@@ -183,8 +183,8 @@ func TestSyncEnable_WithoutRemoteRoot(t *testing.T) {
 
 	_, err := h.runSyncEnable()
 	h.AssertError(err)
-	if !strings.Contains(err.Error(), "no remote root configured") {
-		t.Errorf("expected 'no remote root' error, got: %v", err)
+	if !strings.Contains(err.Error(), "no remote configured") {
+		t.Errorf("expected 'no remote configured' error, got: %v", err)
 	}
 }
 
@@ -400,8 +400,8 @@ func TestClone_NoRemoteRoot(t *testing.T) {
 
 	_, err := h.runClone("some-project")
 	h.AssertError(err)
-	if !strings.Contains(err.Error(), "no remote root") {
-		t.Errorf("expected 'no remote root' error, got: %v", err)
+	if !strings.Contains(err.Error(), "no remote configured") {
+		t.Errorf("expected 'no remote configured' error, got: %v", err)
 	}
 }
 
@@ -507,4 +507,149 @@ func TestLocalTransport_ListProjects(t *testing.T) {
 // loadConfigFromStore is a helper to load config from a store.
 func loadConfigFromStore(store *storage.Store) (*config.Config, error) {
 	return config.LoadConfig(store.DriftDir())
+}
+
+// --- auto-sync tests ---
+
+// TestAutoSyncAfterSave_NoopWhenDisabled verifies that auto-sync does
+// nothing when sync is not enabled.
+func TestAutoSyncAfterSave_NoopWhenDisabled(t *testing.T) {
+	remoteRoot := setupSyncTest(t)
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Set remote but don't enable sync.
+	_, err := h.runSyncRemote(remoteRoot)
+	h.AssertNoError(err)
+
+	// Auto-sync should be a no-op.
+	h.SetupSharedState()
+	AutoSyncAfterSave(h.Dir, h.Config, h.Store)
+
+	// Verify nothing was synced to remote.
+	entries, err := os.ReadDir(remoteRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// remoteRoot should only contain the project directory (created by
+	// sync remote, not by sync enable). Actually sync remote doesn't
+	// create project dirs, so remoteRoot should be empty.
+	for _, e := range entries {
+		// The project dir is only created by sync enable, which we didn't call.
+		t.Errorf("unexpected entry in remote: %s", e.Name())
+	}
+}
+
+// TestAutoSyncAfterSave_SyncsOnSave verifies that auto-sync pushes files
+// after a save when sync is enabled.
+func TestAutoSyncAfterSave_SyncsOnSave(t *testing.T) {
+	remoteRoot := setupSyncTest(t)
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Set up sync.
+	_, err := h.runSyncRemote(remoteRoot)
+	h.AssertNoError(err)
+	_, err = h.runSyncEnable()
+	h.AssertNoError(err)
+
+	// Create a file and add it.
+	h.WriteFile("chapter1.txt", "hello world")
+	h.RunAdd("chapter1.txt")
+
+	// Save — this should trigger auto-sync.
+	h.RunSave("test save")
+
+	// Verify the file was synced to remote.
+	remoteFile := filepath.Join(remoteRoot, h.Config.Sync.RemoteName, "chapter1.txt")
+	data, err := os.ReadFile(remoteFile)
+	if err != nil {
+		t.Fatalf("expected file to be synced to remote: %v", err)
+	}
+	if string(data) != "hello world" {
+		t.Errorf("expected 'hello world', got %q", string(data))
+	}
+
+	// Verify last sync timestamp was updated.
+	if h.Config.Sync.LastSync == "" {
+		t.Error("expected LastSync to be set after auto-sync")
+	}
+}
+
+// TestAutoSyncAfterSave_NoRemoteConfigured verifies that auto-sync is
+// silent when no remote is configured.
+func TestAutoSyncAfterSave_NoRemoteConfigured(t *testing.T) {
+	setupSyncTest(t) // empty global config
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Enable sync (will fail because no remote).
+	_, err := h.runSyncEnable()
+	h.AssertError(err)
+
+	// Even if we force enabled=true, auto-sync should be silent.
+	h.Config.Sync.Enabled = true
+	h.SetupSharedState()
+	AutoSyncAfterSave(h.Dir, h.Config, h.Store)
+	// No error, no panic — that's the test.
+}
+
+// --- WebDAV config tests ---
+
+// TestSyncRemote_WebDAV verifies that a WebDAV URL is stored correctly.
+func TestSyncRemote_WebDAV(t *testing.T) {
+	setupSyncTest(t)
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Set WebDAV remote with credentials via flags.
+	h.SetupSharedState()
+	syncShowRemote = false
+	syncUnsetRemote = false
+	syncWebDAVUser = "alice"
+	syncWebDAVPass = "secret"
+	output, err := CaptureOutput(func() error {
+		return syncRemoteCmd.RunE(syncRemoteCmd, []string{"https://cloud.example.com/dav"})
+	})
+	h.AssertNoError(err)
+	h.AssertContains(output, "WebDAV remote set to")
+
+	// Verify it was persisted.
+	gcfg, err := driftsync.LoadGlobalConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gcfg.WebDAV == nil {
+		t.Fatal("expected WebDAV config to be set")
+	}
+	if gcfg.WebDAV.URL != "https://cloud.example.com/dav" {
+		t.Errorf("expected URL %q, got %q", "https://cloud.example.com/dav", gcfg.WebDAV.URL)
+	}
+	if gcfg.WebDAV.Username != "alice" {
+		t.Errorf("expected username 'alice', got %q", gcfg.WebDAV.Username)
+	}
+	if gcfg.WebDAV.Password != "secret" {
+		t.Errorf("expected password 'secret', got %q", gcfg.WebDAV.Password)
+	}
+}
+
+// TestGetRemoteType verifies remote type detection.
+func TestGetRemoteType(t *testing.T) {
+	// None.
+	gcfg := &driftsync.GlobalConfig{}
+	if gcfg.GetRemoteType() != driftsync.RemoteNone {
+		t.Error("expected RemoteNone")
+	}
+
+	// Local.
+	gcfg.RemoteRoot = "/mnt/nas"
+	if gcfg.GetRemoteType() != driftsync.RemoteLocal {
+		t.Error("expected RemoteLocal")
+	}
+
+	// WebDAV takes precedence.
+	gcfg.WebDAV = &driftsync.WebDAVConfig{URL: "https://cloud.example.com"}
+	if gcfg.GetRemoteType() != driftsync.RemoteWebDAV {
+		t.Error("expected RemoteWebDAV")
+	}
 }

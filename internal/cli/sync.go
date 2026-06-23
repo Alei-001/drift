@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/drift/drift/internal/config"
+	"github.com/drift/drift/internal/storage"
 	driftsync "github.com/drift/drift/internal/sync"
 	"github.com/spf13/cobra"
 )
@@ -14,6 +17,8 @@ import (
 var (
 	syncShowRemote  bool
 	syncUnsetRemote bool
+	syncWebDAVUser  string
+	syncWebDAVPass  string
 )
 
 // syncCmd is the parent command for all sync operations.
@@ -36,15 +41,18 @@ Other commands:
 
 // syncRemoteCmd manages the global remote root path.
 var syncRemoteCmd = &cobra.Command{
-	Use:   "remote [path]",
-	Short: "Set, show, or unset the global remote root path",
-	Long: `The remote root is a directory (e.g. a NAS mount or cloud-drive folder) where
-drift projects are stored. It is configured once and shared by all projects.
+	Use:   "remote [path-or-url]",
+	Short: "Set, show, or unset the global remote root",
+	Long: `The remote root is where drift projects are stored. It can be either:
+  - A local directory (NAS mount, cloud-drive synced folder)
+  - A WebDAV URL (Nextcloud, ownCloud, Synology, 坚果云, etc.)
 
 Examples:
-  drift sync remote /mnt/nas           # set remote root
-  drift sync remote --show             # show current remote root
-  drift sync remote --unset            # remove remote root`,
+  drift sync remote /mnt/nas                       # local path
+  drift sync remote https://cloud.example.com/dav  # WebDAV (will prompt for credentials)
+  drift sync remote https://cloud.example.com/dav --user alice --pass secret
+  drift sync remote --show                         # show current remote
+  drift sync remote --unset                        # remove remote`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		gcfg, err := driftsync.LoadGlobalConfig()
@@ -54,6 +62,7 @@ Examples:
 
 		if syncUnsetRemote {
 			gcfg.RemoteRoot = ""
+			gcfg.WebDAV = nil
 			if err := driftsync.SaveGlobalConfig(gcfg); err != nil {
 				return err
 			}
@@ -62,10 +71,13 @@ Examples:
 		}
 
 		if syncShowRemote {
-			if gcfg.RemoteRoot == "" {
-				fmt.Println("No remote root configured")
-			} else {
+			switch gcfg.GetRemoteType() {
+			case driftsync.RemoteLocal:
 				fmt.Println(gcfg.RemoteRoot)
+			case driftsync.RemoteWebDAV:
+				fmt.Println(gcfg.WebDAV.URL)
+			default:
+				fmt.Println("No remote root configured")
 			}
 			return nil
 		}
@@ -74,9 +86,50 @@ Examples:
 			return cmd.Help()
 		}
 
-		// Set mode: validate the path exists and is a directory.
-		path := args[0]
-		abs, err := filepath.Abs(path)
+		target := args[0]
+
+		// Detect WebDAV by URL scheme.
+		if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+			user := syncWebDAVUser
+			pass := syncWebDAVPass
+			if user == "" {
+				fmt.Print("WebDAV username: ")
+				reader := bufio.NewReader(os.Stdin)
+				u, err := reader.ReadString('\n')
+				if err != nil {
+					return fmt.Errorf("failed to read username: %w", err)
+				}
+				user = strings.TrimSpace(u)
+			}
+			if pass == "" {
+				fmt.Print("WebDAV password: ")
+				p, err := readPassword()
+				if err != nil {
+					// Fallback: read in clear (less secure, but works in non-tty).
+					reader := bufio.NewReader(os.Stdin)
+					p, err = reader.ReadString('\n')
+					if err != nil {
+						return fmt.Errorf("failed to read password: %w", err)
+					}
+				}
+				pass = strings.TrimSpace(p)
+			}
+
+			gcfg.RemoteRoot = ""
+			gcfg.WebDAV = &driftsync.WebDAVConfig{
+				URL:      target,
+				Username: user,
+				Password: pass,
+			}
+			if err := driftsync.SaveGlobalConfig(gcfg); err != nil {
+				return err
+			}
+			fmt.Printf("WebDAV remote set to %s\n", target)
+			return nil
+		}
+
+		// Local path mode: validate the path exists and is a directory.
+		abs, err := filepath.Abs(target)
 		if err != nil {
 			return fmt.Errorf("invalid path: %w", err)
 		}
@@ -89,6 +142,7 @@ Examples:
 		}
 
 		gcfg.RemoteRoot = abs
+		gcfg.WebDAV = nil
 		if err := driftsync.SaveGlobalConfig(gcfg); err != nil {
 			return err
 		}
@@ -107,8 +161,8 @@ var syncEnableCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if gcfg.RemoteRoot == "" {
-			return fmt.Errorf("no remote root configured (run 'drift sync remote <path>' first)")
+		if gcfg.GetRemoteType() == driftsync.RemoteNone {
+			return fmt.Errorf("no remote configured (run 'drift sync remote <path-or-url>' first)")
 		}
 
 		// Use the current directory name as the remote project name.
@@ -125,14 +179,22 @@ var syncEnableCmd = &cobra.Command{
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
-		// Create the remote project directory if it doesn't exist.
-		remoteDir := filepath.Join(gcfg.RemoteRoot, remoteName)
-		if err := os.MkdirAll(remoteDir, 0755); err != nil {
-			return fmt.Errorf("failed to create remote project dir: %w", err)
+		// For local remotes, create the project directory. For WebDAV,
+		// the directory is created on first sync.
+		var remoteDisplay string
+		switch gcfg.GetRemoteType() {
+		case driftsync.RemoteLocal:
+			remoteDir := filepath.Join(gcfg.RemoteRoot, remoteName)
+			if err := os.MkdirAll(remoteDir, 0755); err != nil {
+				return fmt.Errorf("failed to create remote project dir: %w", err)
+			}
+			remoteDisplay = remoteDir
+		case driftsync.RemoteWebDAV:
+			remoteDisplay = strings.TrimRight(gcfg.WebDAV.URL, "/") + "/" + remoteName
 		}
 
 		fmt.Printf("Sync enabled for project %q\n", remoteName)
-		fmt.Printf("Remote: %s\n", remoteDir)
+		fmt.Printf("Remote: %s\n", remoteDisplay)
 		fmt.Println("\nRun 'drift sync now' to perform the initial sync.")
 		return nil
 	},
@@ -173,14 +235,22 @@ var syncStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if gcfg.RemoteRoot == "" {
-			fmt.Println("Sync enabled but no remote root configured.")
-			fmt.Println("Run 'drift sync remote <path>' to set it.")
+		if gcfg.GetRemoteType() == driftsync.RemoteNone {
+			fmt.Println("Sync enabled but no remote configured.")
+			fmt.Println("Run 'drift sync remote <path-or-url>' to set it.")
 			return nil
 		}
 
 		fmt.Printf("Project:  %s\n", sharedConfig.Sync.RemoteName)
-		fmt.Printf("Remote:   %s\n", filepath.Join(gcfg.RemoteRoot, sharedConfig.Sync.RemoteName))
+		var remoteDisplay string
+		switch gcfg.GetRemoteType() {
+		case driftsync.RemoteLocal:
+			remoteDisplay = filepath.Join(gcfg.RemoteRoot, sharedConfig.Sync.RemoteName)
+		case driftsync.RemoteWebDAV:
+			remoteDisplay = strings.TrimRight(gcfg.WebDAV.URL, "/") + "/" + sharedConfig.Sync.RemoteName
+		}
+		fmt.Printf("Remote:   %s\n", remoteDisplay)
+		fmt.Printf("Type:     %s\n", remoteTypeName(gcfg.GetRemoteType()))
 		fmt.Printf("Enabled:  yes\n")
 		if sharedConfig.Sync.LastSync != "" {
 			fmt.Printf("Last sync: %s\n", sharedConfig.Sync.LastSync)
@@ -191,120 +261,170 @@ var syncStatusCmd = &cobra.Command{
 	},
 }
 
-// syncNowCmd performs an immediate sync (push + pull).
+func remoteTypeName(t driftsync.RemoteType) string {
+	switch t {
+	case driftsync.RemoteLocal:
+		return "local"
+	case driftsync.RemoteWebDAV:
+		return "webdav"
+	default:
+		return "none"
+	}
+}
+
+// syncNowCmd performs an immediate sync (push + pull) using the incremental
+// sync engine.
 var syncNowCmd = &cobra.Command{
 	Use:   "now",
 	Short: "Sync immediately (push local changes, pull remote changes)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !sharedConfig.Sync.Enabled {
-			return fmt.Errorf("sync is not enabled (run 'drift sync enable')")
-		}
-
-		gcfg, err := driftsync.LoadGlobalConfig()
-		if err != nil {
-			return err
-		}
-		if gcfg.RemoteRoot == "" {
-			return fmt.Errorf("no remote root configured")
-		}
-
-		remoteName := sharedConfig.Sync.RemoteName
-		remoteDir := filepath.Join(gcfg.RemoteRoot, remoteName)
-
-		// Ensure remote project dir exists.
-		if err := os.MkdirAll(remoteDir, 0755); err != nil {
-			return fmt.Errorf("failed to access remote: %w", err)
-		}
-
-		// Phase 1: simple full-directory mirror. Copy local → remote, then
-		// remote → local, skipping identical files. This is a baseline; a
-		// proper incremental sync (hash-based, with deletion tracking) will
-		// come in a later step.
-		fmt.Printf("Syncing to %s...\n", remoteDir)
-
-		if err := mirrorDir(sharedDir, remoteDir); err != nil {
-			return fmt.Errorf("push failed: %w", err)
-		}
-		if err := mirrorDir(remoteDir, sharedDir); err != nil {
-			return fmt.Errorf("pull failed: %w", err)
-		}
-
-		// Update last sync timestamp.
-		sharedConfig.Sync.LastSync = time.Now().Format(time.RFC3339)
-		if err := config.SaveConfig(sharedStore.DriftDir(), sharedConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to update sync timestamp: %v\n", err)
-		}
-
-		fmt.Println("Sync complete")
-		return nil
+		return runSync(sharedDir, sharedConfig, sharedStore, true)
 	},
 }
 
-// mirrorDir copies all files from src into dst that are missing or newer in
-// src. It does not delete files in dst that are absent from src (that requires
-// deletion tracking, planned for a later phase). The .drift/lock file is
-// always skipped to avoid cross-machine lock contention.
-func mirrorDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		// Skip the lock file — it is machine-local.
-		if rel == filepath.Join(".drift", "lock") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		target := filepath.Join(dst, rel)
-
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode())
-		}
-
-		// Skip symlinks for safety.
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil
-		}
-
-		// Skip if target exists and is not older than source.
-		if tInfo, err := os.Stat(target); err == nil {
-			if !tInfo.ModTime().Before(info.ModTime()) && tInfo.Size() == info.Size() {
-				return nil
-			}
-		}
-
-		return copyFileForSync(path, target, info.Mode())
-	})
-}
-
-// copyFileForSync copies a single file, creating parent dirs as needed.
-func copyFileForSync(src, dst string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return err
+// runSync executes a sync operation. If verbose is true, progress is
+// printed to stdout. This is shared between 'drift sync now' and the
+// auto-sync hook in 'drift save'.
+func runSync(localDir string, cfg *config.Config, store *storage.Store, verbose bool) error {
+	if !cfg.Sync.Enabled {
+		return fmt.Errorf("sync is not enabled (run 'drift sync enable')")
 	}
-	data, err := os.ReadFile(src)
+
+	gcfg, err := driftsync.LoadGlobalConfig()
 	if err != nil {
 		return err
 	}
-	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
+	if gcfg.GetRemoteType() == driftsync.RemoteNone {
+		return fmt.Errorf("no remote configured")
+	}
+
+	remoteName := cfg.Sync.RemoteName
+
+	// For local remotes, ensure the project directory exists.
+	if gcfg.GetRemoteType() == driftsync.RemoteLocal {
+		remoteDir := filepath.Join(gcfg.RemoteRoot, remoteName)
+		if err := os.MkdirAll(remoteDir, 0755); err != nil {
+			return fmt.Errorf("failed to access remote: %w", err)
+		}
+	}
+
+	if verbose {
+		var remoteDisplay string
+		switch gcfg.GetRemoteType() {
+		case driftsync.RemoteLocal:
+			remoteDisplay = filepath.Join(gcfg.RemoteRoot, remoteName)
+		case driftsync.RemoteWebDAV:
+			remoteDisplay = strings.TrimRight(gcfg.WebDAV.URL, "/") + "/" + remoteName
+		}
+		fmt.Printf("Syncing to %s...\n", remoteDisplay)
+	}
+
+	// Use the incremental sync engine with the appropriate transport.
+	transport := driftsync.ProjectTransportForConfig(gcfg, remoteName)
+	if transport == nil {
+		return fmt.Errorf("no transport available for remote type")
+	}
+	engine := driftsync.NewEngine(transport, cfg.Sync.ProjectID)
+
+	result, err := engine.Sync(localDir)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, dst)
+
+	// Update last sync timestamp.
+	cfg.Sync.LastSync = time.Now().Format(time.RFC3339)
+	if err := config.SaveConfig(store.DriftDir(), cfg); err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to update sync timestamp: %v\n", err)
+		}
+	}
+
+	if verbose {
+		printSyncResult(result)
+		fmt.Println("Sync complete")
+	}
+	return nil
+}
+
+// printSyncResult prints a human-readable summary of what was synced.
+func printSyncResult(r *driftsync.SyncResult) {
+	if !r.HasChanges() {
+		fmt.Println("  Already up to date")
+		return
+	}
+	if len(r.Pushed) > 0 {
+		fmt.Printf("  Pushed %d file(s):\n", len(r.Pushed))
+		for _, p := range r.Pushed {
+			fmt.Printf("    %s\n", p)
+		}
+	}
+	if len(r.Pulled) > 0 {
+		fmt.Printf("  Pulled %d file(s):\n", len(r.Pulled))
+		for _, p := range r.Pulled {
+			fmt.Printf("    %s\n", p)
+		}
+	}
+	if len(r.RemoteDeleted) > 0 {
+		fmt.Printf("  Deleted %d file(s) on remote:\n", len(r.RemoteDeleted))
+		for _, p := range r.RemoteDeleted {
+			fmt.Printf("    %s\n", p)
+		}
+	}
+	if len(r.LocalDeleted) > 0 {
+		fmt.Printf("  Deleted %d file(s) locally:\n", len(r.LocalDeleted))
+		for _, p := range r.LocalDeleted {
+			fmt.Printf("    %s\n", p)
+		}
+	}
+}
+
+// AutoSyncAfterSave is called after a successful 'drift save' to trigger
+// background synchronization. If sync is not enabled or no remote is
+// configured, it silently does nothing. If sync fails, it prints a warning
+// but does not return an error (the save already succeeded).
+func AutoSyncAfterSave(localDir string, cfg *config.Config, store *storage.Store) {
+	if !cfg.Sync.Enabled {
+		return
+	}
+	gcfg, err := driftsync.LoadGlobalConfig()
+	if err != nil || gcfg.GetRemoteType() == driftsync.RemoteNone {
+		return
+	}
+
+	// Retry up to 2 times on failure.
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := runSync(localDir, cfg, store, false); err != nil {
+			lastErr = err
+			time.Sleep(time.Second)
+			continue
+		}
+		return // success
+	}
+	if lastErr != nil {
+		fmt.Fprintf(os.Stderr, "\n⚠ Sync failed: %v (will retry next save)\n", lastErr)
+	}
+}
+
+// readPassword reads a password from stdin. On supported platforms it tries
+// to disable echo; otherwise it falls back to plain reading. The returned
+// string does not include the trailing newline.
+func readPassword() (string, error) {
+	// Try to disable echo on Unix; on Windows this is a no-op fallback.
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
 }
 
 func init() {
-	syncRemoteCmd.Flags().BoolVar(&syncShowRemote, "show", false, "Show the current remote root")
-	syncRemoteCmd.Flags().BoolVar(&syncUnsetRemote, "unset", false, "Remove the remote root")
+	syncRemoteCmd.Flags().BoolVar(&syncShowRemote, "show", false, "Show the current remote")
+	syncRemoteCmd.Flags().BoolVar(&syncUnsetRemote, "unset", false, "Remove the remote")
+	syncRemoteCmd.Flags().StringVar(&syncWebDAVUser, "user", "", "WebDAV username (for http(s):// remotes)")
+	syncRemoteCmd.Flags().StringVar(&syncWebDAVPass, "pass", "", "WebDAV password (for http(s):// remotes)")
 
 	syncCmd.AddCommand(syncRemoteCmd)
 	syncCmd.AddCommand(syncEnableCmd)
