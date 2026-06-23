@@ -8,12 +8,29 @@
 | **直观性** | 命令名即功能（save / list / export / restore） |
 | **非技术友好** | 面向创意工作者，学习成本低 |
 
-## 命令状态
+## 命令列表
 
-| 标记 | 含义 |
-|------|------|
-| ✅ 已实现 | 功能完整可用 |
-| 🔧 计划中 | 尚未实现 |
+| 命令 | 说明 | 状态 |
+|------|------|------|
+| `init` | 初始化项目 | ✅ |
+| `add` | 添加文件到暂存区 | ✅ |
+| `status` | 查看工作区状态 | ✅ |
+| `unstage` | 清空或移除暂存区文件 | ✅ |
+| `save` | 保存版本 | ✅ |
+| `list` | 查看版本历史 | ✅ |
+| `log` | 查看提交详情 | ✅ |
+| `export` | 导出版本 | ✅ |
+| `restore` | 恢复工作区 | ✅ |
+| `diff` | 对比差异 | ✅ |
+| `branch` | 管理分支 | ✅ |
+| `switch` | 切换分支 | ✅ |
+| `config` | 配置管理 | ✅ |
+| `rm` | 删除文件 | ✅ |
+| `mv` | 移动/重命名文件 | ✅ |
+| `name` | 版本别名 | ✅ |
+| `history` | 操作历史 | ✅ |
+| `undo` | 撤销操作 | ✅ |
+| `wip` | 工作进度管理 | ✅ |
 
 ---
 
@@ -29,8 +46,10 @@ drift init
 
 **行为：**
 - 在当前目录创建 `.drift/` 文件夹
-- 初始化存储结构
-- 创建默认配置文件
+- 初始化存储结构和默认配置
+- 创建 `main` 分支并设置 HEAD
+- 交互式提示输入 `user.name` 和 `user.email`（在终端中运行时）
+- 显示下一步指引
 
 ---
 
@@ -41,14 +60,18 @@ drift init
 添加文件到暂存区。
 
 ```bash
-drift add <路径>
-drift add .        # 添加所有文件
-drift add 章节/    # 添加整个目录
+drift add <路径> [<路径>...]   # 支持多个路径
+drift add .                    # 添加所有文件
+drift add 章节/                # 添加整个目录
+drift add *.txt                # 支持 glob 通配符
+drift add 素材/ 章节/第一章.txt # 混合添加目录和文件
 ```
 
 **行为：**
-- 计算文件 SHA-256 哈希
-- 将文件内容存入 `objects/blobs/`
+- 支持多个路径参数，一次性添加多个文件/目录
+- 支持 glob 模式（`*`、`?`、`[...]`）
+- 重复添加相同内容自动跳过
+- 计算文件 SHA-256 哈希，存入 `objects/blobs/`
 - 更新暂存区（index）
 
 ### `drift status` ✅
@@ -56,10 +79,11 @@ drift add 章节/    # 添加整个目录
 查看工作区状态。
 
 ```bash
-drift status
+drift status                  # 人类可读格式（默认）
+drift status --porcelain      # 机器可读格式
 ```
 
-**输出示例：**
+**输出示例（默认）：**
 
 ```
 On branch main, version v2
@@ -75,21 +99,36 @@ Untracked files:
   新笔记.txt
 ```
 
+**输出示例（--porcelain）：**
+
+```
+A 章节/第一章.txt
+M 章节/第二章.txt
+ D 素材/旧图.png
+?? 新笔记.txt
+```
+
 **状态标识：**
 - `A` — Added（新增）
 - `M` — Modified（修改）
 - `D` — Deleted（删除）
 - `?` — Untracked（未跟踪）
 
+**porcelain 格式说明：** 每行格式为 `XY <路径>`，其中 X 为暂存区状态，Y 为工作区状态。
+
 ### `drift unstage` ✅
 
-清空暂存区。
+从暂存区移除文件。
 
 ```bash
-drift unstage
+drift unstage                 # 清空整个暂存区
+drift unstage <路径>           # 仅移除指定文件
 ```
 
-**行为：** 清空暂存区内容，不影响工作区文件。
+**行为：**
+- 不带参数时清空整个暂存区
+- 带路径参数时只移除该文件
+- 不影响工作区文件
 
 ---
 
@@ -102,6 +141,8 @@ drift unstage
 ```bash
 drift save                    # 无备注
 drift save -m "备注信息"       # 带备注
+drift save --amend            # 修改最近一条版本（保留版本号）
+drift save --amend -m "新备注" # 修改版本并更新备注
 ```
 
 `-m` / `--message` 可选。
@@ -112,6 +153,12 @@ drift save -m "备注信息"       # 带备注
 - 更新当前分支引用并清空暂存区
 - 若文件内容与上一版本完全相同，拒绝保存
 - 保存后列出本次所有保存的文件
+
+**--amend 行为：**
+- 替换最近一条提交，保留版本号（ID）和 parent
+- 更新 Tree 和 Message
+- 不会创建新的版本号
+- 用于修正最近保存的版本
 
 ### `drift list` ✅
 
@@ -138,6 +185,53 @@ Version history:
 - `2024-06-15 10:30` — 提交时间
 - `完成前四章` — 备注信息
 
+### `drift log` ✅
+
+查看提交历史详情。
+
+```bash
+drift log                    # 当前分支完整历史
+drift log <分支名>            # 指定分支历史
+drift log --oneline          # 单行模式
+drift log -n 5               # 只显示最近 5 条
+drift log main -n 10         # main 分支最近 10 条
+```
+
+**参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `<分支名>` | 可选，指定要查看的分支 |
+| `--oneline` | 单行模式，简洁显示 |
+| `-n` / `--number` | 限制显示的提交数量 |
+
+**输出示例（完整模式）：**
+
+```
+commit abc123def456...
+Version: v3
+Branch:  main
+Date:    2024-06-15 10:30:00
+Author:  张三 <zhangsan@example.com>
+
+    完成前四章
+
+commit def456abc123...
+Version: v2
+Branch:  main
+Date:    2024-06-15 09:00:00
+
+    修改配色方案
+```
+
+**输出示例（单行模式）：**
+
+```
+v3 [main] 完成前四章
+v2 [main] 修改配色方案
+v1 [main] 项目初始化
+```
+
 ### `drift export` ✅
 
 导出指定版本到文件系统。
@@ -152,7 +246,7 @@ drift export main -o ./main-branch     # 导出分支最新版本
 ```
 
 **参数：**
-- `<版本>` — 版本 ID（如 v1、v2）或分支名（如 main、feature）
+- `<版本>` — 版本 ID（如 v1、v2）、分支名（如 main）或别名（如 初稿）
 - `-o` / `--output` — **必填**，输出路径
 - `-f` / `--format` — 可选，`dir`（默认）/ `zip` / `tar`
 
@@ -172,11 +266,55 @@ drift restore main              # 恢复到分支最新版本
 - 暂存区与当前版本不同时需 `--force`
 - 未跟踪文件不受影响（保留）
 
-> **注意**：`restore` 只改变工作树内容，分支引用保持不变。如果需要改变分支引用（类似 Git 的 reset），目前需要手动操作。
+> **注意**：`restore` 只改变工作树内容，分支引用保持不变。
 
 ---
 
-## 分支命令 ✅
+## 文件管理命令
+
+### `drift rm` ✅
+
+删除文件并从暂存区移除。
+
+```bash
+drift rm <路径> [<路径>...]       # 删除一个或多个文件
+drift rm --cached <路径>          # 仅从暂存区移除，保留工作区文件
+drift rm -r 目录名                # 递归删除目录
+drift rm *.tmp                    # 支持 glob 通配符
+```
+
+**参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `--cached` | 仅从暂存区移除，保留磁盘文件 |
+| `-r` / `--recursive` | 递归删除目录（必需参数用于目录） |
+
+**行为：**
+- 只允许操作已跟踪的文件（暂存区或已提交）
+- 默认同时删除工作区文件和暂存区条目
+- `--cached` 保留磁盘文件，仅更新暂存区
+- 自动清理因此而变空的父目录
+
+### `drift mv` ✅
+
+移动或重命名已跟踪的文件。
+
+```bash
+drift mv <源> <目标>               # 重命名文件
+drift mv <文件> <目录>              # 移入目录
+drift mv <文件1> <文件2> <目录>     # 多个文件移入目录
+```
+
+**行为：**
+- 操作已跟踪的文件（暂存区或已提交均可）
+- 同时更新工作区和暂存区
+- 目标为已存在的目录时，自动将源移入该目录
+- 自动清理空的源目录
+
+---
+
+## 分支命令
 
 ### `drift branch` ✅
 
@@ -206,13 +344,15 @@ drift branch -m <新名> <旧名>  # 重命名分支
 - 目标名称不能与已有分支重名
 - 若当前在该分支上，HEAD 自动更新为新名
 
+**操作记录：** 删除和重命名操作会被记录到操作历史中，可通过 `drift undo` 恢复。
+
 ### `drift switch` ✅
 
 切换到指定分支。
 
 ```bash
 drift switch <名称>
-drift switch <名称> --force     # 强制切换（丢弃暂存区改动）
+drift switch <名称> --force     # 强制切换（丢弃未保存改动）
 drift switch <名称> --create    # 分支不存在时自动创建并切换
 drift switch <名称> -c          # --create 简写
 ```
@@ -220,14 +360,16 @@ drift switch <名称> -c          # --create 简写
 **行为：**
 - 将工作区切换到目标分支的最新版本
 - 删除目标分支不存在的文件
-- 暂存区非空时需 `--force`
+- **暂存区和工作区有改动时自动保存到 WIP**（不再拒绝切换）
+- `--force` 忽略所有未保存改动直接切换
 - `--create`/`-c`：分支不存在时从当前分支创建，已存在时报错
+- 切换后可执行 `drift wip` 查看或恢复保存的工作进度
 
 > **设计原则**：分支是独立版本线，不做 merge。作家用分支写不同剧情线，设计师用分支试不同配色方案。
 
 ---
 
-## 对比命令 ✅
+## 对比命令
 
 ### `drift diff` ✅
 
@@ -314,35 +456,123 @@ drift diff v1 v2 -p --output diff.txt      # 保存差异到文件
 | 版本 ID | `v1` | 当前分支的版本（如有歧义会提示） |
 | 分支名 | `main` | 该分支的最新版本 |
 | 分支/版本 | `main/v1` | 精确指定某分支的某版本 |
+| 别名 | `初稿` | 通过 `drift name` 设置的别名 |
 
 ---
 
-## 错误处理
+## 版本别名命令
 
-| 错误信息 | 原因 | 解决方案 |
-|----------|------|----------|
-| `not a drift project (run 'drift init')` | 未运行 `drift init` | 运行 `drift init` |
-| `file not found` | 路径错误 | 检查文件路径 |
-| `nothing to save (use 'drift add' first)` | 暂存区为空 | 运行 `drift add` |
-| `nothing changed since last version` | 文件内容未变化 | 修改文件后重新 `drift add` |
-| `version not found` | 版本 ID 错误 | 运行 `drift list` |
-| `staging area has pending changes` | 暂存区非空 | 运行 `drift unstage` 或使用 `--force` |
-| `branch not found` | 分支名错误 | 运行 `drift branch list` |
-| `branch "X" already exists` | 分支名重复 | 使用其他分支名或 `branch -m` 重命名 |
-| `cannot delete the currently checked-out branch` | 试图删除当前分支 | 先 `drift switch` 到其他分支 |
-| `could not acquire lock` | 另一个 drift 进程正在运行 | 等待或删除 `.drift/lock` |
+### `drift name` ✅
+
+为版本设置友好别名（类似 Git 的 tag）。
+
+```bash
+drift name <版本> <标签名>    # 为版本设置别名
+drift name --list             # 查看所有别名
+drift name --delete <标签名>  # 删除别名
+```
+
+**示例：**
+
+```bash
+drift name v1 初稿
+drift name v3 终稿
+drift name --list
+drift name --delete 初稿
+```
+
+**行为：**
+- 别名为版本提供一个易记的名称
+- 别名可在所有需要版本号的命令中使用（diff、export、restore 等）
+- 别名以 `refs/names/<标签>.ref` 存储在 `.drift/` 中
 
 ---
 
-## 配置命令 ✅
+## 操作历史命令
+
+### `drift history` ✅
+
+查看操作历史记录。
+
+```bash
+drift history                 # 查看所有操作记录
+drift history -n 10           # 只显示最近 10 条
+```
+
+**输出示例：**
+
+```
+2024-06-23 10:30:00  save v3  (修改配色) on main
+2024-06-23 10:25:00  save v2  on main
+2024-06-23 10:20:00  branch | create experiment
+2024-06-23 10:15:00  save v1  on main
+```
+
+**记录的操作类型：**
+- `save` — 保存版本
+- `branch` — 创建/删除/重命名分支
+- `switch` — 切换分支（HEAD 变更）
+
+### `drift undo` ✅
+
+撤销最近的操作。
+
+```bash
+drift undo                    # 撤销最近一次操作
+drift undo -n 3               # 撤销最近 3 次操作
+```
+
+**行为：**
+- 恢复被操作影响的分支引用到操作前的状态
+- 例如：撤销 `save` 会移除该提交并恢复分支指向
+- 撤销 `branch -d` 会恢复被删除的分支
+- 撤销 `branch -m` 会恢复分支原名
+- 操作历史本身也会记录撤销操作
+
+---
+
+## 工作进度管理
+
+### `drift wip` ✅
+
+查看已保存的工作进度（Work-In-Progress）。
+
+```bash
+drift wip                     # 查看所有 WIP
+drift wip list                # 同上
+```
+
+**说明：**
+- 切换分支时，如果有未保存的改动，会自动保存到 WIP
+- WIP 以 `.drift/wip/<分支名>.json` 存储
+- 不会自动恢复，需要手动执行 `drift restore-wip`
+
+### `drift restore-wip` ✅
+
+恢复之前保存的工作进度。
+
+```bash
+drift restore-wip             # 恢复当前分支的 WIP
+drift restore-wip <分支名>     # 恢复指定分支的 WIP
+```
+
+**行为：**
+- 将 WIP 中的文件恢复到工作区和暂存区
+- 恢复后自动删除 WIP 文件
+
+---
+
+## 配置命令
 
 ### `drift config` ✅
 
 查看或设置配置选项。
 
 ```bash
-drift config <key>           # 查看配置值
-drift config <key> <value>   # 设置配置值
+drift config <key>              # 查看配置值
+drift config <key> <value>      # 设置配置值
+drift config --list             # 列出所有配置
+drift config --unset <key>      # 清除配置值
 ```
 
 **支持的配置项：**
@@ -360,60 +590,11 @@ drift config <key> <value>   # 设置配置值
 drift config user.name "张三"
 drift config user.email "zhangsan@example.com"
 drift config user.name        # 查看当前用户名
+drift config --list            # 列出所有配置
+drift config --unset user.email  # 清除邮箱配置
 drift config core.default_branch dev  # 设置默认分支为 dev
-drift config core.autocrlf true       # 开启 CRLF 归一化（add: CRLF→LF, checkout: LF→CRLF）
-drift config core.autocrlf input      # 仅 add 时 CRLF→LF，checkout 保持 LF
-```
-
----
-
-## 日志命令 ✅
-
-### `drift log` ✅
-
-查看提交历史详情。
-
-```bash
-drift log                    # 当前分支完整历史
-drift log <分支名>            # 指定分支历史
-drift log --oneline          # 单行模式
-drift log -n 5               # 只显示最近 5 条
-drift log main -n 10         # main 分支最近 10 条
-```
-
-**参数：**
-
-| 参数 | 说明 |
-|------|------|
-| `<分支名>` | 可选，指定要查看的分支 |
-| `--oneline` | 单行模式，简洁显示 |
-| `-n` / `--number` | 限制显示的提交数量 |
-
-**输出示例（完整模式）：**
-
-```
-commit abc123def456...
-Version: v3
-Branch:  main
-Date:    2024-06-15 10:30:00
-Author:  张三 <zhangsan@example.com>
-
-    完成前四章
-
-commit def456abc123...
-Version: v2
-Branch:  main
-Date:    2024-06-15 09:00:00
-
-    修改配色方案
-```
-
-**输出示例（单行模式）：**
-
-```
-v3 [main] 完成前四章
-v2 [main] 修改配色方案
-v1 [main] 项目初始化
+drift config core.autocrlf true       # 开启 CRLF 归一化
+drift config core.autocrlf input      # 仅 add 时 CRLF→LF
 ```
 
 ---
@@ -431,3 +612,24 @@ drift <命令> --help
 |----|------|
 | 0 | 成功 |
 | 1 | 一般错误 |
+
+---
+
+## 错误处理
+
+| 错误信息 | 原因 | 解决方案 |
+|----------|------|----------|
+| `not a drift project (run 'drift init')` | 未运行 `drift init` | 运行 `drift init` |
+| `file not found` / `path not found` | 路径错误 | 检查文件路径 |
+| `nothing to save (use 'drift add' first)` | 暂存区为空 | 运行 `drift add` |
+| `nothing changed since last version` | 文件内容未变化 | 修改文件后重新 `drift add` |
+| `version not found` | 版本 ID 错误 | 运行 `drift list` |
+| `staging area has pending changes` | 暂存区非空 | 运行 `drift unstage` 或使用 `--force` |
+| `branch not found` | 分支名错误 | 运行 `drift branch list` |
+| `branch "X" already exists` | 分支名重复 | 使用其他分支名或 `branch -m` 重命名 |
+| `cannot delete the currently checked-out branch` | 试图删除当前分支 | 先 `drift switch` 到其他分支 |
+| `could not acquire lock` | 另一个 drift 进程正在运行 | 等待或检查 PID（见 `.drift/lock`） |
+| `pathspec 'X' did not match any tracked files` | 路径不是已跟踪文件 | 先 `drift add` |
+| `not a drift project` | 当前目录未初始化 | `drift init` |
+| `no version to amend` | 还没有版本可修改 | 先 `drift save` 创建版本 |
+| `unsafe symlink` | 符号链接指向仓库外 | 使用仓库内的路径 |
