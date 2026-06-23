@@ -12,11 +12,18 @@ dist/
 *.so
 *.dylib
 
+# Inno Setup build output (installer/drift.exe is built locally/CI)
+installer/drift.exe
+installer/drift-setup-*.exe
+installer/Output/
+
 # Test binary, built with `go test -c`
 *.test
 
 # Output of the go coverage tool
 *.out
+coverage
+storage_cover
 
 # IDE
 .idea/
