@@ -8,7 +8,7 @@
 | **哈希** | SHA-256 | 安全性高，纯摘要（不兼容 Git header） |
 | **存储** | 内容寻址 + 二进制格式 | 去重、性能 |
 | **CLI** | cobra | Go 标准 CLI 库 |
-| **压缩** | zlib（tar.gz） | 仅 export 使用，存储不压缩 |
+| **压缩** | zlib | 对象存储压缩（DRZL 格式）+ export 归档（tar.gz/zip） |
 
 ## 架构
 
@@ -127,14 +127,20 @@ CalculateHash(data) = hex(sha256.Sum256(data))  → 64 字符 hex string
 
 ### 换行符归一化
 
-计划实现（当前未做）：
+已实现（`internal/core/eol.go`）。通过 `core.autocrlf` 配置项控制：
+
+| 配置值 | add 时 | restore/export 时 |
+|--------|--------|-------------------|
+| `""`（默认） | 不转换 | 不转换 |
+| `true` | CRLF → LF | LF → CRLF（Windows）/ 保持 LF（Unix） |
+| `input` | CRLF → LF | 不转换 |
 
 ```
-PutBlobFromFile  → 读取文件时 CRLF → LF 归一化
-GetBlob          → 写入工作区时 LF → CRLF（Windows）/ 保持 LF（Unix）
+PutBlobFromFile  → 读取文件时 CRLF → LF 归一化（autocrlf=true/input）
+GetBlob          → 写入工作区时 LF → CRLF（Windows, autocrlf=true）
 ```
 
-确保同一文件在 Windows / macOS / Linux 上哈希一致。
+确保同一文件在 Windows / macOS / Linux 上哈希一致。流式处理，支持大文件。
 
 ### 文件锁
 
