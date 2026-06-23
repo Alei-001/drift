@@ -54,8 +54,13 @@ func getConfigValue(cfg *config.Config, key string) (string, error) {
 		return cfg.User.Email, nil
 	case "core.default_branch":
 		return cfg.Core.DefaultBranch, nil
+	case "core.autocrlf":
+		if cfg.Core.AutoCRLF == "" {
+			return "", nil
+		}
+		return cfg.Core.AutoCRLF, nil
 	default:
-		return "", fmt.Errorf("unknown config key: %s (supported: user.name, user.email, core.default_branch)", key)
+		return "", fmt.Errorf("unknown config key: %s (supported: user.name, user.email, core.default_branch, core.autocrlf)", key)
 	}
 }
 
@@ -67,8 +72,10 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 		cfg.User.Email = value
 	case "core.default_branch":
 		cfg.Core.DefaultBranch = value
+	case "core.autocrlf":
+		cfg.Core.AutoCRLF = value
 	default:
-		return fmt.Errorf("unknown config key: %s (supported: user.name, user.email, core.default_branch)", key)
+		return fmt.Errorf("unknown config key: %s (supported: user.name, user.email, core.default_branch, core.autocrlf)", key)
 	}
 	return nil
 }

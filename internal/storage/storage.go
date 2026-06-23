@@ -1,10 +1,15 @@
 package storage
 
-import "github.com/drift/drift/internal/core"
+import (
+	"io"
+
+	"github.com/drift/drift/internal/core"
+)
 
 type Storage interface {
 	PutBlob(data []byte) (string, error)
 	PutBlobFromFile(path string) (string, error)
+	PutBlobFromReader(r io.Reader) (string, error)
 	GetBlob(hash string) ([]byte, error)
 
 	PutTree(t *core.Tree) error

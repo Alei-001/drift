@@ -237,6 +237,90 @@ func TestUnstage_ClearStaging(t *testing.T) {
 	h.AssertContains(output, "note.txt")
 }
 
+// TC-ADD-009: CRLF→LF conversion when autocrlf is set
+func TestAdd_AutoCRLF(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.Config.Core.AutoCRLF = "true"
+	h.SetupSharedState()
+
+	crlfContent := "line1\r\nline2\r\nline3\r\n"
+	h.WriteFile("note.txt", crlfContent)
+
+	_, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+
+	var idx core.Index
+	h.Store.LoadIndex(&idx)
+	entry, err := idx.Entry("note.txt")
+	if err != nil {
+		t.Fatalf("index entry not found: %v", err)
+	}
+
+	data, err := h.Store.GetBlob(entry.Hash)
+	h.AssertNoError(err)
+
+	lfContent := "line1\nline2\nline3\n"
+	if string(data) != lfContent {
+		t.Errorf("stored content = %q, want %q (LF normalized)", string(data), lfContent)
+	}
+}
+
+// TC-ADD-010: No conversion when autocrlf is empty
+func TestAdd_AutoCRLF_Default(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	crlfContent := "line1\r\nline2\r\nline3\r\n"
+	h.WriteFile("note.txt", crlfContent)
+
+	_, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+
+	var idx core.Index
+	h.Store.LoadIndex(&idx)
+	entry, err := idx.Entry("note.txt")
+	if err != nil {
+		t.Fatalf("index entry not found: %v", err)
+	}
+
+	data, err := h.Store.GetBlob(entry.Hash)
+	h.AssertNoError(err)
+
+	if string(data) != crlfContent {
+		t.Errorf("stored content = %q, want %q (CRLF preserved)", string(data), crlfContent)
+	}
+}
+
+// TC-ADD-011: Binary files skip conversion even when autocrlf is set
+func TestAdd_AutoCRLF_BinarySkipped(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.Config.Core.AutoCRLF = "true"
+	h.SetupSharedState()
+
+	binaryContent := string([]byte{0, 1, 2, 'a', '\r', '\n', 'b'})
+	h.WriteFile("data.bin", binaryContent)
+
+	_, err := h.RunAdd("data.bin")
+	h.AssertNoError(err)
+
+	var idx core.Index
+	h.Store.LoadIndex(&idx)
+	entry, err := idx.Entry("data.bin")
+	if err != nil {
+		t.Fatalf("index entry not found: %v", err)
+	}
+
+	data, err := h.Store.GetBlob(entry.Hash)
+	h.AssertNoError(err)
+
+	if string(data) != binaryContent {
+		t.Errorf("binary content should be preserved, got %x, want %x", data, []byte(binaryContent))
+	}
+}
 // TC-ADD-007: Re-adding unchanged file skips it
 func TestAdd_SkipUnchangedFile(t *testing.T) {
 	h := NewTestHelper(t)

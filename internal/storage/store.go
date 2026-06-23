@@ -186,7 +186,20 @@ func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 	}
 	defer src.Close()
 
-	// Issue 16: use a unique temp file to avoid collisions on concurrent calls.
+	return s.putBlobFromReaderLocked(src)
+}
+
+func (s *Store) PutBlobFromReader(r io.Reader) (string, error) {
+	unlock, err := s.lock()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
+	return s.putBlobFromReaderLocked(r)
+}
+
+func (s *Store) putBlobFromReaderLocked(r io.Reader) (string, error) {
 	tmp, err := os.CreateTemp(s.DriftDir(), "putblob-*.tmp")
 	if err != nil {
 		return "", err
@@ -194,14 +207,12 @@ func (s *Store) PutBlobFromFile(filePath string) (string, error) {
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 
-	if _, err := tmp.ReadFrom(src); err != nil {
+	if _, err := tmp.ReadFrom(r); err != nil {
 		tmp.Close()
 		return "", err
 	}
 	tmp.Close()
 
-	// Stream-hash the tmp file instead of reading it all into memory.
-	// This avoids OOM on large files (the core use case for creative workers).
 	hash, err := core.CalculateHashFromFile(tmpName)
 	if err != nil {
 		return "", err

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -23,6 +24,16 @@ func writeBlobToWorktree(store *storage.Store, root string, blob core.BlobEntry)
 	data, err := store.GetBlob(blob.Hash)
 	if err != nil {
 		return core.IndexEntry{}, err
+	}
+
+	if runtime.GOOS == "windows" && blob.Mode != core.ModeSymlink &&
+		sharedConfig != nil && sharedConfig.Core.AutoCRLF == "true" {
+		var buf bytes.Buffer
+		w := core.NewCRLFWriter(&buf)
+		if _, err := w.Write(data); err != nil {
+			return core.IndexEntry{}, err
+		}
+		data = buf.Bytes()
 	}
 
 	// Symlink: remove existing entry and create a symlink to the stored target.

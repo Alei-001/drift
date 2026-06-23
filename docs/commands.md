@@ -352,6 +352,7 @@ drift config <key> <value>   # 设置配置值
 | `user.name` | 用户姓名（用于版本记录） | 空 |
 | `user.email` | 用户邮箱（用于版本记录） | 空 |
 | `core.default_branch` | 默认分支名称 | `main` |
+| `core.autocrlf` | CRLF 换行符归一化策略 | `""`（不做转换） |
 
 **示例：**
 
@@ -360,6 +361,8 @@ drift config user.name "张三"
 drift config user.email "zhangsan@example.com"
 drift config user.name        # 查看当前用户名
 drift config core.default_branch dev  # 设置默认分支为 dev
+drift config core.autocrlf true       # 开启 CRLF 归一化（add: CRLF→LF, checkout: LF→CRLF）
+drift config core.autocrlf input      # 仅 add 时 CRLF→LF，checkout 保持 LF
 ```
 
 ---

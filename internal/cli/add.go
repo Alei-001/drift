@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -177,7 +179,7 @@ func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileI
 			return false, fmt.Errorf("failed to store symlink %s: %w", relPath, err)
 		}
 	} else {
-		hash, err = store.PutBlobFromFile(fullPath)
+		hash, err = putBlobForAdd(store, fullPath, sharedConfig.Core.AutoCRLF)
 		if err != nil {
 			return false, fmt.Errorf("failed to store %s: %w", relPath, err)
 		}
@@ -207,4 +209,36 @@ func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileI
 
 	fmt.Printf("Added: %s\n", relPath)
 	return true, nil
+}
+
+func putBlobForAdd(store *storage.Store, path, autoCRLF string) (string, error) {
+	if autoCRLF == "" {
+		return store.PutBlobFromFile(path)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	head := make([]byte, 8192)
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return "", err
+	}
+	head = head[:n]
+
+	r := io.MultiReader(bytes.NewReader(head), f)
+
+	if bytes.Contains(head, []byte{0}) {
+		return store.PutBlobFromReader(r)
+	}
+
+	var buf bytes.Buffer
+	w := core.NewLFWriter(&buf)
+	if _, err := io.Copy(w, r); err != nil {
+		return "", err
+	}
+	return store.PutBlobFromReader(&buf)
 }

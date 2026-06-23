@@ -18,6 +18,7 @@ type UserConfig struct {
 
 type CoreConfig struct {
 	DefaultBranch string `json:"default_branch"`
+	AutoCRLF      string `json:"autocrlf"`
 }
 
 func DefaultConfig() *Config {
