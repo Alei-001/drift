@@ -9,11 +9,19 @@ import (
 )
 
 var saveCmd = &cobra.Command{
-	Use:   "save [-m message] [--amend]",
+	Use:   "save [-m message] [--amend] [--name label]",
 	Short: "Save staged changes as a new version",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		message, _ := cmd.Flags().GetString("message")
 		amend, _ := cmd.Flags().GetBool("amend")
+		nameLabel, _ := cmd.Flags().GetString("name")
+
+		// Validate name label early so we fail before saving.
+		if nameLabel != "" {
+			if err := validateNameLabel(nameLabel); err != nil {
+				return err
+			}
+		}
 
 		var idx core.Index
 		if err := sharedStore.LoadIndex(&idx); err != nil {
@@ -98,6 +106,11 @@ var saveCmd = &cobra.Command{
 			for _, p := range stagedPaths {
 				fmt.Printf("    %s\n", p)
 			}
+			if nameLabel != "" {
+				if err := addName(sharedStore, id, nameLabel); err != nil {
+					fmt.Printf("Warning: failed to assign name '%s': %v\n", nameLabel, err)
+				}
+			}
 			return nil
 		}
 
@@ -138,6 +151,11 @@ var saveCmd = &cobra.Command{
 		for _, p := range stagedPaths {
 			fmt.Printf("    %s\n", p)
 		}
+		if nameLabel != "" {
+			if err := addName(sharedStore, id, nameLabel); err != nil {
+				fmt.Printf("Warning: failed to assign name '%s': %v\n", nameLabel, err)
+			}
+		}
 		return nil
 	},
 }
@@ -145,5 +163,6 @@ var saveCmd = &cobra.Command{
 func init() {
 	saveCmd.Flags().StringP("message", "m", "", "Version message")
 	saveCmd.Flags().Bool("amend", false, "Amend the most recent version instead of creating a new one")
+	saveCmd.Flags().String("name", "", "Assign a version name (alias) to this version")
 	rootCmd.AddCommand(saveCmd)
 }

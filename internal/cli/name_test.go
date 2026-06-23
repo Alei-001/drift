@@ -153,3 +153,87 @@ func TestName_Overwrite(t *testing.T) {
 	h.AssertNoError(err)
 	h.AssertContains(output, "v2")
 }
+
+// TC-NAME-011: save --name assigns alias at save time
+func TestSave_WithName(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "content")
+	_, err := h.RunAdd("a.txt")
+	h.AssertNoError(err)
+
+	output, err := h.RunSaveWithName("my version", "final")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Saved version v1")
+	h.AssertContains(output, "final")
+
+	// Verify the name was assigned
+	output, err = h.RunName("--list")
+	h.AssertNoError(err)
+	h.AssertContains(output, "final")
+	h.AssertContains(output, "v1")
+}
+
+// TC-NAME-012: save --name with invalid label fails before saving
+func TestSave_WithInvalidName(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "content")
+	_, err := h.RunAdd("a.txt")
+	h.AssertNoError(err)
+
+	// Invalid label should fail before saving
+	_, err = h.RunSaveWithName("msg", "bad/name")
+	h.AssertError(err)
+
+	// Verify nothing was saved
+	_, err = h.RunName("--list")
+	h.AssertNoError(err)
+}
+
+// TC-NAME-013: save --name can be resolved later
+func TestSave_WithNameResolved(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "content")
+	_, err := h.RunAdd("a.txt")
+	h.AssertNoError(err)
+
+	_, err = h.RunSaveWithName("msg", "milestone")
+	h.AssertNoError(err)
+
+	// Use the name to export
+	outputDir := h.Dir + "/output"
+	output, err := h.RunExport("milestone", "-o", outputDir)
+	h.AssertNoError(err)
+	h.AssertContains(output, "Exported 1 file(s)")
+}
+
+// TC-NAME-014: save without --name does not affect existing names
+func TestSave_WithoutName(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "v1")
+	_, err := h.RunAdd("a.txt")
+	h.AssertNoError(err)
+	_, err = h.RunSaveWithName("v1", "first")
+	h.AssertNoError(err)
+
+	// Save again without --name
+	h.WriteFile("a.txt", "v2")
+	_, err = h.RunAdd("a.txt")
+	h.AssertNoError(err)
+	output, err := h.RunSave("v2")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Saved version v2")
+
+	// Verify "first" still points to v1
+	output, err = h.RunName("--list")
+	h.AssertNoError(err)
+	h.AssertContains(output, "first")
+	h.AssertContains(output, "v1")
+}

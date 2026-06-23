@@ -103,6 +103,7 @@ func resetAllFlags() {
 
 	// save command flags - message should be set per call
 	saveCmd.Flags().Set("message", "")
+	saveCmd.Flags().Set("name", "")
 
 	// log command package-level vars
 	logOneline = false
@@ -246,6 +247,18 @@ func (h *TestHelper) RunSave(message string) (string, error) {
 	h.SetupSharedState()
 	// Always set the message flag (even to empty) to avoid state leakage between tests.
 	saveCmd.Flags().Set("message", message)
+	saveCmd.Flags().Set("name", "")
+	return CaptureOutput(func() error {
+		return saveCmd.RunE(saveCmd, nil)
+	})
+}
+
+// RunSaveWithName saves with a message and assigns a version name.
+func (h *TestHelper) RunSaveWithName(message, name string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	saveCmd.Flags().Set("message", message)
+	saveCmd.Flags().Set("name", name)
 	return CaptureOutput(func() error {
 		return saveCmd.RunE(saveCmd, nil)
 	})
