@@ -9,6 +9,7 @@ import (
 type Config struct {
 	User UserConfig `json:"user"`
 	Core CoreConfig `json:"core"`
+	Sync SyncConfig `json:"sync,omitempty"`
 }
 
 type UserConfig struct {
@@ -19,6 +20,14 @@ type UserConfig struct {
 type CoreConfig struct {
 	DefaultBranch string `json:"default_branch"`
 	AutoCRLF      string `json:"autocrlf"`
+}
+
+// SyncConfig holds per-project sync state. Managed by the sync subsystem.
+type SyncConfig struct {
+	Enabled    bool   `json:"enabled"`
+	ProjectID  string `json:"project_id,omitempty"`
+	RemoteName string `json:"remote_name,omitempty"`
+	LastSync   string `json:"last_sync,omitempty"`
 }
 
 func DefaultConfig() *Config {

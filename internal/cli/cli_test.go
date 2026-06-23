@@ -126,6 +126,10 @@ func resetAllFlags() {
 	// name command flags
 	nameCmd.Flags().Set("list", "false")
 	nameCmd.Flags().Set("delete", "")
+
+	// sync command flags
+	syncShowRemote = false
+	syncUnsetRemote = false
 }
 
 // WriteFile creates a file with the given content.
