@@ -311,6 +311,89 @@ drift diff v1 v2 -p --output diff.txt      # 保存差异到文件
 | `drift: branch not found` | 分支名错误 | 运行 `drift branch list` |
 | `drift: could not acquire lock` | 另一个 drift 进程正在运行 | 等待或删除 `.drift/lock` |
 
+---
+
+## 配置命令 ✅
+
+### `drift config` ✅
+
+查看或设置配置选项。
+
+```bash
+drift config <key>           # 查看配置值
+drift config <key> <value>   # 设置配置值
+```
+
+**支持的配置项：**
+
+| 配置键 | 说明 | 默认值 |
+|--------|------|--------|
+| `user.name` | 用户姓名（用于版本记录） | 空 |
+| `user.email` | 用户邮箱（用于版本记录） | 空 |
+| `core.default_branch` | 默认分支名称 | `main` |
+
+**示例：**
+
+```bash
+drift config user.name "张三"
+drift config user.email "zhangsan@example.com"
+drift config user.name        # 查看当前用户名
+drift config core.default_branch dev  # 设置默认分支为 dev
+```
+
+---
+
+## 日志命令 ✅
+
+### `drift log` ✅
+
+查看提交历史详情。
+
+```bash
+drift log                    # 当前分支完整历史
+drift log <分支名>            # 指定分支历史
+drift log --oneline          # 单行模式
+drift log -n 5               # 只显示最近 5 条
+drift log main -n 10         # main 分支最近 10 条
+```
+
+**参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `<分支名>` | 可选，指定要查看的分支 |
+| `--oneline` | 单行模式，简洁显示 |
+| `-n` / `--number` | 限制显示的提交数量 |
+
+**输出示例（完整模式）：**
+
+```
+commit abc123def456...
+Version: v3
+Branch:  main
+Date:    2024-06-15 10:30:00
+Author:  张三 <zhangsan@example.com>
+
+    完成前四章
+
+commit def456abc123...
+Version: v2
+Branch:  main
+Date:    2024-06-15 09:00:00
+
+    修改配色方案
+```
+
+**输出示例（单行模式）：**
+
+```
+v3 [main] 完成前四章
+v2 [main] 修改配色方案
+v1 [main] 项目初始化
+```
+
+---
+
 ## 帮助
 
 ```bash
