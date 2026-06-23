@@ -109,9 +109,8 @@
 
 | go-git 功能 | 为什么不需要 |
 |-------------|-------------|
-| packfile / delta 压缩 | 二进制文件不压缩，存储便宜 |
 | merge / conflict resolution | 单人/极小团队，不做 merge |
-| transport / remote protocol | MVP 阶段纯本地 |
+| transport / remote protocol | MVP 阶段纯本地,未来可以做 |
 | reflog | 过于 Git 内部概念 |
 | rebase / cherry-pick / stash | 开发者工具 |
 | tag | version ID 已足够，不需要两层命名 |
