@@ -109,23 +109,27 @@ drift save -m "备注信息"       # 带备注
 **行为：**
 - 从暂存区构建 Tree 对象
 - 创建 Commit 对象（每个分支独立递增：main 的 v1, v2...；feature 的 v1, v2...）
-- 更新当前分支引用
-- 清空暂存区
+- 更新当前分支引用并清空暂存区
+- 若文件内容与上一版本完全相同，拒绝保存
+- 保存后列出本次所有保存的文件
 
 ### `drift list` ✅
 
 查看版本历史（最新在前）。
 
 ```bash
-drift list
+drift list              # 所有分支的版本历史
+drift list <分支名>      # 仅查看指定分支的历史
 ```
 
 **输出示例：**
 
 ```
-v2  [main]     2024-06-15 10:30  完成前四章
-v1  [main]     2024-06-15 09:00  修改配色
-v1  [feature]  2024-06-14 15:00  方案A初稿
+Version history:
+
+  v2  [main]     2024-06-15 10:30  完成前四章
+  v1  [main]     2024-06-15 09:00  修改配色
+  v1  [feature]  2024-06-14 15:00  方案A初稿
 ```
 
 **格式说明：**
@@ -176,11 +180,13 @@ drift restore main              # 恢复到分支最新版本
 
 ### `drift branch` ✅
 
-创建或查看分支。
+创建、查看、删除或重命名分支。
 
 ```bash
-drift branch <名称>    # 基于当前版本创建分支
-drift branch list      # 查看所有分支
+drift branch <名称>      # 基于当前版本创建分支
+drift branch list        # 查看所有分支
+drift branch -d <名称>   # 删除分支
+drift branch -m <新名> <旧名>  # 重命名分支
 ```
 
 **输出示例：**
@@ -191,19 +197,31 @@ drift branch list      # 查看所有分支
   方案B
 ```
 
+**删除约束：**
+- 不能删除 HEAD
+- 不能删除当前所在分支（需先切换到其他分支）
+
+**重命名约束：**
+- 不能重命名 HEAD
+- 目标名称不能与已有分支重名
+- 若当前在该分支上，HEAD 自动更新为新名
+
 ### `drift switch` ✅
 
 切换到指定分支。
 
 ```bash
 drift switch <名称>
-drift switch <名称> --force    # 强制切换（丢弃暂存区改动）
+drift switch <名称> --force     # 强制切换（丢弃暂存区改动）
+drift switch <名称> --create    # 分支不存在时自动创建并切换
+drift switch <名称> -c          # --create 简写
 ```
 
 **行为：**
 - 将工作区切换到目标分支的最新版本
 - 删除目标分支不存在的文件
 - 暂存区非空时需 `--force`
+- `--create`/`-c`：分支不存在时从当前分支创建，已存在时报错
 
 > **设计原则**：分支是独立版本线，不做 merge。作家用分支写不同剧情线，设计师用分支试不同配色方案。
 
@@ -303,13 +321,16 @@ drift diff v1 v2 -p --output diff.txt      # 保存差异到文件
 
 | 错误信息 | 原因 | 解决方案 |
 |----------|------|----------|
-| `drift: not initialized` | 未运行 `drift init` | 运行 `drift init` |
-| `drift: file not found` | 路径错误 | 检查文件路径 |
-| `drift: staging area is empty` | 未添加文件 | 运行 `drift add` |
-| `drift: version not found` | 版本 ID 错误 | 运行 `drift list` |
-| `drift: staging area has pending changes` | 暂存区非空 | 运行 `drift unstage` 或使用 `--force` |
-| `drift: branch not found` | 分支名错误 | 运行 `drift branch list` |
-| `drift: could not acquire lock` | 另一个 drift 进程正在运行 | 等待或删除 `.drift/lock` |
+| `not a drift project (run 'drift init')` | 未运行 `drift init` | 运行 `drift init` |
+| `file not found` | 路径错误 | 检查文件路径 |
+| `nothing to save (use 'drift add' first)` | 暂存区为空 | 运行 `drift add` |
+| `nothing changed since last version` | 文件内容未变化 | 修改文件后重新 `drift add` |
+| `version not found` | 版本 ID 错误 | 运行 `drift list` |
+| `staging area has pending changes` | 暂存区非空 | 运行 `drift unstage` 或使用 `--force` |
+| `branch not found` | 分支名错误 | 运行 `drift branch list` |
+| `branch "X" already exists` | 分支名重复 | 使用其他分支名或 `branch -m` 重命名 |
+| `cannot delete the currently checked-out branch` | 试图删除当前分支 | 先 `drift switch` 到其他分支 |
+| `could not acquire lock` | 另一个 drift 进程正在运行 | 等待或删除 `.drift/lock` |
 
 ---
 

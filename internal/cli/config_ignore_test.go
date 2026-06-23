@@ -15,6 +15,37 @@ func TestConfig_DefaultConfig(t *testing.T) {
 	}
 }
 
+// TC-CONFIG-002: Get config value (default empty)
+func TestConfig_GetDefault(t *testing.T) {
+	h := NewTestHelper(t)
+
+	output, err := h.RunConfig("user.name")
+	h.AssertNoError(err)
+	if output == "" {
+		// default is empty - just verify no error
+	}
+}
+
+// TC-CONFIG-003: Set and get config value
+func TestConfig_SetAndGet(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("user.name", "Test User")
+	h.AssertNoError(err)
+
+	output, err := h.RunConfig("user.name")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Test User")
+}
+
+// TC-CONFIG-004: Unknown config key errors
+func TestConfig_UnknownKey(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("unknown.key")
+	h.AssertError(err)
+}
+
 // TC-IGNORE-001: .driftignore ignores specific files
 func TestIgnore_SpecificFiles(t *testing.T) {
 	h := NewTestHelper(t)

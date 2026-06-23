@@ -245,3 +245,100 @@ func TestSwitch_IndependentVersionLines(t *testing.T) {
 		t.Errorf("expected 3 total commits, got %d", len(mainCommits))
 	}
 }
+
+// TC-BRANCH-004: Delete a branch
+func TestBranch_Delete(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	_, err := h.RunBranch("experiment")
+	h.AssertNoError(err)
+
+	_, err = h.RunSwitch("experiment")
+	h.AssertNoError(err)
+	_, err = h.RunSwitch("main")
+	h.AssertNoError(err)
+
+	output, err := h.RunBranch("-d", "experiment")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Deleted branch: experiment")
+
+	_, err = h.Store.GetRef("experiment")
+	h.AssertError(err)
+}
+
+// TC-BRANCH-005: Delete current branch fails
+func TestBranch_DeleteCurrentBranch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	_, err := h.RunBranch("-d", "main")
+	h.AssertError(err)
+}
+
+// TC-BRANCH-006: Rename a branch
+func TestBranch_Rename(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	_, err := h.RunBranch("old-name")
+	h.AssertNoError(err)
+
+	output, err := h.RunBranch("-m", "new-name", "old-name")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Renamed branch: old-name")
+
+	_, err = h.Store.GetRef("old-name")
+	h.AssertError(err)
+
+	_, err = h.Store.GetRef("new-name")
+	h.AssertNoError(err)
+}
+
+// TC-BRANCH-007: Rename updates HEAD if checked out
+func TestBranch_RenameUpdatesHEAD(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	_, err := h.RunBranch("old")
+	h.AssertNoError(err)
+	_, err = h.RunSwitch("old")
+	h.AssertNoError(err)
+
+	_, err = h.RunBranch("-m", "new", "old")
+	h.AssertNoError(err)
+
+	head, _ := h.Store.GetRef("HEAD")
+	if head != "new" {
+		t.Errorf("HEAD = %q, want %q", head, "new")
+	}
+}
+
+// TC-BRANCH-008: Rename to existing branch fails
+func TestBranch_RenameToExisting(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	_, err := h.RunBranch("branch-a")
+	h.AssertNoError(err)
+	_, err = h.RunBranch("branch-b")
+	h.AssertNoError(err)
+
+	_, err = h.RunBranch("-m", "branch-b", "branch-a")
+	h.AssertError(err)
+}

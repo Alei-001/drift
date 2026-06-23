@@ -107,6 +107,10 @@ func resetAllFlags() {
 	// log command package-level vars
 	logOneline = false
 	logCount = 0
+
+	// branch command package-level vars
+	branchDelete = false
+	branchMove = ""
 }
 
 // WriteFile creates a file with the given content.
@@ -291,8 +295,35 @@ func (h *TestHelper) RunRestore(args ...string) (string, error) {
 func (h *TestHelper) RunBranch(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
+	branchDelete = false
+	branchMove = ""
+	// Parse -d and -m flags from args; they are cobra-via-BoolVarP/StringVarP.
+	for i, arg := range args {
+		if arg == "-d" || arg == "--delete" {
+			branchDelete = true
+		}
+		if (arg == "-m" || arg == "--move") && i+1 < len(args) {
+			branchMove = args[i+1]
+		}
+	}
+	filteredArgs := make([]string, 0, len(args))
+	skipNext := false
+	for _, arg := range args {
+		if arg == "-d" || arg == "--delete" {
+			continue
+		}
+		if arg == "-m" || arg == "--move" {
+			skipNext = true
+			continue
+		}
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		filteredArgs = append(filteredArgs, arg)
+	}
 	return CaptureOutput(func() error {
-		return branchCmd.RunE(branchCmd, args)
+		return branchCmd.RunE(branchCmd, filteredArgs)
 	})
 }
 
@@ -437,6 +468,25 @@ func (h *TestHelper) RunLogLimit(limit int, args ...string) (string, error) {
 	})
 }
 
+// RunConfig runs the config command.
+func (h *TestHelper) RunConfig(args ...string) (string, error) {
+	h.T.Helper()
+	sharedDir = h.Dir
+	sharedStore = storage.NewStore(h.Dir)
+	sharedConfig = h.Config
+	resetAllFlags()
+	if !sharedStore.IsInitialized() {
+		if err := sharedStore.Init(); err != nil {
+			return "", err
+		}
+		sharedStore.SaveRef("main", "")
+		sharedStore.SaveRef("HEAD", "main")
+	}
+	return CaptureOutput(func() error {
+		return configCmd.RunE(configCmd, args)
+	})
+}
+
 func init() {
 	// Suppress cobra output during tests
 	initCmd.SetOutput(&bytes.Buffer{})
@@ -451,6 +501,7 @@ func init() {
 	switchCmd.SetOutput(&bytes.Buffer{})
 	diffCmd.SetOutput(&bytes.Buffer{})
 	logCmd.SetOutput(&bytes.Buffer{})
+	configCmd.SetOutput(&bytes.Buffer{})
 }
 
 // Helper to format expected output

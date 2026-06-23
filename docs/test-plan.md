@@ -412,6 +412,8 @@ Untracked files:
 
 ### TC-RESET-001：清空暂存区
 
+> **注意：** 该命令已重命名为 `drift unstage`，原 `drift reset` 不再存在。
+
 **前置条件：** 暂存区有文件
 
 **操作步骤：**
@@ -1013,7 +1015,161 @@ drift list
 
 ---
 
-## 5. 对比命令
+### TC-SWITCH-007：使用 --create 创建并切换分支
+
+**前置条件：** 已初始化项目，已保存 v1
+
+**操作步骤：**
+```bash
+drift switch newbranch --create
+```
+
+**预期输出：**
+```
+Created branch: newbranch
+Switched to branch: newbranch
+```
+
+**预期行为：**
+- HEAD 指向 newbranch
+- newbranch 与之前的 main 指向同一 commit
+
+---
+
+### TC-BRANCH-004：删除分支
+
+**前置条件：** 已创建 `experiment` 分支，当前不在该分支上
+
+**操作步骤：**
+```bash
+drift branch -d experiment
+```
+
+**预期输出：**
+```
+Deleted branch: experiment
+```
+
+**预期行为：**
+- `.drift/refs/experiment.json` 被删除
+- 当前分支不受影响
+
+---
+
+### TC-BRANCH-005：删除当前分支（应失败）
+
+**前置条件：** 当前在 `main` 分支
+
+**操作步骤：**
+```bash
+drift branch -d main
+```
+
+**预期输出：**
+```
+Error: cannot delete the currently checked-out branch "main" (switch to another branch first)
+```
+
+---
+
+### TC-BRANCH-006：重命名分支
+
+**前置条件：** 已创建 `old` 分支
+
+**操作步骤：**
+```bash
+drift branch -m new old
+```
+
+**预期输出：**
+```
+Renamed branch: old → new
+```
+
+**预期行为：**
+- `old` 分支引用被删除
+- `new` 分支引用存在，指向原 `old` 的 commit
+- 若当前在 `old` 上，HEAD 自动更新为 `new`
+
+---
+
+## 5. 日志命令
+
+### TC-LOG-001：查看完整日志
+
+**前置条件：** 已保存两个版本
+
+**操作步骤：**
+```bash
+drift log
+```
+
+**预期输出：**
+```
+commit {hash}
+Version: v2
+Branch:  main
+Date:    {date} {time}
+Author:  {name} <{email}>
+
+    second commit
+
+commit {hash}
+Version: v1
+Branch:  main
+Date:    {date} {time}
+
+    first commit
+```
+
+---
+
+### TC-LOG-002：单行模式
+
+**前置条件：** 已保存版本
+
+**操作步骤：**
+```bash
+drift log --oneline
+```
+
+**预期输出：**
+```
+v2 [main] second commit
+v1 [main] first commit
+```
+
+---
+
+### TC-LOG-003：限制数量
+
+**前置条件：** 已保存 5 个版本
+
+**操作步骤：**
+```bash
+drift log -n 3
+```
+
+**预期输出：**
+显示最近 3 条记录
+
+---
+
+### TC-LOG-004：查看指定分支日志
+
+**前置条件：** 有 `main` 和 `feature` 两个分支各有提交
+
+**操作步骤：**
+```bash
+drift log feature
+```
+
+**预期输出：**
+仅显示 `feature` 分支的提交历史
+
+---
+
+## 6. 对比命令
 
 ### TC-DIFF-001：工作区 vs 最新版本（无差异）
 
@@ -1192,8 +1348,7 @@ cat .drift/config.json
     "email": ""
   },
   "core": {
-    "editor": "",
-    "compression": "none"
+    "default_branch": "main"
   }
 }
 ```
@@ -1201,6 +1356,55 @@ cat .drift/config.json
 **预期行为：**
 - `.drift/config.json` 文件存在
 - 字段值为空字符串或默认值
+
+---
+
+### TC-CONFIG-002：查看配置值
+
+**前置条件：** 已初始化项目
+
+**操作步骤：**
+```bash
+drift config user.name
+```
+
+**预期输出：**
+```
+（空行或默认值）
+```
+
+---
+
+### TC-CONFIG-003：设置配置值
+
+**前置条件：** 已初始化项目
+
+**操作步骤：**
+```bash
+drift config user.name "Test User"
+drift config user.name
+```
+
+**预期输出：**
+```
+Test User
+```
+
+---
+
+### TC-CONFIG-004：查看不存在的配置项
+
+**前置条件：** 已初始化项目
+
+**操作步骤：**
+```bash
+drift config unknown.key
+```
+
+**预期输出：**
+```
+Error: unknown config key: unknown.key (supported: user.name, user.email, core.default_branch)
+```
 
 ---
 
@@ -1644,3 +1848,4 @@ drift diff v1 v2
 |------|------|------|
 | 1.0 | 2026-06-22 | 初始版本 |
 | 1.1 | 2026-06-22 | 修正 TC-IGNORE-003 模式为 `**/node_modules/**`；合并重复用例；补充无 commit 时 status 测试 |
+| 1.2 | 2026-06-23 | `reset` → `unstage` 重命名；修正 config schema（`core.default_branch`）；新增 branch delete/rename、switch --create、log 命令测试用例 |

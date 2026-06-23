@@ -529,8 +529,24 @@ func (s *Store) RenameRef(oldName, newName string) error {
 	}
 
 	// Update HEAD if it pointed at oldName.
+	// Write directly (not via SaveRef) to avoid re-entrant lock — we already hold it.
 	if head, err := s.GetRef("HEAD"); err == nil && head == oldName {
-		_ = s.SaveRef("HEAD", newName)
+		headPath := filepath.Join(s.DriftDir(), refsDir, "HEAD.json")
+		headData, err := json.MarshalIndent(map[string]string{
+			"name":        "HEAD",
+			"commit_hash": newName,
+		}, "", "  ")
+		if err != nil {
+			return err
+		}
+		headTmp := headPath + ".tmp"
+		if err := os.WriteFile(headTmp, headData, 0644); err != nil {
+			return err
+		}
+		if err := os.Rename(headTmp, headPath); err != nil {
+			_ = os.Remove(headTmp)
+			return err
+		}
 	}
 
 	return nil
