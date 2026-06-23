@@ -46,6 +46,29 @@ func TestConfig_UnknownKey(t *testing.T) {
 	h.AssertError(err)
 }
 
+// TC-CONFIG-005: Set and get core.autocrlf
+func TestConfig_SetAndGetAutoCRLF(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("core.autocrlf", "true")
+	h.AssertNoError(err)
+
+	output, err := h.RunConfig("core.autocrlf")
+	h.AssertNoError(err)
+	h.AssertContains(output, "true")
+}
+
+// TC-CONFIG-006: Get default core.autocrlf (empty)
+func TestConfig_GetDefaultAutoCRLF(t *testing.T) {
+	h := NewTestHelper(t)
+
+	output, err := h.RunConfig("core.autocrlf")
+	h.AssertNoError(err)
+	if trimmed := output; trimmed != "" && trimmed != "\n" {
+		t.Errorf("expected empty default for core.autocrlf, got %q", output)
+	}
+}
+
 // TC-IGNORE-001: .driftignore ignores specific files
 func TestIgnore_SpecificFiles(t *testing.T) {
 	h := NewTestHelper(t)

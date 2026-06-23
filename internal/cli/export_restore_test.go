@@ -3,6 +3,8 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -176,6 +178,106 @@ func TestRestore_StagedChangesForce(t *testing.T) {
 	output, err := h.RunRestore("v1", "--force")
 	h.AssertNoError(err)
 	h.AssertContains(output, "Restored to v1")
+}
+
+// TC-RESTORE-005: Restore with autocrlf=true converts LF→CRLF on Windows
+func TestRestore_AutoCRLF_LFtoCRLF(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create file with LF line endings (as stored internally)
+	h.WriteFile("note.txt", "line1\nline2\nline3\n")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Enable autocrlf
+	h.Config.Core.AutoCRLF = "true"
+	h.SetupSharedState()
+
+	// Restore
+	_, err := h.RunRestore("v1", "--force")
+	h.AssertNoError(err)
+
+	data, err := os.ReadFile(filepath.Join(h.Dir, "note.txt"))
+	h.AssertNoError(err)
+
+	if runtime.GOOS == "windows" {
+		// On Windows, LF should be converted to CRLF
+		if !strings.Contains(string(data), "\r\n") {
+			t.Errorf("expected CRLF line endings on Windows, got: %q", string(data))
+		}
+		if strings.Count(string(data), "\r\n") != 3 {
+			t.Errorf("expected 3 CRLF sequences on Windows, got: %q", string(data))
+		}
+	} else {
+		// On other platforms, LF should be preserved
+		if strings.Contains(string(data), "\r\n") {
+			t.Errorf("expected LF line endings on non-Windows, got: %q", string(data))
+		}
+	}
+}
+
+// TC-RESTORE-006: Restore with autocrlf=false preserves LF
+func TestRestore_AutoCRLF_Off_PreservesLF(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "line1\nline2\nline3\n")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// autocrlf is off by default
+	h.SetupSharedState()
+
+	_, err := h.RunRestore("v1", "--force")
+	h.AssertNoError(err)
+
+	data, err := os.ReadFile(filepath.Join(h.Dir, "note.txt"))
+	h.AssertNoError(err)
+
+	// LF should always be preserved when autocrlf is off
+	if strings.Contains(string(data), "\r\n") {
+		t.Errorf("expected LF line endings when autocrlf is off, got: %q", string(data))
+	}
+}
+
+// TC-RESTORE-007: Full round trip CRLF→LF→CRLF with autocrlf=true
+func TestRestore_AutoCRLF_RoundTrip(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Original content has CRLF endings
+	original := "line1\r\nline2\r\nline3\r\n"
+
+	h.Config.Core.AutoCRLF = "true"
+	h.SetupSharedState()
+
+	h.WriteFile("note.txt", original)
+
+	// Add (CRLF→LF stored)
+	_, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+
+	// Save
+	_, err = h.RunSave("v1")
+	h.AssertNoError(err)
+
+	// Restore
+	_, err = h.RunRestore("v1", "--force")
+	h.AssertNoError(err)
+
+	data, err := os.ReadFile(filepath.Join(h.Dir, "note.txt"))
+	h.AssertNoError(err)
+
+	if runtime.GOOS == "windows" {
+		// On Windows, should return to CRLF
+		if string(data) != original {
+			t.Errorf("round-trip failed on Windows:\n  got:  %q\n  want: %q", string(data), original)
+		}
+	} else {
+		// On other platforms, stored LF is preserved
+		if strings.Contains(string(data), "\r\n") {
+			t.Errorf("expected LF on non-Windows after round-trip, got: %q", string(data))
+		}
+	}
 }
 
 // TC-RESTORE-004: Preserve untracked files

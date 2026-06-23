@@ -37,7 +37,7 @@ func TestSaveThenLoad_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{
 		User: UserConfig{Name: "alice", Email: "alice@example.com"},
-		Core: CoreConfig{DefaultBranch: "develop"},
+		Core: CoreConfig{DefaultBranch: "develop", AutoCRLF: "true"},
 	}
 	if err := SaveConfig(dir, cfg); err != nil {
 		t.Fatalf("SaveConfig failed: %v", err)
@@ -55,6 +55,9 @@ func TestSaveThenLoad_RoundTrip(t *testing.T) {
 	}
 	if loaded.Core.DefaultBranch != "develop" {
 		t.Fatalf("expected default branch develop, got %q", loaded.Core.DefaultBranch)
+	}
+	if loaded.Core.AutoCRLF != "true" {
+		t.Fatalf("expected autocrlf true, got %q", loaded.Core.AutoCRLF)
 	}
 }
 

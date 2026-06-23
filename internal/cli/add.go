@@ -240,5 +240,8 @@ func putBlobForAdd(store *storage.Store, path, autoCRLF string) (string, error) 
 	if _, err := io.Copy(w, r); err != nil {
 		return "", err
 	}
+	if err := w.Close(); err != nil {
+		return "", err
+	}
 	return store.PutBlobFromReader(&buf)
 }

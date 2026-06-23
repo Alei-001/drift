@@ -52,6 +52,42 @@ func TestCRLFToLF_TrailingCR(t *testing.T) {
 	}
 }
 
+func TestCRLFToLF_LoneTrailingCR(t *testing.T) {
+	// A lone \r at the end (not part of \r\n) should be preserved.
+	// Close() flushes the buffered \r.
+	input := []byte("hello\r")
+	expected := []byte("hello\r")
+
+	var buf bytes.Buffer
+	w := NewLFWriter(&buf)
+	n, err := w.Write(input)
+	if err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+	if n != len(input) {
+		t.Errorf("n = %d, want %d", n, len(input))
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if !bytes.Equal(buf.Bytes(), expected) {
+		t.Errorf("output = %q, want %q", buf.Bytes(), expected)
+	}
+}
+
+func TestCRLFToLF_CRNotFollowedByLF(t *testing.T) {
+	// \r should only be removed when immediately followed by \n.
+	input := []byte("a\rb\nc\r\n")
+	expected := []byte("a\rb\nc\n")
+
+	var buf bytes.Buffer
+	w := NewLFWriter(&buf)
+	w.Write(input)
+	if !bytes.Equal(buf.Bytes(), expected) {
+		t.Errorf("output = %q, want %q", buf.Bytes(), expected)
+	}
+}
+
 func TestLFToCRLF(t *testing.T) {
 	input := []byte("a\nb\nc")
 	expected := []byte("a\r\nb\r\nc")
@@ -124,6 +160,61 @@ func TestRoundTrip_CRLF_LF_CRLF(t *testing.T) {
 
 	if !bytes.Equal(crlf.Bytes(), original) {
 		t.Errorf("round-trip failed: %q != %q", crlf.Bytes(), original)
+	}
+}
+
+// TestCRLFToLF_ByteCountAcrossWrites verifies that the return values of
+// Write calls across \r\n splitting correctly sum to the total input length.
+// Regression test for the pendingCR + empty-data byte-count edge case.
+func TestCRLFToLF_ByteCountAcrossWrites(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewLFWriter(&buf)
+
+	// Scenario: \r lands at end of one Write, \n starts the next.
+	n1, err := w.Write([]byte("hello\r"))
+	if err != nil {
+		t.Fatalf("first Write failed: %v", err)
+	}
+	n2, err := w.Write([]byte("\nworld"))
+	if err != nil {
+		t.Fatalf("second Write failed: %v", err)
+	}
+
+	totalBytes := len("hello\r") + len("\nworld")
+	if n1+n2 != totalBytes {
+		t.Errorf("total returned bytes = %d, want %d", n1+n2, totalBytes)
+	}
+	if string(buf.Bytes()) != "hello\nworld" {
+		t.Errorf("output = %q, want %q", buf.Bytes(), "hello\nworld")
+	}
+}
+
+// TestCRLFToLF_ByteCount_JustNewline verifies the exact edge case where
+// the second Write is a single \n (leaving data empty after slice).
+func TestCRLFToLF_ByteCount_JustNewline(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewLFWriter(&buf)
+
+	n1, err := w.Write([]byte("\r"))
+	if err != nil {
+		t.Fatalf("first Write failed: %v", err)
+	}
+	n2, err := w.Write([]byte("\n"))
+	if err != nil {
+		t.Fatalf("second Write failed: %v", err)
+	}
+
+	totalBytes := len("\r") + len("\n")
+	if n1+n2 != totalBytes {
+		t.Errorf("total returned bytes = %d, want %d", n1+n2, totalBytes)
+	}
+	// Close to flush the pending state (should be a no-op here since \r+\n
+	// combined into a single \n).
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if string(buf.Bytes()) != "\n" {
+		t.Errorf("output = %q, want %q", buf.Bytes(), "\n")
 	}
 }
 

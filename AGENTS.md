@@ -47,5 +47,6 @@ Platform-specific lock implementations: `lock_windows.go` (LockFileEx) and `lock
 - Code output and error messages must be in English (no Chinese in `.go` files)
 - Docs (`docs/`) are in Chinese — that's intentional
 - `reference/go-git/` is a read-only reference, gitignored — do not import from it
+- When implementing similar features, prefer referencing go-git's implementation approach instead of writing from scratch, to improve code quality and consistency with established patterns
 - Use standard library when possible (e.g., `encoding/hex` instead of custom hex functions)
 - Use codegraph for dependency analysis (`codegraph explore`, `codegraph node`)
