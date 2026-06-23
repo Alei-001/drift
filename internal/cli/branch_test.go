@@ -165,6 +165,53 @@ func TestSwitch_StagedChangesForce(t *testing.T) {
 	h.AssertContains(output, "Switched to branch: experiment")
 }
 
+// TC-SWITCH-007: Switch with --create creates a new branch and switches
+func TestSwitch_CreateBranch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	output, err := h.RunSwitch("newbranch", "--create")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Created branch: newbranch")
+	h.AssertContains(output, "Switched to branch: newbranch")
+
+	branch, _ := h.Store.GetRef("HEAD")
+	if branch != "newbranch" {
+		t.Errorf("HEAD = %q, want %q", branch, "newbranch")
+	}
+}
+
+// TC-SWITCH-008: Switch with --create fails if branch already exists
+func TestSwitch_CreateExistingBranch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	_, err := h.RunBranch("existing")
+	h.AssertNoError(err)
+
+	_, err = h.RunSwitch("existing", "--create")
+	h.AssertError(err)
+}
+
+// TC-SWITCH-009: Switch with --create and -c shorthand
+func TestSwitch_CreateShorthand(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	output, err := h.RunSwitch("feat", "-c")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Created branch: feat")
+	h.AssertContains(output, "Switched to branch: feat")
+}
 // TC-SWITCH-006: Independent version lines on branches
 func TestSwitch_IndependentVersionLines(t *testing.T) {
 	h := NewTestHelper(t)

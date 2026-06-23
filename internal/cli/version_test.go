@@ -39,7 +39,111 @@ func TestSave_WithMessage(t *testing.T) {
 	h.AssertContains(output, "Saved version v1: first chapter")
 }
 
-// TC-SAVE-003: Save with empty staging area
+// TC-LIST-004: Filter by branch name
+func TestList_FilterByBranch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// Create v1 on main
+	h.WriteFile("main.txt", "main content")
+	h.AddAndSave([]string{"main.txt"}, "v1")
+
+	// Create feature branch with v1
+	_, err := h.RunBranch("feature")
+	h.AssertNoError(err)
+	_, err = h.RunSwitch("feature")
+	h.AssertNoError(err)
+	h.WriteFile("feat.txt", "feature content")
+	h.AddAndSave([]string{"feat.txt"}, "v1")
+
+	// List only main branch
+	output, err := h.RunList("main")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Version history:")
+	h.AssertContains(output, "v1")
+	h.AssertContains(output, "[main]")
+	h.AssertNotContains(output, "[feature]")
+}
+
+// TC-LIST-005: List nonexistent branch errors
+func TestList_NonexistentBranch(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	_, err := h.RunList("nonexistent")
+	h.AssertError(err)
+}
+
+// TC-LIST-006: Deduplicate commits across branches
+func TestList_DeduplicateAcrossBranches(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("shared.txt", "shared")
+	h.AddAndSave([]string{"shared.txt"}, "v1 on main")
+
+	_, err := h.RunBranch("duplicate")
+	h.AssertNoError(err)
+	_, err = h.RunSwitch("duplicate")
+	h.AssertNoError(err)
+
+	// Switch back to main
+	_, err = h.RunSwitch("main")
+	h.AssertNoError(err)
+
+	// List all should show v1 only once
+	output, err := h.RunList()
+	h.AssertNoError(err)
+	// Count occurrences of "v1 on main" - should appear exactly once
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "v1 on main") {
+			count++
+		}
+	}
+	if count > 1 {
+		t.Errorf("commit should appear once, appeared %d times", count)
+	}
+}
+
+// TC-SAVE-006: Prevent empty commit (same tree hash as parent)
+func TestSave_PreventsEmptyCommit(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Stage same file with same content
+	h.WriteFile("note.txt", "content")
+	_, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+
+	_, err = h.RunSave("should fail")
+	h.AssertError(err)
+}
+
+// TC-SAVE-007: Shows saved files list
+func TestSave_ShowsSavedFiles(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "file a")
+	h.WriteFile("b.txt", "file b")
+	_, err := h.RunAdd(".")
+	h.AssertNoError(err)
+
+	output, err := h.RunSave("multi file")
+	h.AssertNoError(err)
+	h.AssertContains(output, "2 file(s) saved:")
+	h.AssertContains(output, "a.txt")
+	h.AssertContains(output, "b.txt")
+}
+
+// TC-SAVE-008: Save empty staging area
 func TestSave_EmptyStaging(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()

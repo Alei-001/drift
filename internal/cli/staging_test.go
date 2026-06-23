@@ -237,6 +237,37 @@ func TestUnstage_ClearStaging(t *testing.T) {
 	h.AssertContains(output, "note.txt")
 }
 
+// TC-ADD-007: Re-adding unchanged file skips it
+func TestAdd_SkipUnchangedFile(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	output, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+	if output != "" {
+		t.Errorf("expected empty output for unchanged file, got %q", output)
+	}
+}
+
+// TC-ADD-008: Re-adding file with same hash already in index skips it
+func TestAdd_SkipDuplicateInIndex(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	_, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+
+	output, err := h.RunAdd("note.txt")
+	h.AssertNoError(err)
+	if output != "" {
+		t.Errorf("expected empty output for already-staged identical file, got %q", output)
+	}
+}
+
 // TC-UNSTAGE-002: Unstage on empty staging area
 func TestUnstage_EmptyStaging(t *testing.T) {
 	h := NewTestHelper(t)

@@ -99,9 +99,14 @@ func resetAllFlags() {
 
 	// switch command flags
 	switchCmd.Flags().Set("force", "false")
+	switchCmd.Flags().Set("create", "false")
 
 	// save command flags - message should be set per call
 	saveCmd.Flags().Set("message", "")
+
+	// log command package-level vars
+	logOneline = false
+	logCount = 0
 }
 
 // WriteFile creates a file with the given content.
@@ -231,11 +236,11 @@ func (h *TestHelper) RunSave(message string) (string, error) {
 }
 
 // RunList runs the list command.
-func (h *TestHelper) RunList() (string, error) {
+func (h *TestHelper) RunList(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	return CaptureOutput(func() error {
-		return listCmd.RunE(listCmd, nil)
+		return listCmd.RunE(listCmd, args)
 	})
 }
 
@@ -296,22 +301,37 @@ func (h *TestHelper) RunSwitch(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	return CaptureOutput(func() error {
-		// Check if --force is in args
+		// Parse --force and --create/-c from args
+		forceFlag := false
+		createFlag := false
 		for _, arg := range args {
 			if arg == "--force" {
-				switchCmd.Flags().Set("force", "true")
-				break
+				forceFlag = true
+			}
+			if arg == "--create" || arg == "-c" {
+				createFlag = true
 			}
 		}
-		// Filter out --force from args
+		switchCmd.Flags().Set("force", strBool(forceFlag))
+		switchCmd.Flags().Set("create", strBool(createFlag))
+
+		// Filter out flags from positional args
 		filteredArgs := make([]string, 0, len(args))
 		for _, arg := range args {
-			if arg != "--force" {
-				filteredArgs = append(filteredArgs, arg)
+			if arg == "--force" || arg == "--create" || arg == "-c" {
+				continue
 			}
+			filteredArgs = append(filteredArgs, arg)
 		}
 		return switchCmd.RunE(switchCmd, filteredArgs)
 	})
+}
+
+func strBool(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }
 
 // RunDiff runs the diff command.
@@ -384,6 +404,39 @@ func (h *TestHelper) VersionCount() int {
 	return len(commits)
 }
 
+// RunLog runs the log command.
+func (h *TestHelper) RunLog(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	logOneline = false
+	logCount = 0
+	return CaptureOutput(func() error {
+		return logCmd.RunE(logCmd, args)
+	})
+}
+
+// RunLogOneline runs the log command with --oneline.
+func (h *TestHelper) RunLogOneline(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	logOneline = true
+	logCount = 0
+	return CaptureOutput(func() error {
+		return logCmd.RunE(logCmd, args)
+	})
+}
+
+// RunLogLimit runs the log command with -n limit.
+func (h *TestHelper) RunLogLimit(limit int, args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	logOneline = false
+	logCount = limit
+	return CaptureOutput(func() error {
+		return logCmd.RunE(logCmd, args)
+	})
+}
+
 func init() {
 	// Suppress cobra output during tests
 	initCmd.SetOutput(&bytes.Buffer{})
@@ -397,6 +450,7 @@ func init() {
 	branchCmd.SetOutput(&bytes.Buffer{})
 	switchCmd.SetOutput(&bytes.Buffer{})
 	diffCmd.SetOutput(&bytes.Buffer{})
+	logCmd.SetOutput(&bytes.Buffer{})
 }
 
 // Helper to format expected output
