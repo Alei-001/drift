@@ -8,17 +8,12 @@ import (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list",
+	Use:   "list [branch]",
 	Short: "Show version history with branch information",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !sharedStore.IsInitialized() {
 			return fmt.Errorf("not a drift project (run 'drift init')")
-		}
-		// P1-#9: iterate branch refs and walk each chain, instead of
-		// scanning and deserializing every commit file on disk.
-		refs, err := sharedStore.ListRefs()
-		if err != nil {
-			return fmt.Errorf("failed to list refs: %w", err)
 		}
 
 		type commitInfo struct {
@@ -31,13 +26,10 @@ var listCmd = &cobra.Command{
 		var all []commitInfo
 		seen := make(map[string]bool)
 
-		for branchName := range refs {
-			if branchName == "HEAD" {
-				continue
-			}
+		addBranch := func(branchName string) error {
 			commits, err := sharedStore.ListBranchCommits(branchName)
 			if err != nil {
-				continue
+				return err
 			}
 			for _, c := range commits {
 				if seen[c.Hash] {
@@ -51,6 +43,28 @@ var listCmd = &cobra.Command{
 					Message:   c.Message,
 					ts:        c.Timestamp.UnixMilli(),
 				})
+			}
+			return nil
+		}
+
+		if len(args) == 1 {
+			branchName := args[0]
+			if _, err := sharedStore.GetRef(branchName); err != nil {
+				return fmt.Errorf("branch not found: %s", branchName)
+			}
+			if err := addBranch(branchName); err != nil {
+				return err
+			}
+		} else {
+			refs, err := sharedStore.ListRefs()
+			if err != nil {
+				return fmt.Errorf("failed to list refs: %w", err)
+			}
+			for branchName := range refs {
+				if branchName == "HEAD" {
+					continue
+				}
+				_ = addBranch(branchName)
 			}
 		}
 

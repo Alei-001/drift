@@ -60,6 +60,9 @@ var saveCmd = &cobra.Command{
 		parentHash := ""
 		if branchCommitCount > 0 {
 			parentHash = branchCommits[0].Hash
+			if branchCommits[0].TreeHash == tree.Hash {
+				return fmt.Errorf("nothing changed since last version (use 'drift add' after modifying files)")
+			}
 		}
 
 		id := "v" + strconv.Itoa(branchCommitCount+1)
