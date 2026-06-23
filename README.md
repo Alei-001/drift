@@ -1,75 +1,171 @@
 # Drift
 
-面向创意工作者的轻量级版本管理工具。
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![中文文档](https://img.shields.io/badge/README-中文-red.svg)](README.zh-CN.md)
 
-## 目标用户
+A lightweight version control tool for creative workers — illustrators, designers, novelists, screenwriters. Manage multiple versions of creative work without learning Git.
 
-插画师、设计师、小说作者、剧本创作者——需要管理多版本创意文件、但不愿学习复杂工具的人。
+> **README in Chinese:** [README.zh-CN.md](README.zh-CN.md)
 
-## 特性
+## Why Drift?
 
-- **简单易用** — 10 分钟上手，无需学习 Git
-- **暂存预览** — 保存前预览即将提交的内容
-- **分支探索** — 尝试不同创作方向（配色方案、剧情线）
-- **版本导出** — 快速导出任意版本为目录 / zip / tar.gz
-- **文本对比** — 查看版本之间的文字差异
-- **跨平台** — Windows、macOS、Linux
+Creative workers manage versions by hand today — folders named `final`, `final_v2`, `final_really_final`, `final_really_final_client_picked_this`. Drift replaces that chaos with a simple mental model:
 
-## 快速开始
-
-```bash
-# 安装
-install.bat    # Windows / PowerShell
-
-# 初始化项目
-drift init
-
-# 添加文件到暂存区
-drift add .
-
-# 保存版本
-drift save -m "初稿完成"
-
-# 查看历史
-drift log --all
-
-# 回到旧版本
-drift restore v1
-
-# 导出交付
-drift export v1 -o ./交付客户
+```
+save a version  →  go back to any version  →  export for delivery
 ```
 
-## 技术栈
+No staging area jargon. No merge conflicts. No Git concepts to learn.
 
-- **语言**: Go
-- **哈希**: SHA-256（纯摘要，不兼容 Git）
-- **存储**: 内容寻址 + 二进制格式（DRIX / DREE / DCMT）
-- **CLI**: cobra
+## Features
 
-## 文档
+- **Simple** — 10-minute onboarding, no Git knowledge required
+- **Staging preview** — see exactly what will be saved before you commit
+- **Branches for exploration** — try different color palettes, plot lines, or layouts in parallel (no merge — branches are independent creative lines)
+- **Version export** — export any version as a directory, `.zip`, or `.tar.gz`
+- **Text diff** — line-level diffs between versions for writers
+- **Binary-aware** — large files (.psd, .blend, video) handled with streaming + progress bars, no OOM
+- **Cross-platform** — Windows, macOS, Linux
+- **WIP auto-save** — switching branches with pending changes auto-saves them; restore with one command
+- **Version aliases** — name versions like `初稿` / `final` instead of `v1` / `v2`
 
-| 文档 | 内容 |
-|------|------|
-| [产品需求](docs/PRD.md) | 目标用户、使用场景、功能取舍 |
-| [技术设计](docs/technical.md) | 架构、数据格式、跨平台方案 |
-| [命令参考](docs/commands.md) | 完整 CLI 命令说明 |
-| [开发进度](docs/progress.md) | 已完成阶段与下一步计划 |
-| [已知问题](docs/issues.md) | 缺陷分析与修复路线 |
+## Quick Start
 
-## 项目结构
+### Install
+
+**Windows (installer):** Download `drift-setup-x.y.z.exe` from [Releases](../../releases) and run it — graphical installer with PATH setup and uninstaller.
+
+**Windows (from source):**
+```powershell
+.\install.bat
+```
+
+**macOS / Linux:**
+```bash
+./install.sh
+```
+
+**Build from source:**
+```bash
+go build -ldflags "-X github.com/drift/drift/internal/cli.version=0.1.0" -o drift ./cmd/drift/
+```
+
+Verify the install:
+```bash
+drift version
+```
+
+### Use
+
+```bash
+# Initialize a project (creates .drift/ in the current directory)
+drift init
+
+# Stage all files
+drift add .
+
+# Save a version
+drift save -m "first draft done"
+
+# View history
+drift log --all
+
+# Go back to an earlier version
+drift restore v1
+
+# Export a version for delivery
+drift export v1 -o ./delivery
+```
+
+### Common workflows
+
+**Writer exploring plot branches:**
+```bash
+drift save -m "main storyline v1"
+drift branch alt-ending
+drift switch alt-ending
+drift save -m "alternative ending"
+drift diff v1 v2 -p          # compare the two versions line by line
+```
+
+**Designer iterating on a client project:**
+```bash
+drift save -a -m "revision 2"   # -a auto-stages all changes, like git commit -a
+drift export v2 -o ./client-v2.zip -f zip
+drift restore v1 素材/封面.psd   # restore only one file from v1
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `init` | Initialize a new Drift project |
+| `add` | Add files to the staging area (supports globs, multiple paths) |
+| `status` | Show working tree status |
+| `save` | Save staged changes as a new version (`-a` auto-stages, `--amend` edits last version, `--name` sets an alias) |
+| `log` | View commit history (`--all` across branches) |
+| `restore` | Restore the workspace or specific files to a version |
+| `export` | Export a version as dir / zip / tar.gz |
+| `diff` | Show differences between versions (`-p` for patch, `-f`/`--` for file filtering) |
+| `branch` | Create / list / delete / rename branches |
+| `switch` | Switch branches (auto-saves WIP, `--create` to create on the fly) |
+| `name` | Manage version aliases |
+| `wip` / `restore-wip` | List / restore auto-saved work-in-progress |
+| `rm` / `mv` | Delete / move tracked files |
+| `config` | View and set configuration (`user.name`, `core.autocrlf`, etc.) |
+| `history` / `undo` | View / undo recent operations |
+| `version` | Show drift version |
+
+Full reference: [docs/commands.md](docs/commands.md)
+
+## Tech Stack
+
+- **Language:** Go
+- **Hashing:** SHA-256 (pure digest, not Git-compatible)
+- **Storage:** Content-addressable, binary formats (DRIX / DREE / DCMT) with zlib compression
+- **CLI framework:** cobra
+- **Locking:** OS-level file locks (LockFileEx on Windows, flock on Unix)
+
+## Project Structure
 
 ```
 drift/
-├── cmd/drift/          # CLI 入口
+├── cmd/drift/          # CLI entry point
 ├── internal/
-│   ├── core/           # 核心对象模型（Blob / Tree / Commit / Index）
-│   ├── storage/        # 存储引擎（内容寻址、原子写入）
-│   └── cli/            # CLI 命令实现
-├── dist/               # 编译产物与安装脚本
-└── docs/               # 文档
+│   ├── core/           # Object model (Blob / Tree / Commit / Index), hashing, codecs, diff
+│   ├── storage/        # Content-addressable store, atomic writes, file locking
+│   ├── cli/            # All cobra commands
+│   └── config/         # JSON config read/write
+├── installer/          # Inno Setup script for Windows installer
+├── .github/workflows/  # CI/CD: release workflow (tag-triggered)
+├── install.bat / install.sh  # Source-based install scripts
+└── docs/               # Design docs (Chinese)
 ```
 
-## 许可证
+## Documentation
+
+| Doc | Content |
+|-----|---------|
+| [Product Requirements](docs/PRD.md) | Target users, use cases, feature trade-offs |
+| [Technical Design](docs/technical.md) | Architecture, data formats, cross-platform |
+| [Command Reference](docs/commands.md) | Full CLI command documentation |
+| [Development Progress](docs/progress.md) | Completed phases and next steps |
+| [Test Plan](docs/test-plan.md) | Test cases and coverage |
+
+## Releasing
+
+Releases are fully automated via GitHub Actions. Push a version tag and the workflow will:
+
+1. Build binaries for Windows (amd64), macOS (amd64 + arm64), and Linux (amd64 + arm64)
+2. Compile a Windows `setup.exe` with Inno Setup (graphical installer, PATH management, uninstaller)
+3. Publish all artifacts to a GitHub Release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+## License
 
 MIT
