@@ -104,6 +104,7 @@ func resetAllFlags() {
 	// save command flags - message should be set per call
 	saveCmd.Flags().Set("message", "")
 	saveCmd.Flags().Set("name", "")
+	saveCmd.Flags().Set("all", "false")
 
 	// log command package-level vars
 	logOneline = false
@@ -249,6 +250,7 @@ func (h *TestHelper) RunSave(message string) (string, error) {
 	// Always set the message flag (even to empty) to avoid state leakage between tests.
 	saveCmd.Flags().Set("message", message)
 	saveCmd.Flags().Set("name", "")
+	saveCmd.Flags().Set("all", "false")
 	return CaptureOutput(func() error {
 		return saveCmd.RunE(saveCmd, nil)
 	})
@@ -260,6 +262,19 @@ func (h *TestHelper) RunSaveWithName(message, name string) (string, error) {
 	h.SetupSharedState()
 	saveCmd.Flags().Set("message", message)
 	saveCmd.Flags().Set("name", name)
+	saveCmd.Flags().Set("all", "false")
+	return CaptureOutput(func() error {
+		return saveCmd.RunE(saveCmd, nil)
+	})
+}
+
+// RunSaveAll runs the save command with --all (auto-stage before saving).
+func (h *TestHelper) RunSaveAll(message string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	saveCmd.Flags().Set("message", message)
+	saveCmd.Flags().Set("name", "")
+	saveCmd.Flags().Set("all", "true")
 	return CaptureOutput(func() error {
 		return saveCmd.RunE(saveCmd, nil)
 	})

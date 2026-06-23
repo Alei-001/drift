@@ -207,6 +207,50 @@ func TestSave_StatusCleanAfterSave(t *testing.T) {
 	h.AssertContains(output, "Nothing to commit, working tree clean")
 }
 
+// TC-SAVE-010: save --all auto-stages changes before saving
+func TestSave_AllAutoStages(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	// v1 with one file (explicit add)
+	h.WriteFile("a.txt", "content a")
+	h.AddAndSave([]string{"a.txt"}, "v1")
+
+	// Modify existing + add new file, but do NOT run `drift add`
+	h.WriteFile("a.txt", "modified a")
+	h.WriteFile("b.txt", "content b")
+
+	// save --all should auto-stage both files and create v2
+	output, err := h.RunSaveAll("auto stage")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Saved version v2: auto stage")
+	// Both files should appear in the saved list.
+	h.AssertContains(output, "a.txt")
+	h.AssertContains(output, "b.txt")
+
+	if h.VersionCount() != 2 {
+		t.Errorf("expected 2 commits, got %d", h.VersionCount())
+	}
+
+	// Working tree should be clean after save --all.
+	statusOutput, err := h.RunStatus()
+	h.AssertNoError(err)
+	h.AssertContains(statusOutput, "Nothing to commit, working tree clean")
+}
+
+// TC-SAVE-011: save --all with no changes still errors (nothing to save)
+func TestSave_AllNoChanges(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "content a")
+	h.AddAndSave([]string{"a.txt"}, "v1")
+
+	// No modifications — save --all should fail with nothing to save.
+	_, err := h.RunSaveAll("nothing")
+	h.AssertError(err)
+}
+
 // TC-LOG-007: Show version history with --all (formerly TestList_ShowHistory)
 func TestLog_AllShowHistory(t *testing.T) {
 	h := NewTestHelper(t)

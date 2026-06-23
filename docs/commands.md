@@ -144,9 +144,11 @@ drift save --name 初稿         # 保存并同时设置别名
 drift save -m "初稿" --name 初稿  # 带备注和别名
 drift save --amend            # 修改最近一条版本（保留版本号）
 drift save --amend -m "新备注" # 修改版本并更新备注
+drift save -a -m "备注"        # 自动暂存所有改动后保存
+drift save --all              # 等同于 drift add . + drift save
 ```
 
-`-m` / `--message` 可选。`--name` 可选，用于在保存时直接为该版本设置别名（等效于保存后执行 `drift name <版本> <别名>`）。
+`-m` / `--message` 可选。`--name` 可选，用于在保存时直接为该版本设置别名（等效于保存后执行 `drift name <版本> <别名>`）。`-a` / `--all` 可选，自动暂存工作区所有改动后再保存（类似 `git commit -a`），无需先执行 `drift add`。
 
 **行为：**
 - 从暂存区构建 Tree 对象
@@ -155,6 +157,7 @@ drift save --amend -m "新备注" # 修改版本并更新备注
 - 若文件内容与上一版本完全相同，拒绝保存
 - 保存后列出本次所有保存的文件
 - 若指定 `--name`，保存成功后自动创建别名
+- 若指定 `--all`，保存前自动暂存所有改动（含新增、修改、删除的已跟踪文件）
 
 **--amend 行为：**
 - 替换最近一条提交，保留版本号（ID）和 parent

@@ -9,11 +9,12 @@ import (
 )
 
 var saveCmd = &cobra.Command{
-	Use:   "save [-m message] [--amend] [--name label]",
+	Use:   "save [-m message] [--amend] [--all] [--name label]",
 	Short: "Save staged changes as a new version",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		message, _ := cmd.Flags().GetString("message")
 		amend, _ := cmd.Flags().GetBool("amend")
+		all, _ := cmd.Flags().GetBool("all")
 		nameLabel, _ := cmd.Flags().GetString("name")
 
 		// Validate name label early so we fail before saving.
@@ -23,13 +24,20 @@ var saveCmd = &cobra.Command{
 			}
 		}
 
+		// --all: auto-stage all changes before saving (like 'drift add .' + 'drift save').
+		if all {
+			if err := addAll(sharedStore, sharedDir); err != nil {
+				return fmt.Errorf("failed to stage changes: %w", err)
+			}
+		}
+
 		var idx core.Index
 		if err := sharedStore.LoadIndex(&idx); err != nil {
 			return fmt.Errorf("failed to load index: %w", err)
 		}
 
 		if len(idx.Entries) == 0 {
-			return fmt.Errorf("nothing to save (use 'drift add' first)")
+			return fmt.Errorf("nothing to save (use 'drift add' first, or 'drift save --all')")
 		}
 
 		// Capture staged paths before the transaction clears the index.
@@ -163,6 +171,7 @@ var saveCmd = &cobra.Command{
 func init() {
 	saveCmd.Flags().StringP("message", "m", "", "Version message")
 	saveCmd.Flags().Bool("amend", false, "Amend the most recent version instead of creating a new one")
+	saveCmd.Flags().BoolP("all", "a", false, "Automatically stage all changes before saving")
 	saveCmd.Flags().String("name", "", "Assign a version name (alias) to this version")
 	rootCmd.AddCommand(saveCmd)
 }
