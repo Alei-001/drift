@@ -15,9 +15,9 @@ import (
 )
 
 var exportCmd = &cobra.Command{
-	Use:   "export <version>",
+	Use:   "export <version> [<path>...]",
 	Short: "Export a version or branch to a directory or archive",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		version := args[0]
 		output, _ := cmd.Flags().GetString("output")
@@ -43,13 +43,38 @@ var exportCmd = &cobra.Command{
 			return fmt.Errorf("failed to list files: %w", err)
 		}
 
+		// Filter by path arguments if provided.
+		if pathFilters := args[1:]; len(pathFilters) > 0 {
+			normalized := make([]string, 0, len(pathFilters))
+			for _, f := range pathFilters {
+				rel, err := filepath.Rel(".", f)
+				if err != nil {
+					return fmt.Errorf("cannot resolve relative path %q: %w", f, err)
+				}
+				normalized = append(normalized, strings.TrimSuffix(filepath.ToSlash(rel), "/"))
+			}
+			var filtered []core.BlobEntry
+			for _, blob := range blobs {
+				for _, fp := range normalized {
+					if blob.Path == fp || strings.HasPrefix(blob.Path, fp+"/") {
+						filtered = append(filtered, blob)
+						break
+					}
+				}
+			}
+			blobs = filtered
+			if len(blobs) == 0 {
+				return fmt.Errorf("no matching files found for given paths")
+			}
+		}
+
 		switch format {
 		case "zip":
 			return exportZip(sharedStore, blobs, output)
 		case "tar", "tar.gz":
 			return exportTar(sharedStore, blobs, output)
 		case "dir", "":
-			return exportDir(sharedStore, blobs, output, len(blobs))
+			return exportDir(sharedStore, blobs, output)
 		default:
 			return fmt.Errorf("unsupported format: %s (use dir, zip, or tar)", format)
 		}
@@ -62,7 +87,7 @@ func init() {
 	rootCmd.AddCommand(exportCmd)
 }
 
-func exportDir(store *storage.Store, blobs []core.BlobEntry, output string, total int) error {
+func exportDir(store *storage.Store, blobs []core.BlobEntry, output string) error {
 	if _, err := os.Stat(output); err == nil {
 		return fmt.Errorf("directory already exists: %s", output)
 	}
@@ -71,6 +96,7 @@ func exportDir(store *storage.Store, blobs []core.BlobEntry, output string, tota
 		return err
 	}
 
+	total := len(blobs)
 	for i, blob := range blobs {
 		if err := writeBlobToFile(store, blob, output); err != nil {
 			return err
@@ -79,7 +105,7 @@ func exportDir(store *storage.Store, blobs []core.BlobEntry, output string, tota
 	}
 	fmt.Println()
 
-	fmt.Printf("Exported %d file(s) to %s\n", len(blobs), output)
+	fmt.Printf("Exported %d file(s) to %s\n", total, output)
 	return nil
 }
 

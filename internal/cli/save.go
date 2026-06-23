@@ -85,8 +85,7 @@ var saveCmd = &cobra.Command{
 			commit := core.NewCommit(id, message, parentHash, branch, tree.Hash, author)
 
 			prevBranchHash := lastCommit.Hash
-			emptyIdx := &core.Index{}
-			if err := sharedStore.SaveCommitTransaction(commit, branch, emptyIdx); err != nil {
+			if err := sharedStore.SaveCommitTransaction(commit, branch, &idx); err != nil {
 				return fmt.Errorf("failed to save amended commit: %w", err)
 			}
 
@@ -116,8 +115,7 @@ var saveCmd = &cobra.Command{
 		if branchCommitCount > 0 {
 			prevBranchHash = branchCommits[0].Hash
 		}
-		emptyIdx := &core.Index{}
-		if err := sharedStore.SaveCommitTransaction(commit, branch, emptyIdx); err != nil {
+		if err := sharedStore.SaveCommitTransaction(commit, branch, &idx); err != nil {
 			return fmt.Errorf("failed to save commit: %w", err)
 		}
 

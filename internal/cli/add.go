@@ -69,7 +69,7 @@ func expandAddPaths(args []string) ([]string, error) {
 			for _, m := range matches {
 				rel, err := filepath.Rel(".", m)
 				if err != nil {
-					rel = m
+					return nil, fmt.Errorf("cannot resolve relative path %q: %w", m, err)
 				}
 				rel = filepath.ToSlash(rel)
 				if !seen[rel] {
@@ -78,11 +78,15 @@ func expandAddPaths(args []string) ([]string, error) {
 				}
 			}
 		} else {
-			// Literal path — verify it exists.
+			// Literal path — verify it exists and normalize to relative.
 			if _, err := os.Lstat(arg); err != nil {
 				return nil, fmt.Errorf("path not found: %s", arg)
 			}
-			rel := filepath.ToSlash(arg)
+			rel, err := filepath.Rel(".", arg)
+			if err != nil {
+				return nil, fmt.Errorf("cannot resolve relative path %q: %w", arg, err)
+			}
+			rel = filepath.ToSlash(rel)
 			if !seen[rel] {
 				seen[rel] = true
 				result = append(result, rel)

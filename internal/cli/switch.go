@@ -43,7 +43,7 @@ Use --force to discard changes without saving.`,
 			// Auto-save pending work to WIP before switching, instead of
 			// refusing or discarding. This mirrors Figma's "auto-save draft"
 			// behavior — the user never loses work.
-			if hasPendingChanges, err := hasPendingStagedChanges(&idx); err == nil && hasPendingChanges {
+			if hasPendingChanges, err := hasPendingStagedChanges(&idx, nil); err == nil && hasPendingChanges {
 				if err := saveWIP(currentBranch, &idx); err != nil {
 					return fmt.Errorf("failed to save work-in-progress: %w", err)
 				}
@@ -54,7 +54,7 @@ Use --force to discard changes without saving.`,
 					return fmt.Errorf("failed to clear index: %w", err)
 				}
 			}
-			if dirty, err := hasWorktreeModifications(); err == nil && dirty {
+			if dirty, err := hasWorktreeModifications(nil); err == nil && dirty {
 				// Worktree modifications detected — save them to WIP too.
 				// Re-load the index with worktree changes staged.
 				if err := stageWorktreeChanges(&idx); err != nil {

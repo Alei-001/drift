@@ -779,9 +779,14 @@ func (s *Store) LoadIndex(idx *core.Index) error {
 }
 
 // SaveCommitTransaction atomically writes a commit, updates the branch ref,
-// and clears the index, all under a single lock. This prevents orphan commits
-// or duplicate saves if one of the steps fails (Issue 6).
-func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, emptyIdx *core.Index) error {
+// and persists the index, all under a single lock. This prevents orphan
+// commits or duplicate saves if one of the steps fails (Issue 6).
+//
+// The caller must pass the index that was used to build the commit's tree.
+// Persisting it as-is keeps full metadata (mtime/size) so that subsequent
+// `drift add` or `drift status` does not falsely report committed files as
+// deleted, and the status fast-path remains effective.
+func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, idx *core.Index) error {
 	unlock, err := s.lock()
 	if err != nil {
 		return err
@@ -818,9 +823,12 @@ func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, emptyIdx *c
 		return err
 	}
 
-	// 3. Clear index.
+	// 3. Persist the index. The index already reflects all tracked files
+	//    (it is what the commit's tree was built from), so write it back
+	//    unchanged. This prevents false "Deleted" status entries for
+	//    committed files that haven't been re-staged via `drift add`.
 	idxPath := filepath.Join(s.DriftDir(), indexFile)
-	idxData, err := emptyIdx.Marshal()
+	idxData, err := idx.Marshal()
 	if err != nil {
 		return err
 	}

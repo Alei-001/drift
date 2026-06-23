@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -139,7 +140,10 @@ func removeExistingPath(fullPath string) error {
 // hasWorktreeModifications checks whether any tracked file in the current
 // branch's commit has unstaged modifications in the working tree.
 // Used by restore/switch to prevent silent overwrites (Issue 11).
-func hasWorktreeModifications() (bool, error) {
+//
+// If filters is non-empty, only paths matching the filters are checked.
+// If filters is nil/empty, all tracked files are checked.
+func hasWorktreeModifications(filters []string) (bool, error) {
 	commit, err := currentBranchCommit(sharedStore)
 	if err != nil {
 		return false, err
@@ -165,6 +169,10 @@ func hasWorktreeModifications() (bool, error) {
 	}
 
 	for _, b := range blobs {
+		// Skip paths outside the filter (if a filter is set).
+		if !pathMatchesAny(b.Path, filters) {
+			continue
+		}
 		// If file is staged, its worktree status is checked elsewhere.
 		if idx.Has(b.Path) {
 			continue
@@ -239,4 +247,52 @@ func cleanEmptyDirsAffected(root string, deletedPaths []string) {
 			dir = filepath.Dir(dir)
 		}
 	}
+}
+
+// normalizePathFilters converts raw path arguments into normalized,
+// repository-relative filter strings (no trailing slash, forward slashes).
+// Returns nil if no arguments are given.
+func normalizePathFilters(args []string) ([]string, error) {
+	if len(args) == 0 {
+		return nil, nil
+	}
+	filters := make([]string, 0, len(args))
+	for _, f := range args {
+		rel, err := filepath.Rel(".", f)
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve relative path %q: %w", f, err)
+		}
+		filters = append(filters, strings.TrimSuffix(filepath.ToSlash(rel), "/"))
+	}
+	return filters, nil
+}
+
+// pathMatchesAny reports whether the given path matches any of the filters.
+// A path matches if it equals a filter or is a descendant of it (prefix+"/").
+// Empty/nil filters means "match all" (no filtering).
+func pathMatchesAny(path string, filters []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	for _, fp := range filters {
+		if path == fp || strings.HasPrefix(path, fp+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// filterBlobs returns only the blob entries whose path matches any filter.
+// If filters is nil/empty, all blobs are returned unchanged.
+func filterBlobs(blobs []core.BlobEntry, filters []string) []core.BlobEntry {
+	if len(filters) == 0 {
+		return blobs
+	}
+	var filtered []core.BlobEntry
+	for _, b := range blobs {
+		if pathMatchesAny(b.Path, filters) {
+			filtered = append(filtered, b)
+		}
+	}
+	return filtered
 }
