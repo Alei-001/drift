@@ -469,6 +469,33 @@ func TestStore_Lock_Release(t *testing.T) {
 	unlock2()
 }
 
+// TestStore_Lock_WritesPID verifies that writeLockPID/readLockPID/clearLockPID
+// work correctly. We test the helpers directly because Windows denies reading
+// a locked file via a separate file handle.
+func TestStore_Lock_WritesPID(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "lock")
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create lock file: %v", err)
+	}
+	defer f.Close()
+
+	// Write PID.
+	writeLockPID(f)
+	pid := readLockPID(f)
+	if pid != os.Getpid() {
+		t.Errorf("readLockPID = %d, want %d", pid, os.Getpid())
+	}
+
+	// Clear PID.
+	clearLockPID(f)
+	pid = readLockPID(f)
+	if pid != 0 {
+		t.Errorf("readLockPID after clear = %d, want 0", pid)
+	}
+}
+
 // TestStore_ListCommits_Empty verifies that an empty commits directory returns an empty list.
 func TestStore_ListCommits_Empty(t *testing.T) {
 	s := newTestStore(t)

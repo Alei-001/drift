@@ -111,6 +111,14 @@ func resetAllFlags() {
 	// branch command package-level vars
 	branchDelete = false
 	branchMove = ""
+
+	// rm command package-level vars
+	rmCached = false
+	rmRecursive = false
+
+	// config command package-level vars
+	configList = false
+	configUnset = false
 }
 
 // WriteFile creates a file with the given content.
@@ -482,8 +490,51 @@ func (h *TestHelper) RunConfig(args ...string) (string, error) {
 		sharedStore.SaveRef("main", "")
 		sharedStore.SaveRef("HEAD", "main")
 	}
+	// Parse --list and --unset flags from args via cobra's flag set, so
+	// the bound variables are updated consistently.
+	var filteredArgs []string
+	for _, arg := range args {
+		switch arg {
+		case "--list":
+			configCmd.Flags().Set("list", "true")
+		case "--unset":
+			configCmd.Flags().Set("unset", "true")
+		default:
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
 	return CaptureOutput(func() error {
-		return configCmd.RunE(configCmd, args)
+		return configCmd.RunE(configCmd, filteredArgs)
+	})
+}
+
+// RunRm runs the rm command with args.
+func (h *TestHelper) RunRm(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	return CaptureOutput(func() error {
+		// Parse --cached and -r/--recursive flags from args.
+		var filteredArgs []string
+		for _, arg := range args {
+			switch arg {
+			case "--cached":
+				rmCached = true
+			case "-r", "--recursive":
+				rmRecursive = true
+			default:
+				filteredArgs = append(filteredArgs, arg)
+			}
+		}
+		return rmCmd.RunE(rmCmd, filteredArgs)
+	})
+}
+
+// RunMv runs the mv command with args.
+func (h *TestHelper) RunMv(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	return CaptureOutput(func() error {
+		return mvCmd.RunE(mvCmd, args)
 	})
 }
 
@@ -502,6 +553,8 @@ func init() {
 	diffCmd.SetOutput(&bytes.Buffer{})
 	logCmd.SetOutput(&bytes.Buffer{})
 	configCmd.SetOutput(&bytes.Buffer{})
+	rmCmd.SetOutput(&bytes.Buffer{})
+	mvCmd.SetOutput(&bytes.Buffer{})
 }
 
 // Helper to format expected output

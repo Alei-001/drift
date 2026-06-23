@@ -16,7 +16,8 @@ var switchCmd = &cobra.Command{
 	Use:   "switch <branch>",
 	Short: "Switch to another branch",
 	Long: `Switch to another branch and restore the working tree.
-The staging area must be empty (or use --force to discard).`,
+Pending changes are automatically saved and can be recovered with 'drift restore-wip'.
+Use --force to discard changes without saving.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		branch := args[0]
@@ -39,11 +40,34 @@ The staging area must be empty (or use --force to discard).`,
 		}
 
 		if !force {
+			// Auto-save pending work to WIP before switching, instead of
+			// refusing or discarding. This mirrors Figma's "auto-save draft"
+			// behavior — the user never loses work.
 			if hasPendingChanges, err := hasPendingStagedChanges(&idx); err == nil && hasPendingChanges {
-				return fmt.Errorf("staging area has pending changes (use --force to discard)")
+				if err := saveWIP(currentBranch, &idx); err != nil {
+					return fmt.Errorf("failed to save work-in-progress: %w", err)
+				}
+				fmt.Printf("Saved pending changes for %s (use 'drift restore-wip' to recover)\n", currentBranch)
+				// Clear the staging area after saving WIP.
+				emptyIdx := &core.Index{}
+				if err := sharedStore.SaveIndex(emptyIdx); err != nil {
+					return fmt.Errorf("failed to clear index: %w", err)
+				}
 			}
 			if dirty, err := hasWorktreeModifications(); err == nil && dirty {
-				return fmt.Errorf("working tree has unstaged modifications (use --force to discard)")
+				// Worktree modifications detected — save them to WIP too.
+				// Re-load the index with worktree changes staged.
+				if err := stageWorktreeChanges(&idx); err != nil {
+					return fmt.Errorf("failed to capture worktree changes: %w", err)
+				}
+				if err := saveWIP(currentBranch, &idx); err != nil {
+					return fmt.Errorf("failed to save work-in-progress: %w", err)
+				}
+				fmt.Printf("Saved worktree changes for %s (use 'drift restore-wip' to recover)\n", currentBranch)
+				emptyIdx := &core.Index{}
+				if err := sharedStore.SaveIndex(emptyIdx); err != nil {
+					return fmt.Errorf("failed to clear index: %w", err)
+				}
 			}
 		}
 
@@ -79,6 +103,11 @@ The staging area must be empty (or use --force to discard).`,
 		if err := sharedStore.SaveRef("HEAD", branch); err != nil {
 			return fmt.Errorf("failed to update HEAD: %w", err)
 		}
+
+		// Record operation for undo.
+		recordOperation(sharedStore, OpSwitch, fmt.Sprintf("switch to %s", branch), []RefChange{
+			{Ref: "HEAD", Before: currentBranch, After: branch},
+		})
 
 		// Issue 2: handle empty branch — clear old branch's files from worktree.
 		if commitHash == "" {
@@ -157,7 +186,7 @@ The staging area must be empty (or use --force to discard).`,
 }
 
 func init() {
-	switchCmd.Flags().Bool("force", false, "Discard staged changes and unstaged modifications, then force switch")
+	switchCmd.Flags().Bool("force", false, "Discard pending changes without saving to WIP")
 	switchCmd.Flags().BoolP("create", "c", false, "Create the branch if it does not exist, then switch")
 	rootCmd.AddCommand(switchCmd)
 }
@@ -188,6 +217,11 @@ func findCommitByHash(store *storage.Store, hash string) (*core.Commit, error) {
 // Ambiguous version IDs (same ID in multiple branches) return an error
 // suggesting the branch/version form.
 func resolveCommit(store *storage.Store, version string) (*core.Commit, error) {
+	// Check version name alias first (e.g. "客户终稿" → commit hash).
+	if hash := resolveName(store, version); hash != "" {
+		return findCommitByHash(store, hash)
+	}
+
 	// branch/version format (e.g. "main/v1").
 	if strings.Contains(version, "/") {
 		parts := strings.SplitN(version, "/", 2)

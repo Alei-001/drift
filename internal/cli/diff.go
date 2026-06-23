@@ -129,7 +129,10 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 	}
 
 	// Collect differences
-	diffs := collectWorktreeDiffs(targetBlobs, filterSet)
+	diffs, err := collectWorktreeDiffs(targetBlobs, filterSet)
+	if err != nil {
+		return err
+	}
 
 	if len(diffs) == 0 {
 		fmt.Fprintln(output, "No differences")
@@ -184,7 +187,10 @@ func diffVersions(reader *core.TreeReader, v1, v2 string, output io.Writer, show
 	}
 
 	// Collect differences
-	diffs := collectVersionDiffs(blobs1, blobs2)
+	diffs, err := collectVersionDiffs(blobs1, blobs2)
+	if err != nil {
+		return err
+	}
 
 	if len(diffs) == 0 {
 		fmt.Fprintln(output, "No differences")
@@ -231,7 +237,7 @@ func filterBlobsByPaths(blobs []core.BlobEntry, paths []string) []core.BlobEntry
 	return result
 }
 
-func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]bool) []FileDiff {
+func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]bool) ([]FileDiff, error) {
 	diffs := []FileDiff{}
 
 	// If a filter is active, apply it to targetBlobs first.
@@ -256,7 +262,10 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 		if err != nil {
 			if os.IsNotExist(err) {
 				// File deleted in working tree
-				blobData, _ := sharedStore.GetBlob(blob.Hash)
+				blobData, err := sharedStore.GetBlob(blob.Hash)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read blob %s for %s: %w", blob.Hash, blob.Path, err)
+				}
 				diffs = append(diffs, FileDiff{
 					Path:     blob.Path,
 					Status:   "deleted",
@@ -278,7 +287,10 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 			if err != nil {
 				continue
 			}
-			blobData, _ := sharedStore.GetBlob(blob.Hash)
+			blobData, err := sharedStore.GetBlob(blob.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", blob.Hash, blob.Path, err)
+			}
 			diffs = append(diffs, FileDiff{
 				Path:     blob.Path,
 				Status:   "modified",
@@ -307,7 +319,10 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 		if err != nil {
 			continue
 		}
-		blobData, _ := sharedStore.GetBlob(blob.Hash)
+		blobData, err := sharedStore.GetBlob(blob.Hash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read blob %s for %s: %w", blob.Hash, blob.Path, err)
+		}
 
 		if bytes.Equal(workData, blobData) {
 			continue
@@ -351,7 +366,7 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 			return nil
 		})
 		if err != nil {
-			return diffs
+			return diffs, nil
 		}
 	}
 
@@ -360,10 +375,10 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 		return diffs[i].Path < diffs[j].Path
 	})
 
-	return diffs
+	return diffs, nil
 }
 
-func collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) []FileDiff {
+func collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) ([]FileDiff, error) {
 	diffs := []FileDiff{}
 
 	map1 := make(map[string]core.BlobEntry)
@@ -383,8 +398,14 @@ func collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) []FileDiff {
 				continue
 			}
 			// Modified: load both sides for diff rendering.
-			data1, _ := sharedStore.GetBlob(b1.Hash)
-			data2, _ := sharedStore.GetBlob(b2.Hash)
+			data1, err := sharedStore.GetBlob(b1.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b1.Hash, path, err)
+			}
+			data2, err := sharedStore.GetBlob(b2.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b2.Hash, path, err)
+			}
 			diffs = append(diffs, FileDiff{
 				Path:     path,
 				Status:   "modified",
@@ -396,7 +417,10 @@ func collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) []FileDiff {
 			})
 		} else {
 			// Deleted: load only the old side.
-			data1, _ := sharedStore.GetBlob(b1.Hash)
+			data1, err := sharedStore.GetBlob(b1.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b1.Hash, path, err)
+			}
 			diffs = append(diffs, FileDiff{
 				Path:     path,
 				Status:   "deleted",
@@ -411,7 +435,10 @@ func collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) []FileDiff {
 	// Files only in v2 (added)
 	for path, b2 := range map2 {
 		if _, exists := map1[path]; !exists {
-			data2, _ := sharedStore.GetBlob(b2.Hash)
+			data2, err := sharedStore.GetBlob(b2.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b2.Hash, path, err)
+			}
 			diffs = append(diffs, FileDiff{
 				Path:     path,
 				Status:   "added",
@@ -429,7 +456,7 @@ func collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) []FileDiff {
 		return diffs[i].Path < diffs[j].Path
 	})
 
-	return diffs
+	return diffs, nil
 }
 
 func printSummary(output io.Writer, diffs []FileDiff, v1, v2 string) {

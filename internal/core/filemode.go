@@ -36,6 +36,21 @@ func NormalizeMode(osMode os.FileMode) (uint32, error) {
 	return 0, ErrUnsupportedFileType
 }
 
+// NormalizeModeForPath is like NormalizeMode but also considers the file
+// name. On Windows, where the filesystem does not store the Unix executable
+// bit, files with known executable extensions are detected as executable so
+// the mode is preserved when the repository is shared cross-platform.
+func NormalizeModeForPath(osMode os.FileMode, name string) (uint32, error) {
+	mode, err := NormalizeMode(osMode)
+	if err != nil {
+		return 0, err
+	}
+	if mode == ModeRegular && isExecutableByPath(name) {
+		return ModeExecutable, nil
+	}
+	return mode, nil
+}
+
 // ToOSFileMode converts a Drift FileMode to an os.FileMode suitable for
 // os.WriteFile/os.Chmod. Note: for symlinks, callers must use os.Symlink
 // rather than os.WriteFile — see writeBlobToWorktree.

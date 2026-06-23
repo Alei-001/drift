@@ -2,10 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/spf13/cobra"
 )
+
+var statusPorcelain bool
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -44,12 +47,17 @@ var statusCmd = &cobra.Command{
 			return fmt.Errorf("failed to compute status: %w", err)
 		}
 
-		printStatus(status)
+		if statusPorcelain {
+			printStatusPorcelain(status)
+		} else {
+			printStatus(status)
+		}
 		return nil
 	},
 }
 
 func init() {
+	statusCmd.Flags().BoolVar(&statusPorcelain, "porcelain", false, "Machine-readable output (XY path format)")
 	rootCmd.AddCommand(statusCmd)
 }
 
@@ -94,5 +102,43 @@ func printStatus(s core.Status) {
 		for _, line := range untracked {
 			fmt.Println(line)
 		}
+	}
+}
+
+// printStatusPorcelain outputs status in a machine-readable format similar
+// to `git status --porcelain`: two status characters (staged + worktree)
+// followed by the file path, one per line.
+func printStatusPorcelain(s core.Status) {
+	// Collect and sort paths for deterministic output.
+	paths := make([]string, 0, len(s))
+	for path := range s {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		fs := s[path]
+		staged := statusCode(fs.Staging)
+		worktree := statusCode(fs.Worktree)
+		if staged == ' ' && worktree == ' ' {
+			continue
+		}
+		fmt.Printf("%c%c %s\n", staged, worktree, path)
+	}
+}
+
+// statusCode converts a StatusCode to a single character for porcelain output.
+func statusCode(c core.StatusCode) byte {
+	switch c {
+	case core.Modified:
+		return 'M'
+	case core.Added:
+		return 'A'
+	case core.Deleted:
+		return 'D'
+	case core.Untracked:
+		return '?'
+	default:
+		return ' '
 	}
 }

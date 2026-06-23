@@ -127,9 +127,17 @@ func deleteBranch(name string) error {
 		return fmt.Errorf("cannot delete the currently checked-out branch %q (switch to another branch first)", name)
 	}
 
+	// Capture the branch's commit hash for undo.
+	branchHash, _ := sharedStore.GetRef(name)
+
 	if err := sharedStore.DeleteRef(name); err != nil {
 		return err
 	}
+
+	// Record operation for undo.
+	recordOperation(sharedStore, OpBranchDelete, fmt.Sprintf("delete branch %s", name), []RefChange{
+		{Ref: name, Before: branchHash, After: ""},
+	})
 
 	fmt.Printf("Deleted branch: %s\n", name)
 	return nil
@@ -138,9 +146,23 @@ func deleteBranch(name string) error {
 // renameBranch renames a branch. HEAD is updated if it pointed at the old
 // name. Mirrors `git branch -m`.
 func renameBranch(oldName, newName string) error {
+	// Capture HEAD before for undo.
+	headBefore, _ := sharedStore.GetRef("HEAD")
+
 	if err := sharedStore.RenameRef(oldName, newName); err != nil {
 		return err
 	}
+
+	// Record operation for undo.
+	headAfter, _ := sharedStore.GetRef("HEAD")
+	changes := []RefChange{
+		{Ref: oldName, Before: "", After: ""}, // old ref deleted
+	}
+	if headBefore != headAfter {
+		changes = append(changes, RefChange{Ref: "HEAD", Before: headBefore, After: headAfter})
+	}
+	recordOperation(sharedStore, OpBranchRename, fmt.Sprintf("rename %s → %s", oldName, newName), changes)
+
 	fmt.Printf("Renamed branch: %s → %s\n", oldName, newName)
 	return nil
 }

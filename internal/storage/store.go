@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -129,13 +130,8 @@ func (s *Store) PutBlob(data []byte) (string, error) {
 		return "", err
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return "", err
-	}
-
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	// Compress blob data before writing to disk.
+	if err := compressFileToPath(path, data); err != nil {
 		return "", err
 	}
 
@@ -144,11 +140,16 @@ func (s *Store) PutBlob(data []byte) (string, error) {
 
 func (s *Store) GetBlob(hash string) ([]byte, error) {
 	path := s.blobPath(hash)
-	data, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrObjectNotFound
 		}
+		return nil, err
+	}
+
+	data, err := decompressBytes(raw)
+	if err != nil {
 		return nil, err
 	}
 
@@ -160,16 +161,38 @@ func (s *Store) GetBlob(hash string) ([]byte, error) {
 	return data, nil
 }
 
-// GetBlobSize returns the on-disk size of the stored blob without reading
-// its content into memory. B2: avoids loading large blobs (PSD, video)
-// just to compare file sizes in ComputeStatus.
+// GetBlobSize returns the original (uncompressed) size of the stored blob
+// without fully reading its content into memory. B2: avoids loading large
+// blobs (PSD, video) just to compare file sizes in ComputeStatus.
+// For compressed blobs, reads only the header to get the original size.
+// For legacy uncompressed blobs, returns the file size directly.
 func (s *Store) GetBlobSize(hash string) (int64, error) {
 	path := s.blobPath(hash)
-	fi, err := os.Stat(path)
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return 0, ErrObjectNotFound
 		}
+		return 0, err
+	}
+	defer f.Close()
+
+	// Read the compression header to determine format and original size.
+	header := make([]byte, compressedHeaderSz)
+	n, err := io.ReadFull(f, header)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return 0, err
+	}
+	header = header[:n]
+
+	// If the file has the DRZL magic, extract the original size from header.
+	if n >= compressedHeaderSz && string(header[:4]) == compressedMagic {
+		return int64(binary.LittleEndian.Uint32(header[5:9])), nil
+	}
+
+	// Legacy uncompressed blob — return file size.
+	fi, err := f.Stat()
+	if err != nil {
 		return 0, err
 	}
 	return fi.Size(), nil
@@ -178,6 +201,7 @@ func (s *Store) GetBlobSize(hash string) (int64, error) {
 // GetBlobToWriter streams a blob's content to the given writer without loading
 // the entire blob into memory. This is essential for large files (PSD, video)
 // that creative workers handle. The hash is verified via a streaming hasher.
+// Handles both compressed (DRZL) and legacy raw formats transparently.
 func (s *Store) GetBlobToWriter(hash string, w io.Writer) error {
 	path := s.blobPath(hash)
 	f, err := os.Open(path)
@@ -189,8 +213,14 @@ func (s *Store) GetBlobToWriter(hash string, w io.Writer) error {
 	}
 	defer f.Close()
 
+	// Wrap the file reader with transparent decompression.
+	r, err := streamingDecompressReader(f)
+	if err != nil {
+		return err
+	}
+
 	h := core.NewHasher()
-	if _, err := io.Copy(io.MultiWriter(w, h), f); err != nil {
+	if _, err := io.Copy(io.MultiWriter(w, h), r); err != nil {
 		return err
 	}
 
@@ -228,24 +258,15 @@ func (s *Store) PutBlobFromReader(r io.Reader) (string, error) {
 }
 
 func (s *Store) putBlobFromReaderLocked(r io.Reader) (string, error) {
-	tmp, err := os.CreateTemp(s.DriftDir(), "putblob-*.tmp")
-	if err != nil {
-		return "", err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-
-	if _, err := tmp.ReadFrom(r); err != nil {
-		tmp.Close()
-		return "", err
-	}
-	tmp.Close()
-
-	hash, err := core.CalculateHashFromFile(tmpName)
+	// Read the full content into memory to compute hash and compress.
+	// For very large files this is unavoidable since we need the hash
+	// before we know the path, and compression needs the full content.
+	data, err := io.ReadAll(r)
 	if err != nil {
 		return "", err
 	}
 
+	hash := core.CalculateHash(data)
 	path := s.blobPath(hash)
 
 	if _, err := os.Stat(path); err == nil {
@@ -256,7 +277,8 @@ func (s *Store) putBlobFromReaderLocked(r io.Reader) (string, error) {
 		return "", err
 	}
 
-	if err := os.Rename(tmpName, path); err != nil {
+	// Write compressed data atomically.
+	if err := compressFileToPath(path, data); err != nil {
 		return "", err
 	}
 
@@ -287,13 +309,8 @@ func (s *Store) PutTree(t *core.Tree) error {
 		return err
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
-	}
-
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	// Write compressed tree data atomically.
+	if err := compressFileToPath(path, data); err != nil {
 		return err
 	}
 
@@ -308,17 +325,23 @@ func (s *Store) GetTree(hash string) (*core.Tree, error) {
 
 	// Try new two-level path; fall back to old flat path (B10).
 	path := s.treePath(hash)
-	data, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		// Try old flat path for backward compatibility.
 		oldPath := filepath.Join(s.DriftDir(), treesDir, hash+".dre")
-		data, err = os.ReadFile(oldPath)
+		raw, err = os.ReadFile(oldPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil, ErrObjectNotFound
 			}
 			return nil, err
 		}
+	}
+
+	// Decompress if needed (backward compatible with raw format).
+	data, err := decompressBytes(raw)
+	if err != nil {
+		return nil, err
 	}
 
 	t := &core.Tree{}
@@ -354,13 +377,8 @@ func (s *Store) PutCommit(c *core.Commit) error {
 		return err
 	}
 
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return err
-	}
-
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	// Write compressed commit data atomically.
+	if err := compressFileToPath(path, data); err != nil {
 		return err
 	}
 
@@ -370,17 +388,23 @@ func (s *Store) PutCommit(c *core.Commit) error {
 func (s *Store) GetCommit(id string) (*core.Commit, error) {
 	// Try new two-level path; fall back to old flat path (B10).
 	path := s.commitPath(id)
-	data, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		// Try old flat path for backward compatibility.
 		oldPath := filepath.Join(s.DriftDir(), commitsDir, id+".dcm")
-		data, err = os.ReadFile(oldPath)
+		raw, err = os.ReadFile(oldPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil, ErrObjectNotFound
 			}
 			return nil, err
 		}
+	}
+
+	// Decompress if needed (backward compatible with raw format).
+	data, err := decompressBytes(raw)
+	if err != nil {
+		return nil, err
 	}
 
 	c := &core.Commit{}
@@ -490,6 +514,11 @@ func (s *Store) SaveRef(name, commitHash string) error {
 	path := filepath.Join(s.DriftDir(), refsDir, name+refExt)
 	data := []byte(commitHash + "\n")
 
+	// Create parent directory for nested refs (e.g. "names/label").
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return err
@@ -539,34 +568,53 @@ func (s *Store) GetRef(name string) (string, error) {
 }
 
 func (s *Store) ListRefs() (map[string]string, error) {
-	dir := filepath.Join(s.DriftDir(), refsDir)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
 	refs := make(map[string]string)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		// B5: handle both .ref (new) and .json (legacy) formats.
-		if filepath.Ext(name) == refExt {
-			name = name[:len(name)-len(refExt)]
-		} else if filepath.Ext(name) == refJSONExt {
-			name = name[:len(name)-len(refJSONExt)]
-		} else {
-			continue
-		}
-		commitHash, err := s.GetRef(name)
+	refsDirPath := filepath.Join(s.DriftDir(), refsDir)
+
+	err := filepath.Walk(refsDirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
 		}
-		refs[name] = commitHash
+		if info.IsDir() {
+			return nil
+		}
+
+		name := info.Name()
+		// B5: handle both .ref (new) and .json (legacy) formats.
+		var refName string
+		if filepath.Ext(name) == refExt {
+			base := name[:len(name)-len(refExt)]
+			// Compute the ref name relative to the refs directory.
+			rel, err := filepath.Rel(refsDirPath, path)
+			if err != nil {
+				return nil
+			}
+			rel = strings.TrimSuffix(rel, refExt)
+			refName = filepath.ToSlash(rel)
+			_ = base
+		} else if filepath.Ext(name) == refJSONExt {
+			rel, err := filepath.Rel(refsDirPath, path)
+			if err != nil {
+				return nil
+			}
+			rel = strings.TrimSuffix(rel, refJSONExt)
+			refName = filepath.ToSlash(rel)
+		} else {
+			return nil
+		}
+
+		commitHash, err := s.GetRef(refName)
+		if err != nil {
+			return nil
+		}
+		refs[refName] = commitHash
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return refs, nil

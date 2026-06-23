@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -13,20 +14,83 @@ import (
 )
 
 var addCmd = &cobra.Command{
-	Use:   "add <path>",
+	Use:   "add <path> [<path>...]",
 	Short: "Add file contents to the staging area",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		target := args[0]
-		if target == "." {
+		// Expand glob patterns and collect unique paths.
+		paths, err := expandAddPaths(args)
+		if err != nil {
+			return err
+		}
+		if len(paths) == 0 {
+			return fmt.Errorf("no matching files found")
+		}
+
+		// Special case: "." means add all.
+		if len(paths) == 1 && paths[0] == "." {
 			return addAll(sharedStore, sharedDir)
 		}
-		return addPath(sharedStore, sharedDir, target)
+
+		return addPaths(sharedStore, sharedDir, paths)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(addCmd)
+}
+
+// expandAddPaths expands glob patterns in the given arguments and returns
+// a deduplicated list of repository-relative paths. Literal paths (without
+// glob metacharacters) are passed through as-is if they exist.
+func expandAddPaths(args []string) ([]string, error) {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, arg := range args {
+		// "." is a special case — pass through.
+		if arg == "." {
+			if !seen["."] {
+				seen["."] = true
+				result = append(result, ".")
+			}
+			continue
+		}
+
+		// Check if the argument contains glob metacharacters.
+		if strings.ContainsAny(arg, "*?[") {
+			matches, err := filepath.Glob(arg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q: %w", arg, err)
+			}
+			if len(matches) == 0 {
+				return nil, fmt.Errorf("no matches for pattern: %s", arg)
+			}
+			for _, m := range matches {
+				rel, err := filepath.Rel(".", m)
+				if err != nil {
+					rel = m
+				}
+				rel = filepath.ToSlash(rel)
+				if !seen[rel] {
+					seen[rel] = true
+					result = append(result, rel)
+				}
+			}
+		} else {
+			// Literal path — verify it exists.
+			if _, err := os.Lstat(arg); err != nil {
+				return nil, fmt.Errorf("path not found: %s", arg)
+			}
+			rel := filepath.ToSlash(arg)
+			if !seen[rel] {
+				seen[rel] = true
+				result = append(result, rel)
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // loadParentTreeHashes returns a map of path → blob hash from the current
@@ -60,37 +124,9 @@ func loadParentTreeHashes(store *storage.Store) map[string]string {
 	return m
 }
 
-func addPath(store *storage.Store, root, path string) error {
-	fullPath := filepath.Join(root, filepath.FromSlash(path))
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		return fmt.Errorf("path not found: %s", path)
-	}
-
-	if info.IsDir() {
-		return addDirectory(store, root, path)
-	}
-
-	var idx core.Index
-	if err := store.LoadIndex(&idx); err != nil {
-		return fmt.Errorf("failed to load index: %w", err)
-	}
-
-	parentHashes := loadParentTreeHashes(store)
-	if _, err := addFile(store, root, path, fullPath, info, &idx, parentHashes); err != nil {
-		return err
-	}
-
-	if err := store.SaveIndex(&idx); err != nil {
-		return fmt.Errorf("failed to save index: %w", err)
-	}
-
-	return nil
-}
-
-func addDirectory(store *storage.Store, root, dirPath string) error {
-	fullDir := filepath.Join(root, filepath.FromSlash(dirPath))
-
+// addPaths processes multiple paths in a single staging operation, sharing
+// the index and parent-tree-hash map across all paths for efficiency.
+func addPaths(store *storage.Store, root string, paths []string) error {
 	var idx core.Index
 	if err := store.LoadIndex(&idx); err != nil {
 		return fmt.Errorf("failed to load index: %w", err)
@@ -98,10 +134,52 @@ func addDirectory(store *storage.Store, root, dirPath string) error {
 
 	parentHashes := loadParentTreeHashes(store)
 	var added int
+
+	for _, p := range paths {
+		fullPath := filepath.Join(root, filepath.FromSlash(p))
+		info, err := os.Lstat(fullPath)
+		if err != nil {
+			return fmt.Errorf("path not found: %s", p)
+		}
+
+		if info.IsDir() {
+			// Walk directory and add files within.
+			n, err := addDirectoryInto(store, root, p, &idx, parentHashes)
+			if err != nil {
+				return err
+			}
+			added += n
+		} else {
+			wasAdded, err := addFile(store, root, p, fullPath, info, &idx, parentHashes)
+			if err != nil {
+				return err
+			}
+			if wasAdded {
+				added++
+			}
+		}
+	}
+
+	if err := store.SaveIndex(&idx); err != nil {
+		return fmt.Errorf("failed to save index: %w", err)
+	}
+
+	if added > 0 {
+		fmt.Printf("Added %d file(s)\n", added)
+	}
+	return nil
+}
+
+// addDirectoryInto walks a directory and adds files into the provided index.
+// Returns the count of newly added files.
+func addDirectoryInto(store *storage.Store, root, dirPath string, idx *core.Index, parentHashes map[string]string) (int, error) {
+	fullDir := filepath.Join(root, filepath.FromSlash(dirPath))
+	var added int
+
 	err := core.WalkWorkingDirWithIgnore(fullDir, root, func(path string, info os.FileInfo) error {
 		relPath := filepath.ToSlash(filepath.Join(dirPath, path))
 		fullPath := filepath.Join(root, filepath.FromSlash(relPath))
-		wasAdded, err := addFile(store, root, relPath, fullPath, info, &idx, parentHashes)
+		wasAdded, err := addFile(store, root, relPath, fullPath, info, idx, parentHashes)
 		if err != nil {
 			return err
 		}
@@ -111,15 +189,9 @@ func addDirectory(store *storage.Store, root, dirPath string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
-
-	if err := store.SaveIndex(&idx); err != nil {
-		return fmt.Errorf("failed to save index: %w", err)
-	}
-
-	fmt.Printf("Added %d file(s)\n", added)
-	return nil
+	return added, nil
 }
 
 func addAll(store *storage.Store, root string) error {
@@ -154,7 +226,7 @@ func addAll(store *storage.Store, root string) error {
 }
 
 func addFile(store *storage.Store, root, relPath, fullPath string, info os.FileInfo, idx *core.Index, parentTreeHashes map[string]string) (bool, error) {
-	mode, err := core.NormalizeMode(info.Mode())
+	mode, err := core.NormalizeModeForPath(info.Mode(), relPath)
 	if err != nil {
 		// Skip unsupported file types (sockets, pipes, devices) with a notice.
 		fmt.Printf("Skipped (unsupported type): %s\n", relPath)

@@ -122,7 +122,7 @@ func TestSwitch_NonexistentBranch(t *testing.T) {
 	h.AssertError(err)
 }
 
-// TC-SWITCH-004: Switch with staged changes (no --force)
+// TC-SWITCH-004: Switch with staged changes (no --force) — auto-saves to WIP
 func TestSwitch_StagedChangesNoForce(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
@@ -138,9 +138,9 @@ func TestSwitch_StagedChangesNoForce(t *testing.T) {
 	_, err = h.RunAdd("note.txt")
 	h.AssertNoError(err)
 
-	// Switch should fail without --force
+	// Switch should auto-save WIP and succeed (not fail).
 	_, err = h.RunSwitch("experiment")
-	h.AssertError(err)
+	h.AssertNoError(err)
 }
 
 // TC-SWITCH-005: Switch with staged changes and --force

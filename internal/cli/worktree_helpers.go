@@ -183,7 +183,10 @@ func hasWorktreeModifications() (bool, error) {
 			target, err := os.Readlink(fullPath)
 			if err != nil || target != "" {
 				// Readlink error or mismatched target means modification.
-				data, _ := sharedStore.GetBlob(b.Hash)
+				data, err := sharedStore.GetBlob(b.Hash)
+				if err != nil {
+					return false, fmt.Errorf("failed to read blob %s for %s: %w", b.Hash, b.Path, err)
+				}
 				if target != string(data) {
 					return true, nil
 				}

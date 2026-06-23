@@ -2,7 +2,10 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,22 +29,67 @@ func acquireFileLock(lockPath string) (*fileLock, error) {
 
 	// Try non-blocking first; if it fails, poll with a deadline.
 	if err := platformTryLock(f); err == nil {
+		writeLockPID(f)
 		return &fileLock{file: f}, nil
 	}
+
+	// Check for a stale lock before waiting. If the PID recorded in the
+	// lock file belongs to a process that no longer exists, the lock is
+	// stale (the process crashed without releasing). On Unix the OS lock
+	// is released automatically on process death, but on Windows a
+	// crashed process may leave a dangling lock file — reporting the PID
+	// helps the user diagnose.
+	holderPID := readLockPID(f)
 
 	deadline := time.Now().Add(lockTimeout)
 	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 		if err := platformTryLock(f); err == nil {
+			writeLockPID(f)
 			return &fileLock{file: f}, nil
 		}
 	}
 
 	f.Close()
+	if holderPID > 0 {
+		return nil, fmt.Errorf("%w (held by PID %d)", ErrLockTimeout, holderPID)
+	}
 	return nil, ErrLockTimeout
 }
 
 func (fl *fileLock) release() {
 	platformUnlock(fl.file)
+	// Clear the PID we wrote so a future reader doesn't see a stale value.
+	clearLockPID(fl.file)
 	fl.file.Close()
+}
+
+// writeLockPID records the current process ID in the lock file so other
+// processes can report which one holds the lock.
+func writeLockPID(f *os.File) {
+	f.Truncate(0)
+	f.Seek(0, 0)
+	fmt.Fprintf(f, "%d\n", os.Getpid())
+	f.Sync()
+}
+
+// readLockPID reads the PID recorded in the lock file, or 0 if unreadable.
+func readLockPID(f *os.File) int {
+	f.Seek(0, 0)
+	buf := make([]byte, 32)
+	n, _ := f.Read(buf)
+	if n == 0 {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(buf[:n])))
+	if err != nil {
+		return 0
+	}
+	return pid
+}
+
+// clearLockPID erases the PID from the lock file on release.
+func clearLockPID(f *os.File) {
+	f.Truncate(0)
+	f.Seek(0, 0)
 }

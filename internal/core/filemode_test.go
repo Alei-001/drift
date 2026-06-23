@@ -88,3 +88,47 @@ func TestIsMalformed(t *testing.T) {
 		t.Fatalf("0o170000 should be malformed")
 	}
 }
+
+// TestNormalizeModeForPath_RegularFile verifies that a regular file with a
+// non-executable extension maps to ModeRegular.
+func TestNormalizeModeForPath_RegularFile(t *testing.T) {
+	got, err := NormalizeModeForPath(0o644, "note.txt")
+	if err != nil {
+		t.Fatalf("NormalizeModeForPath(0644, note.txt) error: %v", err)
+	}
+	if got != ModeRegular {
+		t.Fatalf("NormalizeModeForPath(0644, note.txt) = %o, want %o", got, ModeRegular)
+	}
+}
+
+// TestNormalizeModeForPath_ExecutableByExt verifies that on Windows, files
+// with executable extensions are detected as executable even without the
+// Unix executable bit.
+func TestNormalizeModeForPath_ExecutableByExt(t *testing.T) {
+	got, err := NormalizeModeForPath(0o644, "build.exe")
+	if err != nil {
+		t.Fatalf("NormalizeModeForPath(0644, build.exe) error: %v", err)
+	}
+	// On Windows, .exe should map to ModeExecutable; on Unix, ModeRegular.
+	if isWindows {
+		if got != ModeExecutable {
+			t.Fatalf("NormalizeModeForPath(0644, build.exe) = %o, want %o (Windows)", got, ModeExecutable)
+		}
+	} else {
+		if got != ModeRegular {
+			t.Fatalf("NormalizeModeForPath(0644, build.exe) = %o, want %o (Unix)", got, ModeRegular)
+		}
+	}
+}
+
+// TestNormalizeModeForPath_SymlinkUnaffected verifies that symlinks are not
+// affected by the path-based executable detection.
+func TestNormalizeModeForPath_SymlinkUnaffected(t *testing.T) {
+	got, err := NormalizeModeForPath(os.ModeSymlink|0o777, "link.exe")
+	if err != nil {
+		t.Fatalf("NormalizeModeForPath(symlink, link.exe) error: %v", err)
+	}
+	if got != ModeSymlink {
+		t.Fatalf("NormalizeModeForPath(symlink, link.exe) = %o, want %o", got, ModeSymlink)
+	}
+}

@@ -141,6 +141,61 @@ func TestConfig_SetMultipleKeys(t *testing.T) {
 	h.AssertContains(output, "true")
 }
 
+// TC-CONFIG-011: --list prints all config values
+func TestConfig_List(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("user.name", "Bob")
+	h.AssertNoError(err)
+	_, err = h.RunConfig("user.email", "bob@example.com")
+	h.AssertNoError(err)
+
+	output, err := h.RunConfig("--list")
+	h.AssertNoError(err)
+	h.AssertContains(output, "user.name=Bob")
+	h.AssertContains(output, "user.email=bob@example.com")
+	h.AssertContains(output, "core.default_branch=")
+}
+
+// TC-CONFIG-012: --unset clears a config value
+func TestConfig_Unset(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("user.name", "Carol")
+	h.AssertNoError(err)
+
+	output, err := h.RunConfig("user.name")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Carol")
+
+	output, err = h.RunConfig("--unset", "user.name")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Unset user.name")
+
+	// Value should now be empty.
+	output, err = h.RunConfig("user.name")
+	h.AssertNoError(err)
+	if output != "" && output != "\n" {
+		t.Errorf("expected empty after unset, got %q", output)
+	}
+}
+
+// TC-CONFIG-013: --unset with unknown key errors
+func TestConfig_UnsetUnknownKey(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("--unset", "unknown.key")
+	h.AssertError(err)
+}
+
+// TC-CONFIG-014: --unset without a key errors
+func TestConfig_UnsetNoKey(t *testing.T) {
+	h := NewTestHelper(t)
+
+	_, err := h.RunConfig("--unset")
+	h.AssertError(err)
+}
+
 // TC-IGNORE-001: .driftignore ignores specific files
 func TestIgnore_SpecificFiles(t *testing.T) {
 	h := NewTestHelper(t)
