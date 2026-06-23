@@ -392,3 +392,94 @@ func TestDiff_NormalizedPath(t *testing.T) {
 	h.AssertContains(output, "M a.txt")
 	h.AssertNotContains(output, "b.txt")
 }
+
+// TC-DIFF-011: Diff with -- separator for file paths
+func TestDiff_DashDashSeparator(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "v1 a")
+	h.WriteFile("b.txt", "v1 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+
+	h.WriteFile("a.txt", "v2 a")
+	h.WriteFile("b.txt", "v2 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+
+	// drift diff v1 v2 -- a.txt
+	// Cobra passes post-"--" args as part of args slice.
+	output, err := h.RunDiff("v1", "v2", "a.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M a.txt")
+	h.AssertNotContains(output, "b.txt")
+}
+
+// TC-DIFF-012: Diff with -- separator and multiple files
+func TestDiff_DashDashMultipleFiles(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "v1 a")
+	h.WriteFile("b.txt", "v1 b")
+	h.WriteFile("c.txt", "v1 c")
+	h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v1")
+
+	h.WriteFile("a.txt", "v2 a")
+	h.WriteFile("b.txt", "v2 b")
+	h.WriteFile("c.txt", "v2 c")
+	h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v2")
+
+	// drift diff v1 v2 -- a.txt c.txt
+	output, err := h.RunDiff("v1", "v2", "a.txt", "c.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M a.txt")
+	h.AssertContains(output, "M c.txt")
+	h.AssertNotContains(output, "b.txt")
+}
+
+// TC-DIFF-013: Diff with -f shorthand flag
+func TestDiff_ShortFlag(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "v1 a")
+	h.WriteFile("b.txt", "v1 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+
+	h.WriteFile("a.txt", "v2 a")
+	h.WriteFile("b.txt", "v2 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+
+	// Use -f shorthand by setting the flag directly
+	h.SetupSharedState()
+	diffFilePaths = []string{"a.txt"}
+	output, err := CaptureOutput(func() error {
+		return diffCmd.RunE(diffCmd, []string{"v1", "v2"})
+	})
+	h.AssertNoError(err)
+	h.AssertContains(output, "M a.txt")
+	h.AssertNotContains(output, "b.txt")
+}
+
+// TC-DIFF-014: Diff with -- separator and directory filter
+func TestDiff_DashDashDirectory(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("src/main.go", "v1 main")
+	h.WriteFile("src/lib/helper.go", "v1 helper")
+	h.WriteFile("docs/guide.md", "v1 guide")
+	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v1")
+
+	h.WriteFile("src/main.go", "v2 main")
+	h.WriteFile("src/lib/helper.go", "v2 helper")
+	h.WriteFile("docs/guide.md", "v2 guide")
+	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v2")
+
+	// drift diff v1 v2 -- src/
+	output, err := h.RunDiff("v1", "v2", "src/")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M src/main.go")
+	h.AssertContains(output, "M src/lib/helper.go")
+	h.AssertNotContains(output, "docs/guide.md")
+}

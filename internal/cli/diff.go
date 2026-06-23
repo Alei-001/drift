@@ -21,13 +21,18 @@ var (
 )
 
 var diffCmd = &cobra.Command{
-	Use:   "diff [v1] [v2] [--file <path>...]",
+	Use:   "diff [v1] [v2] [-- <path>...]",
 	Short: "Show differences between versions, branches, or working tree",
 	Long: `Show file differences.
 Version arguments can be version IDs (e.g., v1), branch names (e.g., main), or branch/version (e.g., main/v1).
 
 By default, shows a summary of changed files with statistics.
 Use --patch or -p to show detailed line-by-line differences.
+
+File paths can be specified in three ways:
+  - After a -- separator:  drift diff v1 v2 -- 章节/第一章.txt
+  - With -f/--file flag:   drift diff v1 v2 -f 章节/第一章.txt
+  - Multiple files:        drift diff v1 v2 -- src/ a.txt
 
 Examples:
   drift diff                    # working tree vs current branch (summary)
@@ -37,24 +42,37 @@ Examples:
   drift diff main feature       # main latest vs feature latest (summary)
   drift diff main/v1 feature/v1 # cross-branch comparison (summary)
   drift diff v1 v2 -p           # v1 vs v2 (detailed)
-  drift diff v1 v2 --file 章节/第一章.txt  # only specific file(s)
-  drift diff v1 v2 --file src/             # only files under a directory
-  drift diff v1 v2 -o diff.txt             # save to file`,
-	Args: cobra.MaximumNArgs(2),
+  drift diff v1 v2 -- 章节/第一章.txt  # only specific file(s)
+  drift diff v1 v2 -- src/             # only files under a directory
+  drift diff v1 v2 -f a.txt -f b.txt   # multiple files via flag
+  drift diff v1 v2 -o diff.txt         # save to file`,
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Parse version arguments
+		// Separate version arguments from file paths. Cobra passes
+		// post-"--" arguments as part of args, but we also accept -f/--file.
+		// The first 0-2 arguments are versions; any beyond that are file paths.
 		var v1, v2 string
-		if len(args) >= 1 {
+		var extraPaths []string
+		switch {
+		case len(args) == 0:
+			// No versions, no paths
+		case len(args) == 1:
 			v1 = args[0]
-		}
-		if len(args) >= 2 {
-			v2 = args[1]
+		case len(args) == 2:
+			v1, v2 = args[0], args[1]
+		default:
+			// 3+ args: first two are versions, rest are file paths
+			v1, v2 = args[0], args[1]
+			extraPaths = args[2:]
 		}
 
 		// Use global variables bound to flags
 		showPatch := diffPatch
 		outputFile := diffOutput
 		filePaths := diffFilePaths
+
+		// Merge paths from --file flag and positional args (after --).
+		filePaths = append(filePaths, extraPaths...)
 
 		// Normalize file filter paths to repository-relative form.
 		if len(filePaths) > 0 {
@@ -95,7 +113,7 @@ func init() {
 	rootCmd.AddCommand(diffCmd)
 	diffCmd.Flags().BoolVarP(&diffPatch, "patch", "p", false, "Show detailed line-by-line differences")
 	diffCmd.Flags().StringVarP(&diffOutput, "output", "o", "", "Output to file instead of stdout")
-	diffCmd.Flags().StringSliceVar(&diffFilePaths, "file", []string{}, "Specific file(s) to compare (can be repeated)")
+	diffCmd.Flags().StringSliceVarP(&diffFilePaths, "file", "f", []string{}, "Specific file(s) to compare (can be repeated, or use -- separator)")
 }
 
 func diffWorktree(reader *core.TreeReader, version string, output io.Writer, showPatch bool, filePaths []string) error {
