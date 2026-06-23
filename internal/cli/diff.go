@@ -21,7 +21,7 @@ var (
 )
 
 var diffCmd = &cobra.Command{
-	Use:   "diff [v1] [v2] [-- <file>...]",
+	Use:   "diff [v1] [v2] [--file <path>...]",
 	Short: "Show differences between versions, branches, or working tree",
 	Long: `Show file differences.
 Version arguments can be version IDs (e.g., v1), branch names (e.g., main), or branch/version (e.g., main/v1).
@@ -37,8 +37,9 @@ Examples:
   drift diff main feature       # main latest vs feature latest (summary)
   drift diff main/v1 feature/v1 # cross-branch comparison (summary)
   drift diff v1 v2 -p           # v1 vs v2 (detailed)
-  drift diff v1 v2 -- 章节/第一章.txt  # only specific file(s)
-  drift diff v1 v2 -p --output diff.txt  # save to file`,
+  drift diff v1 v2 --file 章节/第一章.txt  # only specific file(s)
+  drift diff v1 v2 --file src/             # only files under a directory
+  drift diff v1 v2 -o diff.txt             # save to file`,
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Parse version arguments
@@ -54,6 +55,15 @@ Examples:
 		showPatch := diffPatch
 		outputFile := diffOutput
 		filePaths := diffFilePaths
+
+		// Normalize file filter paths to repository-relative form.
+		if len(filePaths) > 0 {
+			normalized, err := normalizePathFilters(filePaths)
+			if err != nil {
+				return err
+			}
+			filePaths = normalized
+		}
 
 		// Setup output destination
 		var output io.Writer = os.Stdout
@@ -122,14 +132,13 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 		versionLabel = version
 	}
 
-	// Filter by file paths if specified
-	filterSet := make(map[string]bool, len(filePaths))
-	for _, p := range filePaths {
-		filterSet[p] = true
+	// Filter by file paths if specified (supports directory prefix matching).
+	if len(filePaths) > 0 {
+		targetBlobs = filterBlobsByPaths(targetBlobs, filePaths)
 	}
 
 	// Collect differences
-	diffs, err := collectWorktreeDiffs(targetBlobs, filterSet)
+	diffs, err := collectWorktreeDiffs(targetBlobs, filePaths)
 	if err != nil {
 		return err
 	}
@@ -237,19 +246,11 @@ func filterBlobsByPaths(blobs []core.BlobEntry, paths []string) []core.BlobEntry
 	return result
 }
 
-func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]bool) ([]FileDiff, error) {
+func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []string) ([]FileDiff, error) {
 	diffs := []FileDiff{}
 
-	// If a filter is active, apply it to targetBlobs first.
-	if len(filterSet) > 0 {
-		filtered := make([]core.BlobEntry, 0, len(targetBlobs))
-		for _, b := range targetBlobs {
-			if filterSet[b.Path] {
-				filtered = append(filtered, b)
-			}
-		}
-		targetBlobs = filtered
-	}
+	// targetBlobs is already filtered by filePaths in diffWorktree, so no
+	// additional filtering is needed here.
 
 	trackedPaths := make(map[string]bool, len(targetBlobs))
 	// Check files in target version
@@ -342,7 +343,7 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filterSet map[string]boo
 	// Issue 10: collect untracked files in the working tree (previously skipped).
 	// Skip this when a file filter is active — untracked files don't match a
 	// user-specified tracked-file filter.
-	if len(filterSet) == 0 {
+	if len(filePaths) == 0 {
 		var idx core.Index
 		_ = sharedStore.LoadIndex(&idx)
 		err := core.WalkWorkingDir(sharedDir, func(path string, info os.FileInfo) error {

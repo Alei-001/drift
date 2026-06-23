@@ -306,3 +306,89 @@ func TestDiff_SpecificFile(t *testing.T) {
 	h.AssertContains(output, "M note.txt")
 	h.AssertNotContains(output, "other.txt")
 }
+
+// TC-DIFF-007: Diff with directory filter (worktree vs version)
+func TestDiff_DirectoryFilter_Worktree(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("src/main.go", "v1 main")
+	h.WriteFile("src/lib/helper.go", "v1 helper")
+	h.WriteFile("README.md", "v1 readme")
+	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "README.md"}, "v1")
+
+	// Modify all files
+	h.WriteFile("src/main.go", "v2 main")
+	h.WriteFile("src/lib/helper.go", "v2 helper")
+	h.WriteFile("README.md", "v2 readme")
+
+	// Diff only src/ directory
+	output, err := h.RunDiffWithFile("src/")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M src/main.go")
+	h.AssertContains(output, "M src/lib/helper.go")
+	h.AssertNotContains(output, "README.md")
+}
+
+// TC-DIFF-008: Diff between versions with file filter
+func TestDiff_BetweenVersions_FileFilter(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "v1 a")
+	h.WriteFile("b.txt", "v1 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+
+	h.WriteFile("a.txt", "v2 a")
+	h.WriteFile("b.txt", "v2 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+
+	// Diff only a.txt between v1 and v2
+	output, err := h.RunDiffWithFile("a.txt", "v1", "v2")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M a.txt")
+	h.AssertNotContains(output, "b.txt")
+}
+
+// TC-DIFF-009: Diff between versions with directory filter
+func TestDiff_BetweenVersions_DirectoryFilter(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("src/main.go", "v1 main")
+	h.WriteFile("src/lib/helper.go", "v1 helper")
+	h.WriteFile("docs/guide.md", "v1 guide")
+	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v1")
+
+	h.WriteFile("src/main.go", "v2 main")
+	h.WriteFile("src/lib/helper.go", "v2 helper")
+	h.WriteFile("docs/guide.md", "v2 guide")
+	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v2")
+
+	// Diff only src/ between v1 and v2
+	output, err := h.RunDiffWithFile("src/", "v1", "v2")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M src/main.go")
+	h.AssertContains(output, "M src/lib/helper.go")
+	h.AssertNotContains(output, "docs/guide.md")
+}
+
+// TC-DIFF-010: Diff with normalized path (./prefix)
+func TestDiff_NormalizedPath(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "v1 a")
+	h.WriteFile("b.txt", "v1 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+
+	h.WriteFile("a.txt", "v2 a")
+	h.WriteFile("b.txt", "v2 b")
+	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+
+	// Diff with ./ prefix should normalize and match
+	output, err := h.RunDiffWithFile("./a.txt", "v1", "v2")
+	h.AssertNoError(err)
+	h.AssertContains(output, "M a.txt")
+	h.AssertNotContains(output, "b.txt")
+}
