@@ -119,6 +119,10 @@ func resetAllFlags() {
 	// config command package-level vars
 	configList = false
 	configUnset = false
+
+	// name command flags
+	nameCmd.Flags().Set("list", "false")
+	nameCmd.Flags().Set("delete", "")
 }
 
 // WriteFile creates a file with the given content.
@@ -296,6 +300,30 @@ func (h *TestHelper) RunRestore(args ...string) (string, error) {
 			}
 		}
 		return restoreCmd.RunE(restoreCmd, filteredArgs)
+	})
+}
+
+// RunName runs the name command.
+func (h *TestHelper) RunName(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	nameCmd.Flags().Set("list", "false")
+	nameCmd.Flags().Set("delete", "")
+	var filteredArgs []string
+	for _, arg := range args {
+		switch {
+		case arg == "--list":
+			nameCmd.Flags().Set("list", "true")
+		case strings.HasPrefix(arg, "--delete="):
+			nameCmd.Flags().Set("delete", strings.TrimPrefix(arg, "--delete="))
+		case arg == "--delete":
+			// Skip; handled by next arg
+		default:
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	return CaptureOutput(func() error {
+		return nameCmd.RunE(nameCmd, filteredArgs)
 	})
 }
 

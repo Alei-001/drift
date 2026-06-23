@@ -20,78 +20,79 @@ import (
 //   - No annotated tag objects (just a ref pointing to a commit)
 //   - No GPG signing
 //   - Names can contain any filename-safe characters
+//
+// Usage:
+//   drift name <version> <label>   — assign a name
+//   drift name --list              — list all names
+//   drift name --delete <label>    — delete a name
 
 var nameCmd = &cobra.Command{
-	Use:   "name",
+	Use:   "name [<version> <label>]",
 	Short: "Manage version names (aliases for commits)",
-	Long:  "Assign human-readable names to versions, e.g. 'drift name v3 客户终稿'.",
-}
+	Long: `Assign human-readable names to versions, e.g. 'drift name v3 客户终稿'.
 
-var nameAddCmd = &cobra.Command{
-	Use:   "name <version> <label>",
-	Short: "Assign a name to a version",
-	Args:  cobra.ExactArgs(2),
+Usage:
+  drift name <version> <label>   Assign a name to a version
+  drift name --list              List all version names
+  drift name --delete <label>    Delete a version name`,
+	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		version := args[0]
-		label := args[1]
+		listFlag, _ := cmd.Flags().GetBool("list")
+		deleteFlag, _ := cmd.Flags().GetString("delete")
 
-		// Validate label: no path separators, no dots-only, reasonable length.
-		if err := validateNameLabel(label); err != nil {
-			return err
+		if listFlag {
+			return listNames(sharedStore)
 		}
 
-		// Resolve the version to a commit hash.
-		commit, err := resolveCommit(sharedStore, version)
-		if err != nil {
-			return err
+		if deleteFlag != "" {
+			return deleteName(sharedStore, deleteFlag)
 		}
 
-		// Store the name as a ref under names/<label>.
-		refName := "names/" + label
-		if err := sharedStore.SaveRef(refName, commit.Hash); err != nil {
-			return fmt.Errorf("failed to save name: %w", err)
+		// Default action: assign a name.
+		if len(args) < 2 {
+			return fmt.Errorf("usage: drift name <version> <label>")
 		}
-
-		fmt.Printf("Named %s (commit %s) as '%s'\n", commit.ID, commit.Hash[:12], label)
-		return nil
-	},
-}
-
-var nameListCmd = &cobra.Command{
-	Use:   "name --list",
-	Short: "List all version names",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return listNames(sharedStore)
-	},
-}
-
-var nameDeleteCmd = &cobra.Command{
-	Use:   "name --delete <label>",
-	Short: "Delete a version name",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		label := args[0]
-		refName := "names/" + label
-
-		// Check if the name exists.
-		if _, err := sharedStore.GetRef(refName); err != nil {
-			return fmt.Errorf("name '%s' not found", label)
-		}
-
-		if err := sharedStore.DeleteRef(refName); err != nil {
-			return fmt.Errorf("failed to delete name: %w", err)
-		}
-
-		fmt.Printf("Deleted name '%s'\n", label)
-		return nil
+		return addName(sharedStore, args[0], args[1])
 	},
 }
 
 func init() {
-	nameCmd.AddCommand(nameAddCmd)
-	nameCmd.AddCommand(nameListCmd)
-	nameCmd.AddCommand(nameDeleteCmd)
+	nameCmd.Flags().Bool("list", false, "List all version names")
+	nameCmd.Flags().String("delete", "", "Delete a version name by label")
 	rootCmd.AddCommand(nameCmd)
+}
+
+// addName assigns a human-readable label to a version.
+func addName(store *storage.Store, version, label string) error {
+	if err := validateNameLabel(label); err != nil {
+		return err
+	}
+
+	commit, err := resolveCommit(store, version)
+	if err != nil {
+		return err
+	}
+
+	refName := "names/" + label
+	if err := store.SaveRef(refName, commit.Hash); err != nil {
+		return fmt.Errorf("failed to save name: %w", err)
+	}
+
+	fmt.Printf("Named %s (commit %s) as '%s'\n", commit.ID, commit.Hash[:12], label)
+	return nil
+}
+
+// deleteName removes a version name.
+func deleteName(store *storage.Store, label string) error {
+	refName := "names/" + label
+	if _, err := store.GetRef(refName); err != nil {
+		return fmt.Errorf("name '%s' not found", label)
+	}
+	if err := store.DeleteRef(refName); err != nil {
+		return fmt.Errorf("failed to delete name: %w", err)
+	}
+	fmt.Printf("Deleted name '%s'\n", label)
+	return nil
 }
 
 // validateNameLabel checks that a name label is safe to use as a filename.
