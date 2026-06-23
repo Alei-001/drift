@@ -21,6 +21,7 @@ The staging area must be empty (or use --force to discard).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		branch := args[0]
 		force, _ := cmd.Flags().GetBool("force")
+		create, _ := cmd.Flags().GetBool("create")
 
 		// Issue 27: no-op if already on this branch.
 		currentBranch, _ := sharedStore.GetRef("HEAD")
@@ -48,7 +49,18 @@ The staging area must be empty (or use --force to discard).`,
 
 		commitHash, err := sharedStore.GetRef(branch)
 		if err != nil {
-			return fmt.Errorf("branch not found: %s", branch)
+			if !create {
+				return fmt.Errorf("branch not found: %s", branch)
+			}
+			// Create the branch from the current branch's commit.
+			parentHash, _ := sharedStore.GetRef(currentBranch)
+			if err := sharedStore.SaveRef(branch, parentHash); err != nil {
+				return fmt.Errorf("failed to create branch: %w", err)
+			}
+			fmt.Printf("Created branch: %s\n", branch)
+			commitHash = parentHash
+		} else if create {
+			return fmt.Errorf("branch %q already exists", branch)
 		}
 
 		reader := core.NewTreeReader(sharedStore)
@@ -146,6 +158,7 @@ The staging area must be empty (or use --force to discard).`,
 
 func init() {
 	switchCmd.Flags().Bool("force", false, "Discard staged changes and unstaged modifications, then force switch")
+	switchCmd.Flags().BoolP("create", "c", false, "Create the branch if it does not exist, then switch")
 	rootCmd.AddCommand(switchCmd)
 }
 
