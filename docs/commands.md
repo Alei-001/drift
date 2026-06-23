@@ -546,8 +546,14 @@ drift undo -n 3               # 撤销最近 3 次操作
 查看已保存的工作进度（Work-In-Progress）。
 
 ```bash
-drift wip                     # 查看所有 WIP
-drift wip list                # 同上
+drift wip                     # 查看所有分支的 WIP
+```
+
+**输出示例：**
+
+```
+  main       3 file(s)
+  feature    1 file(s)
 ```
 
 **说明：**

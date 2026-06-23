@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -140,6 +141,47 @@ func stageWorktreeChanges(idx *core.Index) error {
 	})
 }
 
+var wipCmd = &cobra.Command{
+	Use:   "wip",
+	Short: "List saved work-in-progress across branches",
+	Long: `Lists all branches that have saved work-in-progress (WIP).
+
+When you switch branches with pending changes, drift automatically saves them
+as WIP. Use this command to see which branches have saved work. Use
+'drift restore-wip <branch>' to restore that work.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dir := filepath.Join(sharedStore.DriftDir(), wipDir)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Println("No saved work-in-progress")
+				return nil
+			}
+			return err
+		}
+
+		var found bool
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+				continue
+			}
+			branch := strings.TrimSuffix(e.Name(), ".json")
+			wip, err := loadWIP(sharedStore, branch)
+			if err != nil || wip == nil || len(wip.Entries) == 0 {
+				continue
+			}
+			found = true
+			fmt.Printf("  %s  %d file(s)\n", branch, len(wip.Entries))
+		}
+
+		if !found {
+			fmt.Println("No saved work-in-progress")
+		}
+		return nil
+	},
+}
+
 var restoreWIPCmd = &cobra.Command{
 	Use:   "restore-wip [branch]",
 	Short: "Restore work-in-progress saved during a branch switch",
@@ -200,5 +242,6 @@ Use this command to restore that work.`,
 }
 
 func init() {
+	rootCmd.AddCommand(wipCmd)
 	rootCmd.AddCommand(restoreWIPCmd)
 }
