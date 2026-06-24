@@ -155,6 +155,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+## 致谢
+
+本项目参考了 [go-git](https://github.com/go-git/go-git) 的实现思路，其使用 [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) 开源协议。
+
 ## 许可证
 
 MIT
