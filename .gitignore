@@ -7,6 +7,10 @@ reference/
 # Build artifacts
 dist/
 *.exe
+
+# Install scripts (will be distributed via releases instead)
+install.bat
+install.sh
 *.exe~
 *.dll
 *.so
