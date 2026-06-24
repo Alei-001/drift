@@ -36,16 +36,6 @@ No staging area jargon. No merge conflicts. No Git concepts to learn.
 
 **Windows (installer):** Download `drift-setup-x.y.z.exe` from [Releases](../../releases) and run it — graphical installer with PATH setup and uninstaller.
 
-**Windows (from source):**
-```powershell
-.\install.bat
-```
-
-**macOS / Linux:**
-```bash
-./install.sh
-```
-
 **Build from source:**
 ```bash
 go build -ldflags "-X github.com/drift/drift/internal/cli.version=0.1.0" -o drift ./cmd/drift/
@@ -139,7 +129,6 @@ drift/
 │   └── config/         # JSON config read/write
 ├── installer/          # Inno Setup script for Windows installer
 ├── .github/workflows/  # CI/CD: release workflow (tag-triggered)
-├── install.bat / install.sh  # Source-based install scripts
 └── docs/               # Design docs (Chinese)
 ```
 
