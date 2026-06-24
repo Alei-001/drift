@@ -155,6 +155,10 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+## Acknowledgments
+
+Parts of this project reference or are inspired by [go-git](https://github.com/go-git/go-git), licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+
 ## License
 
 MIT
