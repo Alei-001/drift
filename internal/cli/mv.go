@@ -45,7 +45,7 @@ Examples:
 		for _, e := range idx.Entries {
 			tracked[e.Path] = true
 		}
-		for p := range loadParentTreeHashes(sharedStore) {
+		for p := range sharedRepo.WT.LoadParentTreeHashes() {
 			tracked[p] = true
 		}
 
@@ -111,7 +111,7 @@ Examples:
 						return fmt.Errorf("failed to store symlink %s: %w", destRel, err)
 					}
 				} else {
-					hash, err = putBlobForAdd(sharedStore, destFull, sharedConfig.Core.AutoCRLF)
+					hash, err = sharedRepo.WT.PutBlobForAdd(destFull)
 					if err != nil {
 						return fmt.Errorf("failed to store %s: %w", destRel, err)
 					}
@@ -146,7 +146,7 @@ Examples:
 			}
 		}
 		if len(srcDirs) > 0 {
-			cleanEmptyDirsAffected(sharedDir, srcDirs)
+			sharedRepo.WT.CleanEmptyDirs(srcDirs)
 		}
 
 		fmt.Printf("Moved %d file(s)\n", moved)

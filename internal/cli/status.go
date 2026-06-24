@@ -20,7 +20,7 @@ var statusCmd = &cobra.Command{
 			currentBranch = "main"
 		}
 
-		commit, _ := currentBranchCommit(sharedStore)
+		commit, _ := sharedRepo.CurrentCommit()
 		if commit != nil {
 			fmt.Printf("On branch %s, version %s\n\n", currentBranch, commit.ID)
 		} else {
@@ -33,7 +33,7 @@ var statusCmd = &cobra.Command{
 		}
 
 		var commitTree *core.Tree
-		if latest, _ := currentBranchCommit(sharedStore); latest != nil {
+		if latest, _ := sharedRepo.CurrentCommit(); latest != nil {
 			if latest.TreeHash != "" {
 				t, err := sharedStore.GetTree(latest.TreeHash)
 				if err == nil {

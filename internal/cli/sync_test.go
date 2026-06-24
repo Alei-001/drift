@@ -88,7 +88,7 @@ func TestSyncRemote_Set(t *testing.T) {
 
 	output, err := h.runSyncRemote(remoteRoot)
 	h.AssertNoError(err)
-	h.AssertContains(output, "Remote root set to")
+	h.AssertContains(output, "Remote set:")
 	h.AssertContains(output, remoteRoot)
 
 	// Verify it was persisted.
@@ -96,8 +96,11 @@ func TestSyncRemote_Set(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gcfg.RemoteRoot != remoteRoot {
-		t.Errorf("expected RemoteRoot %q, got %q", remoteRoot, gcfg.RemoteRoot)
+	if gcfg.Path != remoteRoot {
+		t.Errorf("expected Path %q, got %q", remoteRoot, gcfg.Path)
+	}
+	if gcfg.Protocol != "local" {
+		t.Errorf("expected Protocol %q, got %q", "local", gcfg.Protocol)
 	}
 }
 
@@ -119,6 +122,7 @@ func TestSyncRemote_Show(t *testing.T) {
 	})
 	h.AssertNoError(err)
 	h.AssertContains(output, remoteRoot)
+	h.AssertContains(output, "local")
 }
 
 func TestSyncRemote_ShowEmpty(t *testing.T) {
@@ -133,7 +137,7 @@ func TestSyncRemote_ShowEmpty(t *testing.T) {
 		return syncRemoteCmd.RunE(syncRemoteCmd, nil)
 	})
 	h.AssertNoError(err)
-	h.AssertContains(output, "No remote root configured")
+	h.AssertContains(output, "No remote configured")
 }
 
 func TestSyncRemote_Unset(t *testing.T) {
@@ -153,15 +157,15 @@ func TestSyncRemote_Unset(t *testing.T) {
 		return syncRemoteCmd.RunE(syncRemoteCmd, nil)
 	})
 	h.AssertNoError(err)
-	h.AssertContains(output, "Remote root unset")
+	h.AssertContains(output, "Remote unset")
 
 	// Verify it was cleared.
 	gcfg, err := driftsync.LoadGlobalConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gcfg.RemoteRoot != "" {
-		t.Errorf("expected empty RemoteRoot, got %q", gcfg.RemoteRoot)
+	if gcfg.Protocol != "" {
+		t.Errorf("expected empty Protocol, got %q", gcfg.Protocol)
 	}
 }
 
@@ -606,30 +610,33 @@ func TestSyncRemote_WebDAV(t *testing.T) {
 	h.SetupSharedState()
 	syncShowRemote = false
 	syncUnsetRemote = false
-	syncWebDAVUser = "alice"
-	syncWebDAVPass = "secret"
+	syncUser = "alice"
+	syncPass = "secret"
 	output, err := CaptureOutput(func() error {
 		return syncRemoteCmd.RunE(syncRemoteCmd, []string{"https://cloud.example.com/dav"})
 	})
 	h.AssertNoError(err)
-	h.AssertContains(output, "WebDAV remote set to")
+	h.AssertContains(output, "Remote set:")
 
 	// Verify it was persisted.
 	gcfg, err := driftsync.LoadGlobalConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gcfg.WebDAV == nil {
-		t.Fatal("expected WebDAV config to be set")
+	if gcfg.Protocol != "webdav" {
+		t.Errorf("expected Protocol %q, got %q", "webdav", gcfg.Protocol)
 	}
-	if gcfg.WebDAV.URL != "https://cloud.example.com/dav" {
-		t.Errorf("expected URL %q, got %q", "https://cloud.example.com/dav", gcfg.WebDAV.URL)
+	if gcfg.Host != "cloud.example.com" {
+		t.Errorf("expected Host %q, got %q", "cloud.example.com", gcfg.Host)
 	}
-	if gcfg.WebDAV.Username != "alice" {
-		t.Errorf("expected username 'alice', got %q", gcfg.WebDAV.Username)
+	if gcfg.Username != "alice" {
+		t.Errorf("expected username 'alice', got %q", gcfg.Username)
 	}
-	if gcfg.WebDAV.Password != "secret" {
-		t.Errorf("expected password 'secret', got %q", gcfg.WebDAV.Password)
+	if gcfg.Password != "secret" {
+		t.Errorf("expected password 'secret', got %q", gcfg.Password)
+	}
+	if !gcfg.TLS {
+		t.Error("expected TLS to be true for https URL")
 	}
 }
 
@@ -642,14 +649,32 @@ func TestGetRemoteType(t *testing.T) {
 	}
 
 	// Local.
-	gcfg.RemoteRoot = "/mnt/nas"
+	gcfg.Protocol = "local"
 	if gcfg.GetRemoteType() != driftsync.RemoteLocal {
 		t.Error("expected RemoteLocal")
 	}
 
-	// WebDAV takes precedence.
-	gcfg.WebDAV = &driftsync.WebDAVConfig{URL: "https://cloud.example.com"}
+	// WebDAV.
+	gcfg.Protocol = "webdav"
 	if gcfg.GetRemoteType() != driftsync.RemoteWebDAV {
 		t.Error("expected RemoteWebDAV")
+	}
+
+	// FTP.
+	gcfg.Protocol = "ftp"
+	if gcfg.GetRemoteType() != driftsync.RemoteFTP {
+		t.Error("expected RemoteFTP")
+	}
+
+	// SFTP.
+	gcfg.Protocol = "sftp"
+	if gcfg.GetRemoteType() != driftsync.RemoteSFTP {
+		t.Error("expected RemoteSFTP")
+	}
+
+	// SMB.
+	gcfg.Protocol = "smb"
+	if gcfg.GetRemoteType() != driftsync.RemoteSMB {
+		t.Error("expected RemoteSMB")
 	}
 }

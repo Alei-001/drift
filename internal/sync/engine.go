@@ -1,12 +1,13 @@
 // Package sync provides remote synchronization for drift projects.
 //
-// The sync engine supports multiple transports (local filesystem, WebDAV)
-// behind a common Transport interface. Synchronization is incremental
-// (content-hash based) and tracks deletions via a manifest file stored on
-// the remote.
+// The sync engine supports multiple transports (local filesystem, WebDAV,
+// FTP, SFTP, SMB) behind a common Transport interface. Synchronization is
+// incremental (content-hash based) and tracks deletions via a manifest file
+// stored on the remote.
 package sync
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -42,6 +43,10 @@ type Transport interface {
 
 	// Mkdir creates a directory on the remote (recursively).
 	Mkdir(remotePath string) error
+
+	// Close releases any resources held by the transport (e.g. network
+	// connections). Local transports implement this as a no-op.
+	Close() error
 }
 
 // RemoteStat holds metadata about a remote file.
@@ -55,9 +60,9 @@ type RemoteStat struct {
 // the local and remote file trees, enabling incremental sync and
 // deletion tracking.
 type Manifest struct {
-	ProjectID string             `json:"project_id"`
-	Files     map[string]string  `json:"files"`      // path → content hash
-	UpdatedAt string             `json:"updated_at"`
+	ProjectID string            `json:"project_id"`
+	Files     map[string]string `json:"files"` // path → content hash
+	UpdatedAt string            `json:"updated_at"`
 }
 
 // newManifest creates an empty manifest.
@@ -136,17 +141,18 @@ func scanFiles(rootDir string) (map[string]string, error) {
 
 // SyncResult summarizes what happened during a sync operation.
 type SyncResult struct {
-	Pushed   []string // paths uploaded to remote
-	Pulled   []string // paths downloaded from remote
-	Deleted  []string // paths deleted (on the side that lost the file)
+	Pushed        []string // paths uploaded to remote
+	Pulled        []string // paths downloaded from remote
 	RemoteDeleted []string // paths deleted on remote during push
 	LocalDeleted  []string // paths deleted on local during pull
+	Conflicts     []string // paths where both local and remote changed since manifest
 }
 
 // HasChanges reports whether the sync did anything.
 func (r *SyncResult) HasChanges() bool {
 	return len(r.Pushed) > 0 || len(r.Pulled) > 0 ||
-		len(r.RemoteDeleted) > 0 || len(r.LocalDeleted) > 0
+		len(r.RemoteDeleted) > 0 || len(r.LocalDeleted) > 0 ||
+		len(r.Conflicts) > 0
 }
 
 // Engine performs bidirectional incremental sync between a local project
@@ -175,9 +181,9 @@ func NewEngine(transport Transport, projectID string) *Engine {
 //  8. Save the updated manifest to the remote.
 //
 // Conflict policy: if a file changed on both sides since the manifest, the
-// local version wins (push overwrites remote). The remote's version is lost
-// unless the user saved it as a commit. This is the "last save wins" model
-// documented in the design.
+// local version wins (push overwrites remote). The conflict is recorded in
+// SyncResult.Conflicts so the caller can warn the user. The remote's version
+// is lost unless the user saved it as a commit.
 func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 	result := &SyncResult{}
 
@@ -235,6 +241,20 @@ func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 			continue
 		}
 
+		// Detect conflict: local changed (localHash != manifestHash) and
+		// remote also exists and may have changed. Use file size as a
+		// quick heuristic — if sizes differ, the remote likely changed too.
+		if remoteHas && inManifest && manifestHash != localHash {
+			fullPath := filepath.Join(localDir, filepath.FromSlash(path))
+			if localInfo, err := os.Stat(fullPath); err == nil {
+				if remoteStat, err := e.transport.Stat(path); err == nil {
+					if remoteStat.Size != localInfo.Size() {
+						result.Conflicts = append(result.Conflicts, path)
+					}
+				}
+			}
+		}
+
 		// Need to upload.
 		fullPath := filepath.Join(localDir, filepath.FromSlash(path))
 		if err := e.putLocalFile(path, fullPath); err != nil {
@@ -258,17 +278,9 @@ func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 	}
 
 	// 6. Pull: download new/changed remote files.
-	// Rebuild remoteSet since we may have deleted some files.
-	remoteFiles, err = e.transport.List("")
-	if err != nil {
-		return nil, fmt.Errorf("list remote (after push): %w", err)
-	}
-	remoteSet = make(map[string]bool, len(remoteFiles))
-	for _, p := range remoteFiles {
-		if p == manifestPath {
-			continue
-		}
-		remoteSet[p] = true
+	// Update remoteSet to reflect deletions from step 5.
+	for _, p := range result.RemoteDeleted {
+		delete(remoteSet, p)
 	}
 
 	for path := range remoteSet {
@@ -293,7 +305,6 @@ func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 			return nil, fmt.Errorf("pull %s: %w", path, err)
 		}
 		result.Pulled = append(result.Pulled, path)
-		_ = localHash // unused but kept for clarity
 	}
 
 	// 7. Pull deletions are already handled in step 4 (when a file is in
@@ -332,17 +343,18 @@ func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 	sort.Strings(result.Pulled)
 	sort.Strings(result.RemoteDeleted)
 	sort.Strings(result.LocalDeleted)
+	sort.Strings(result.Conflicts)
 
 	return result, nil
 }
 
 // getRemoteFile downloads a remote file into memory.
 func (e *Engine) getRemoteFile(remotePath string) ([]byte, error) {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	if err := e.transport.Get(remotePath, &buf); err != nil {
 		return nil, err
 	}
-	return []byte(buf.String()), nil
+	return buf.Bytes(), nil
 }
 
 // getRemoteToFile downloads a remote file to a local path.

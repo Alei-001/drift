@@ -2,11 +2,11 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![中文文档](https://img.shields.io/badge/README-中文-red.svg)](README.zh-CN.md)
+[![中文文档](https://img.shields.io/badge/README-中文-red.svg)](docs/README.zh-CN.md)
 
 A lightweight version control tool for creative workers — illustrators, designers, novelists, screenwriters. Manage multiple versions of creative work without learning Git.
 
-> **README in Chinese:** [README.zh-CN.md](README.zh-CN.md)
+> **README in Chinese:** [docs/README.zh-CN.md](docs/README.zh-CN.md)
 
 ## Why Drift?
 

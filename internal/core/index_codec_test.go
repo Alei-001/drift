@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"testing"
 	"time"
 )
@@ -51,9 +52,16 @@ func TestIndex_MarshalUnmarshal_RoundTrip(t *testing.T) {
 	}
 }
 
+// withChecksum appends a valid SHA-256 checksum trailer to the body.
+func withChecksum(body []byte) []byte {
+	h := sha256.Sum256(body)
+	return append(body, h[:]...)
+}
+
 // TestIndex_Unmarshal_BadMagic verifies that an invalid magic header is rejected.
 func TestIndex_Unmarshal_BadMagic(t *testing.T) {
-	data := []byte{'X', 'X', 'X', 'X', 1, 0, 0, 0, 0, 0, 0, 0}
+	body := []byte{'X', 'X', 'X', 'X', 1, 0, 0, 0, 0, 0, 0, 0}
+	data := withChecksum(body)
 	idx := &Index{}
 	if err := idx.Unmarshal(data); err != ErrInvalidIndex {
 		t.Fatalf("expected ErrInvalidIndex, got %v", err)
@@ -66,8 +74,9 @@ func TestIndex_Unmarshal_UnsupportedVersion(t *testing.T) {
 	buf.Write(indexMagic[:])
 	buf.Write([]byte{99, 0, 0, 0}) // version 99
 	buf.Write([]byte{0, 0, 0, 0})  // count 0
+	data := withChecksum(buf.Bytes())
 	idx := &Index{}
-	if err := idx.Unmarshal(buf.Bytes()); err != ErrIndexVersion {
+	if err := idx.Unmarshal(data); err != ErrIndexVersion {
 		t.Fatalf("expected ErrIndexVersion, got %v", err)
 	}
 }
@@ -81,8 +90,9 @@ func TestIndex_Unmarshal_Truncated(t *testing.T) {
 	buf.Write([]byte{5, 0})       // path length 5
 	buf.Write([]byte("a.txt"))    // path
 	// Missing hash, timestamp, size, mode.
+	data := withChecksum(buf.Bytes())
 	idx := &Index{}
-	if err := idx.Unmarshal(buf.Bytes()); err != ErrIndexCorrupt {
+	if err := idx.Unmarshal(data); err != ErrIndexCorrupt {
 		t.Fatalf("expected ErrIndexCorrupt, got %v", err)
 	}
 }

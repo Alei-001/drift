@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/drift/drift/internal/config"
+	"github.com/drift/drift/internal/repo"
 	"github.com/drift/drift/internal/storage"
 )
 
@@ -51,6 +52,7 @@ func NewTestHelper(t *testing.T) *TestHelper {
 		sharedStore = nil
 		sharedConfig = nil
 		sharedDir = ""
+		sharedRepo = nil
 	})
 
 	return h
@@ -62,6 +64,7 @@ func (h *TestHelper) InitProject() {
 	sharedDir = h.Dir
 	sharedStore = h.Store
 	sharedConfig = h.Config
+	sharedRepo = repo.New(h.Store, h.Config, h.Dir)
 
 	if err := h.Store.Init(); err != nil {
 		h.T.Fatalf("init failed: %v", err)
@@ -77,6 +80,7 @@ func (h *TestHelper) SetupSharedState() {
 	sharedDir = h.Dir
 	sharedStore = storage.NewStore(h.Dir)
 	sharedConfig = h.Config
+	sharedRepo = repo.New(sharedStore, h.Config, h.Dir)
 
 	// Reset all Cobra flags to default values to avoid state leakage between tests
 	// This is critical because Cobra flags are global and persist across tests
@@ -130,8 +134,16 @@ func resetAllFlags() {
 	// sync command flags
 	syncShowRemote = false
 	syncUnsetRemote = false
-	syncWebDAVUser = ""
-	syncWebDAVPass = ""
+	syncProtocol = ""
+	syncHost = ""
+	syncPort = 0
+	syncPath = ""
+	syncUser = ""
+	syncPass = ""
+	syncTLS = false
+	syncInsecure = false
+	syncShare = ""
+	syncKeyPath = ""
 }
 
 // WriteFile creates a file with the given content.

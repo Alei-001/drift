@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/spf13/cobra"
 )
@@ -48,29 +47,17 @@ func init() {
 }
 
 func listBranches() error {
-	currentBranch, _ := sharedStore.GetRef("HEAD")
-	if currentBranch == "" {
-		currentBranch = "main"
-	}
+	currentBranch := sharedRepo.CurrentBranch()
 
-	refs, err := sharedStore.ListRefs()
+	names, err := sharedRepo.ListBranches()
 	if err != nil {
 		return fmt.Errorf("failed to list branches: %w", err)
 	}
 
-	if len(refs) == 0 {
+	if len(names) == 0 {
 		fmt.Println("No branches yet")
 		return nil
 	}
-
-	names := make([]string, 0, len(refs))
-	for name := range refs {
-		if name == "HEAD" {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
 
 	for _, name := range names {
 		prefix := "  "
@@ -84,30 +71,9 @@ func listBranches() error {
 }
 
 func createBranch(name string) error {
-	// Issue 12: refuse to overwrite an existing branch.
-	if existing, err := sharedStore.GetRef(name); err == nil || existing != "" {
-		// GetRef returns ErrObjectNotFound for missing refs; any other result
-		// means the branch already exists.
-		_ = existing
-		return fmt.Errorf("branch %q already exists", name)
+	if err := sharedRepo.CreateBranch(name); err != nil {
+		return err
 	}
-
-	currentBranch, _ := sharedStore.GetRef("HEAD")
-	if currentBranch == "" {
-		currentBranch = "main"
-	}
-
-	// Get the current branch's commit hash (empty string if no commits yet)
-	commitHash, err := sharedStore.GetRef(currentBranch)
-	if err != nil {
-		// If the ref doesn't exist (no commits yet), use empty hash
-		commitHash = ""
-	}
-
-	if err := sharedStore.SaveRef(name, commitHash); err != nil {
-		return fmt.Errorf("failed to create branch: %w", err)
-	}
-
 	fmt.Printf("Created branch: %s\n", name)
 	return nil
 }
@@ -115,30 +81,9 @@ func createBranch(name string) error {
 // deleteBranch removes a branch ref. It refuses to delete the current branch
 // or HEAD. Mirrors `git branch -d`.
 func deleteBranch(name string) error {
-	if name == "HEAD" {
-		return fmt.Errorf("cannot delete HEAD")
-	}
-
-	currentBranch, _ := sharedStore.GetRef("HEAD")
-	if currentBranch == "" {
-		currentBranch = "main"
-	}
-	if name == currentBranch {
-		return fmt.Errorf("cannot delete the currently checked-out branch %q (switch to another branch first)", name)
-	}
-
-	// Capture the branch's commit hash for undo.
-	branchHash, _ := sharedStore.GetRef(name)
-
-	if err := sharedStore.DeleteRef(name); err != nil {
+	if err := sharedRepo.DeleteBranch(name); err != nil {
 		return err
 	}
-
-	// Record operation for undo.
-	recordOperation(sharedStore, OpBranchDelete, fmt.Sprintf("delete branch %s", name), []RefChange{
-		{Ref: name, Before: branchHash, After: ""},
-	})
-
 	fmt.Printf("Deleted branch: %s\n", name)
 	return nil
 }
@@ -146,23 +91,9 @@ func deleteBranch(name string) error {
 // renameBranch renames a branch. HEAD is updated if it pointed at the old
 // name. Mirrors `git branch -m`.
 func renameBranch(oldName, newName string) error {
-	// Capture HEAD before for undo.
-	headBefore, _ := sharedStore.GetRef("HEAD")
-
-	if err := sharedStore.RenameRef(oldName, newName); err != nil {
+	if err := sharedRepo.RenameBranch(oldName, newName); err != nil {
 		return err
 	}
-
-	// Record operation for undo.
-	headAfter, _ := sharedStore.GetRef("HEAD")
-	changes := []RefChange{
-		{Ref: oldName, Before: "", After: ""}, // old ref deleted
-	}
-	if headBefore != headAfter {
-		changes = append(changes, RefChange{Ref: "HEAD", Before: headBefore, After: headAfter})
-	}
-	recordOperation(sharedStore, OpBranchRename, fmt.Sprintf("rename %s → %s", oldName, newName), changes)
-
 	fmt.Printf("Renamed branch: %s → %s\n", oldName, newName)
 	return nil
 }

@@ -2,11 +2,11 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![English README](https://img.shields.io/badge/README-English-blue.svg)](README.md)
+[![English README](https://img.shields.io/badge/README-English-blue.svg)](../README.md)
 
 面向创意工作者的轻量级版本管理工具 —— 插画师、设计师、小说作者、剧本创作者。无需学习 Git 即可管理创意作品的多个版本。
 
-> **English README:** [README.md](README.md)
+> **English README:** [../README.md](../README.md)
 
 ## 为什么需要 Drift？
 
@@ -35,16 +35,6 @@
 ### 安装
 
 **Windows（安装程序）：** 从 [Releases](../../releases) 下载 `drift-setup-x.y.z.exe` 运行 —— 图形化安装向导，自动配置 PATH，带卸载程序。
-
-**Windows（源码安装）：**
-```powershell
-.\install.bat
-```
-
-**macOS / Linux：**
-```bash
-./install.sh
-```
 
 **源码编译：**
 ```bash
@@ -117,7 +107,7 @@ drift restore v1 素材/封面.psd   # 只从 v1 恢复一个文件
 | `history` / `undo` | 查看 / 撤销最近操作 |
 | `version` | 显示 drift 版本 |
 
-完整参考：[docs/commands.md](docs/commands.md)
+完整参考：[commands.md](commands.md)
 
 ## 技术栈
 
@@ -139,7 +129,6 @@ drift/
 │   └── config/         # JSON 配置读写
 ├── installer/          # Inno Setup Windows 安装脚本
 ├── .github/workflows/  # CI/CD：发布工作流（tag 触发）
-├── install.bat / install.sh  # 源码安装脚本
 └── docs/               # 设计文档（中文）
 ```
 
@@ -147,11 +136,11 @@ drift/
 
 | 文档 | 内容 |
 |------|------|
-| [产品需求](docs/PRD.md) | 目标用户、使用场景、功能取舍 |
-| [技术设计](docs/technical.md) | 架构、数据格式、跨平台方案 |
-| [命令参考](docs/commands.md) | 完整 CLI 命令文档 |
-| [开发进度](docs/progress.md) | 已完成阶段与下一步计划 |
-| [测试计划](docs/test-plan.md) | 测试用例与覆盖率 |
+| [产品需求](PRD.md) | 目标用户、使用场景、功能取舍 |
+| [技术设计](technical.md) | 架构、数据格式、跨平台方案 |
+| [命令参考](commands.md) | 完整 CLI 命令文档 |
+| [开发进度](progress.md) | 已完成阶段与下一步计划 |
+| [测试计划](test-plan.md) | 测试用例与覆盖率 |
 
 ## 发布流程
 

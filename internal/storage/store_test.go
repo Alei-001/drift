@@ -124,9 +124,13 @@ func TestStore_GetBlob_Corrupted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Overwrite the blob file with different content.
+	// Overwrite the blob file with valid compressed data but different content.
 	path := s.blobPath(hash)
-	if err := os.WriteFile(path, []byte("tampered"), 0644); err != nil {
+	compressed, err := compressBytes([]byte("tampered"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, compressed, 0644); err != nil {
 		t.Fatal(err)
 	}
 	_, err = s.GetBlob(hash)
@@ -616,11 +620,15 @@ func TestStore_GetBlobToWriter_Corrupted(t *testing.T) {
 	s := newTestStore(t)
 	hash, _ := s.PutBlob([]byte("original"))
 	path := s.blobPath(hash)
-	if err := os.WriteFile(path, []byte("tampered"), 0644); err != nil {
+	compressed, err := compressBytes([]byte("tampered"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, compressed, 0644); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	err := s.GetBlobToWriter(hash, &buf)
+	err = s.GetBlobToWriter(hash, &buf)
 	if err != ErrObjectCorrupted {
 		t.Fatalf("expected ErrObjectCorrupted, got %v", err)
 	}

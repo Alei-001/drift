@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -42,7 +43,7 @@ func (t *memTransport) Put(remotePath string, src io.Reader) error {
 	// Mark parent dirs as existing.
 	dir := remotePath
 	for {
-		dir = filepath.Dir(dir)
+		dir = path.Dir(dir)
 		if dir == "." || dir == "/" {
 			break
 		}
@@ -79,6 +80,8 @@ func (t *memTransport) Mkdir(remotePath string) error {
 	t.dirs[remotePath] = true
 	return nil
 }
+
+func (t *memTransport) Close() error { return nil }
 
 // --- Engine tests ---
 

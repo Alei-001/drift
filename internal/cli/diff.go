@@ -11,6 +11,7 @@ import (
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
+	"github.com/drift/drift/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -76,7 +77,7 @@ Examples:
 
 		// Normalize file filter paths to repository-relative form.
 		if len(filePaths) > 0 {
-			normalized, err := normalizePathFilters(filePaths)
+			normalized, err := worktree.NormalizePathFilters(filePaths)
 			if err != nil {
 				return err
 			}
@@ -121,7 +122,7 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 	var versionLabel string
 
 	if version == "" {
-		latest, err := currentBranchCommit(sharedStore)
+		latest, err := sharedRepo.CurrentCommit()
 		if err != nil || latest == nil {
 			return fmt.Errorf("no versions to compare against")
 		}
@@ -135,7 +136,7 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 		}
 		versionLabel = latest.ID
 	} else {
-		commit, err := resolveCommit(sharedStore, version)
+		commit, err := sharedRepo.ResolveCommit(version)
 		if err != nil {
 			return err
 		}
@@ -152,7 +153,7 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 
 	// Filter by file paths if specified (supports directory prefix matching).
 	if len(filePaths) > 0 {
-		targetBlobs = filterBlobsByPaths(targetBlobs, filePaths)
+		targetBlobs = worktree.FilterBlobs(targetBlobs, filePaths)
 	}
 
 	// Collect differences
@@ -180,11 +181,11 @@ func diffWorktree(reader *core.TreeReader, version string, output io.Writer, sho
 }
 
 func diffVersions(reader *core.TreeReader, v1, v2 string, output io.Writer, showPatch bool, filePaths []string) error {
-	commit1, err := resolveCommit(sharedStore, v1)
+	commit1, err := sharedRepo.ResolveCommit(v1)
 	if err != nil {
 		return err
 	}
-	commit2, err := resolveCommit(sharedStore, v2)
+	commit2, err := sharedRepo.ResolveCommit(v2)
 	if err != nil {
 		return err
 	}
@@ -209,8 +210,8 @@ func diffVersions(reader *core.TreeReader, v1, v2 string, output io.Writer, show
 
 	// Filter by file paths if specified
 	if len(filePaths) > 0 {
-		blobs1 = filterBlobsByPaths(blobs1, filePaths)
-		blobs2 = filterBlobsByPaths(blobs2, filePaths)
+		blobs1 = worktree.FilterBlobs(blobs1, filePaths)
+		blobs2 = worktree.FilterBlobs(blobs2, filePaths)
 	}
 
 	// Collect differences
@@ -246,22 +247,6 @@ type FileDiff struct {
 	NewData  []byte
 	OldSize  int
 	NewSize  int
-}
-
-func filterBlobsByPaths(blobs []core.BlobEntry, paths []string) []core.BlobEntry {
-	result := []core.BlobEntry{}
-	for _, blob := range blobs {
-		for _, path := range paths {
-			// Normalize paths for comparison
-			blobPath := filepath.ToSlash(blob.Path)
-			filterPath := filepath.ToSlash(path)
-			if blobPath == filterPath || strings.HasPrefix(blobPath, filterPath+"/") {
-				result = append(result, blob)
-				break
-			}
-		}
-	}
-	return result
 }
 
 func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []string) ([]FileDiff, error) {

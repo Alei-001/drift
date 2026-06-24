@@ -14,10 +14,6 @@ import (
 //   version: 1 byte (currently 1)
 //   original size: uint32 LE (for pre-allocation)
 //   zlib-compressed payload
-//
-// Objects without the DRZL magic are treated as raw (uncompressed) for
-// backward compatibility with repositories created before compression
-// was introduced.
 
 const (
 	compressedMagic    = "DRZL"
@@ -58,18 +54,14 @@ func compressBytes(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// decompressBytes checks for the DRZL magic and decompresses if present.
-// If the data does not start with the magic, it is returned as-is (raw
-// format, backward compatible).
+// decompressBytes decompresses data with the DRZL header.
 func decompressBytes(data []byte) ([]byte, error) {
 	if len(data) < compressedHeaderSz {
-		// Too short to have a header — treat as raw.
-		return data, nil
+		return nil, ErrCorruptedObject
 	}
 
 	if string(data[:4]) != compressedMagic {
-		// Not compressed — raw format.
-		return data, nil
+		return nil, ErrCorruptedObject
 	}
 
 	// Parse header.
@@ -133,24 +125,17 @@ func readAndDecompress(path string) ([]byte, error) {
 	return decompressBytes(raw)
 }
 
-// streamingDecompressReader wraps a reader that may contain compressed
-// data. It peeks at the first 4 bytes to detect the DRZL magic.
-// For compressed data, it returns a reader that decompresses on the fly.
-// For raw data, it returns a reader that replays the peeked bytes + the
-// rest of the original reader.
+// streamingDecompressReader wraps a reader containing DRZL-compressed data.
+// It returns a reader that decompresses on the fly.
 func streamingDecompressReader(r io.Reader) (io.Reader, error) {
-	// Peek the header.
+	// Read the header.
 	header := make([]byte, compressedHeaderSz)
 	n, err := io.ReadFull(r, header)
-	if err != nil && err != io.ErrUnexpectedEOF {
-		return nil, err
+	if err != nil {
+		return nil, ErrCorruptedObject
 	}
-	header = header[:n]
-
-	// If we couldn't read a full header, or the magic doesn't match,
-	// treat as raw: replay the bytes we read + the rest.
 	if n < compressedHeaderSz || string(header[:4]) != compressedMagic {
-		return io.MultiReader(bytes.NewReader(header), r), nil
+		return nil, ErrCorruptedObject
 	}
 
 	// Parse compressed header.

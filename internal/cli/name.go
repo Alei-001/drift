@@ -2,11 +2,9 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/drift/drift/internal/storage"
+	"github.com/drift/drift/internal/repo"
 	"github.com/spf13/cobra"
 )
 
@@ -41,18 +39,18 @@ Usage:
 		deleteFlag, _ := cmd.Flags().GetString("delete")
 
 		if listFlag {
-			return listNames(sharedStore)
+			return listNames()
 		}
 
 		if deleteFlag != "" {
-			return deleteName(sharedStore, deleteFlag)
+			return deleteName(deleteFlag)
 		}
 
 		// Default action: assign a name.
 		if len(args) < 2 {
 			return fmt.Errorf("usage: drift name <version> <label>")
 		}
-		return addName(sharedStore, args[0], args[1])
+		return addName(args[0], args[1])
 	},
 }
 
@@ -63,19 +61,18 @@ func init() {
 }
 
 // addName assigns a human-readable label to a version.
-func addName(store *storage.Store, version, label string) error {
-	if err := validateNameLabel(label); err != nil {
+func addName(version, label string) error {
+	if err := repo.ValidateNameLabel(label); err != nil {
 		return err
 	}
 
-	commit, err := resolveCommit(store, version)
+	commit, err := sharedRepo.ResolveCommit(version)
 	if err != nil {
 		return err
 	}
 
-	refName := "names/" + label
-	if err := store.SaveRef(refName, commit.Hash); err != nil {
-		return fmt.Errorf("failed to save name: %w", err)
+	if err := sharedRepo.AddName(version, label); err != nil {
+		return err
 	}
 
 	fmt.Printf("Named %s (commit %s) as '%s'\n", commit.ID, commit.Hash[:12], label)
@@ -83,53 +80,19 @@ func addName(store *storage.Store, version, label string) error {
 }
 
 // deleteName removes a version name.
-func deleteName(store *storage.Store, label string) error {
-	refName := "names/" + label
-	if _, err := store.GetRef(refName); err != nil {
-		return fmt.Errorf("name '%s' not found", label)
-	}
-	if err := store.DeleteRef(refName); err != nil {
-		return fmt.Errorf("failed to delete name: %w", err)
+func deleteName(label string) error {
+	if err := sharedRepo.DeleteName(label); err != nil {
+		return err
 	}
 	fmt.Printf("Deleted name '%s'\n", label)
 	return nil
 }
 
-// validateNameLabel checks that a name label is safe to use as a filename.
-func validateNameLabel(label string) error {
-	if label == "" {
-		return fmt.Errorf("name cannot be empty")
-	}
-	if len(label) > 100 {
-		return fmt.Errorf("name too long (max 100 characters)")
-	}
-	if strings.ContainsAny(label, `/\`) {
-		return fmt.Errorf("name cannot contain path separators")
-	}
-	if label == "." || label == ".." {
-		return fmt.Errorf("name cannot be '.' or '..'")
-	}
-	return nil
-}
-
 // listNames prints all version names with their corresponding commits.
-func listNames(store *storage.Store) error {
-	refs, err := store.ListRefs()
+func listNames() error {
+	entries, err := sharedRepo.ListNames()
 	if err != nil {
 		return err
-	}
-
-	type nameEntry struct {
-		label string
-		hash  string
-	}
-
-	var entries []nameEntry
-	for refName, hash := range refs {
-		if strings.HasPrefix(refName, "names/") {
-			label := strings.TrimPrefix(refName, "names/")
-			entries = append(entries, nameEntry{label: label, hash: hash})
-		}
 	}
 
 	if len(entries) == 0 {
@@ -138,14 +101,14 @@ func listNames(store *storage.Store) error {
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].label < entries[j].label
+		return entries[i].Label < entries[j].Label
 	})
 
 	fmt.Printf("%-20s  %-12s  %s\n", "NAME", "COMMIT", "MESSAGE")
 	for _, e := range entries {
-		commit, err := store.GetCommit(e.hash)
+		commit, err := sharedRepo.Store.GetCommit(e.Hash)
 		msg := ""
-		id := e.hash[:12]
+		id := e.Hash[:12]
 		if err == nil {
 			msg = commit.Message
 			id = commit.ID
@@ -154,25 +117,8 @@ func listNames(store *storage.Store) error {
 		if len(msg) > 40 {
 			msg = msg[:37] + "..."
 		}
-		fmt.Printf("%-20s  %-12s  %s\n", e.label, id, msg)
+		fmt.Printf("%-20s  %-12s  %s\n", e.Label, id, msg)
 	}
 
 	return nil
-}
-
-// resolveName checks if a version string is a name alias and returns the
-// commit hash if so. Returns empty string if not a name.
-func resolveName(store *storage.Store, version string) string {
-	refName := "names/" + version
-	hash, err := store.GetRef(refName)
-	if err != nil || hash == "" {
-		return ""
-	}
-	return hash
-}
-
-// nameRefPath returns the filesystem path for a name ref file.
-// Used for documentation; actual path construction is in storage layer.
-func nameRefPath(store *storage.Store, label string) string {
-	return filepath.Join(store.DriftDir(), "refs", "names", label+".ref")
 }

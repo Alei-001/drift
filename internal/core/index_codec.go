@@ -49,21 +49,17 @@ func (idx *Index) Marshal() ([]byte, error) {
 }
 
 func (idx *Index) Unmarshal(data []byte) error {
-	// Verify checksum trailer (if present). Backwards-compatible: indexes
-	// without a trailer are accepted; indexes with a valid 32-byte trailer
-	// are verified; a trailer that doesn't match is corruption.
-	if len(data) >= checksumSize {
-		body := data[:len(data)-checksumSize]
-		got := sha256.Sum256(body)
-		trailer := data[len(data)-checksumSize:]
-		if bytes.Equal(got[:], trailer) {
-			// Valid checksum trailer; strip it before parsing.
-			data = body
-		}
-		// If it doesn't match, it might be an old-format index with no
-		// trailer whose last 32 bytes happen to be entry data. The trailing
-		// data check below will catch real corruption.
+	// Verify and strip the checksum trailer.
+	if len(data) < checksumSize {
+		return ErrIndexCorrupt
 	}
+	body := data[:len(data)-checksumSize]
+	got := sha256.Sum256(body)
+	trailer := data[len(data)-checksumSize:]
+	if !bytes.Equal(got[:], trailer) {
+		return ErrIndexCorrupt
+	}
+	data = body
 
 	r := bytes.NewReader(data)
 

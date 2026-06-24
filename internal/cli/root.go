@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/drift/drift/internal/config"
-	"github.com/drift/drift/internal/core"
+	"github.com/drift/drift/internal/repo"
 	"github.com/drift/drift/internal/storage"
 	driftsync "github.com/drift/drift/internal/sync"
 	"github.com/spf13/cobra"
@@ -17,6 +17,7 @@ var (
 	sharedStore  *storage.Store
 	sharedConfig *config.Config
 	sharedDir    string
+	sharedRepo   *repo.Repository
 )
 
 var rootCmd = &cobra.Command{
@@ -55,6 +56,7 @@ var rootCmd = &cobra.Command{
 			sharedConfig = config.DefaultConfig()
 		}
 
+		sharedRepo = repo.New(sharedStore, sharedConfig, dir)
 		return nil
 	},
 }
@@ -148,23 +150,4 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
-}
-
-// currentBranchName returns the current branch from HEAD, defaulting to "main".
-func currentBranchName(store *storage.Store) string {
-	branch, err := store.GetRef("HEAD")
-	if err != nil || branch == "" {
-		return "main"
-	}
-	return branch
-}
-
-// currentBranchCommit returns the latest commit on the current branch, or nil if the branch has no commits yet.
-func currentBranchCommit(store *storage.Store) (*core.Commit, error) {
-	branch := currentBranchName(store)
-	hash, err := store.GetRef(branch)
-	if err != nil {
-		return nil, nil // no commits on this branch yet
-	}
-	return findCommitByHash(store, hash)
 }

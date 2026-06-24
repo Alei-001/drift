@@ -11,6 +11,7 @@ import (
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
+	"github.com/drift/drift/internal/worktree"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,7 @@ var exportCmd = &cobra.Command{
 			return fmt.Errorf("output path is required (use -o flag)")
 		}
 
-		commit, err := resolveCommit(sharedStore, version)
+		commit, err := sharedRepo.ResolveCommit(version)
 		if err != nil {
 			return err
 		}
@@ -45,24 +46,11 @@ var exportCmd = &cobra.Command{
 
 		// Filter by path arguments if provided.
 		if pathFilters := args[1:]; len(pathFilters) > 0 {
-			normalized := make([]string, 0, len(pathFilters))
-			for _, f := range pathFilters {
-				rel, err := filepath.Rel(".", f)
-				if err != nil {
-					return fmt.Errorf("cannot resolve relative path %q: %w", f, err)
-				}
-				normalized = append(normalized, strings.TrimSuffix(filepath.ToSlash(rel), "/"))
+			normalized, err := worktree.NormalizePathFilters(pathFilters)
+			if err != nil {
+				return err
 			}
-			var filtered []core.BlobEntry
-			for _, blob := range blobs {
-				for _, fp := range normalized {
-					if blob.Path == fp || strings.HasPrefix(blob.Path, fp+"/") {
-						filtered = append(filtered, blob)
-						break
-					}
-				}
-			}
-			blobs = filtered
+			blobs = worktree.FilterBlobs(blobs, normalized)
 			if len(blobs) == 0 {
 				return fmt.Errorf("no matching files found for given paths")
 			}

@@ -49,7 +49,7 @@ Examples:
 		for _, e := range idx.Entries {
 			tracked[e.Path] = true
 		}
-		for p := range loadParentTreeHashes(sharedStore) {
+		for p := range sharedRepo.WT.LoadParentTreeHashes() {
 			tracked[p] = true
 		}
 
@@ -87,7 +87,7 @@ Examples:
 
 		// Clean up empty directories left behind by removals.
 		if !rmCached {
-			cleanEmptyDirsAffected(sharedDir, paths)
+			sharedRepo.WT.CleanEmptyDirs(paths)
 		}
 
 		fmt.Printf("Removed %d file(s)\n", removed)

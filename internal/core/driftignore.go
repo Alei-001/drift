@@ -3,7 +3,6 @@ package core
 import (
 	"bufio"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -274,10 +273,6 @@ func (p *driftPattern) globMatch(path []string, isDir bool) bool {
 	}
 	return matched
 }
-
-// Keep path imported for future use; mirrors go-git's package layout where
-// path joining helpers live alongside the matcher.
-var _ = path.Join
 
 // The wildmatch implementation below ports the matcher from canonical Git's
 // wildmatch.c, via go-git's gitignore package. The algorithm is preserved

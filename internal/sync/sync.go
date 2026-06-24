@@ -1,11 +1,9 @@
 // Package sync provides remote synchronization for drift projects.
 //
-// Phase 1 (current): local filesystem transport (NAS mount, synced folder).
-// The remote is a plain directory containing project subdirectories, so
-// users can browse files directly on the NAS.
-//
-// Future phases: WebDAV transport, automatic sync after save, conflict
-// resolution.
+// The sync engine supports multiple transports (local filesystem, WebDAV,
+// FTP, SFTP, SMB) behind a common Transport interface. Synchronization is
+// incremental (content-hash based) and tracks deletions via a manifest file
+// stored on the remote. Auto-sync is triggered after 'drift save'.
 package sync
 
 import (
@@ -23,18 +21,42 @@ import (
 // GlobalConfig stores drift-wide settings that apply across all projects.
 // It lives at ~/.drift/global.json so it survives project cloning.
 type GlobalConfig struct {
-	RemoteRoot string         `json:"remote_root,omitempty"`
-	WebDAV     *WebDAVConfig  `json:"webdav,omitempty"`
-}
+	// Protocol specifies the remote storage protocol.
+	// Valid values: "local", "webdav", "ftp", "sftp", "smb".
+	Protocol string `json:"protocol,omitempty"`
 
-// WebDAVConfig holds credentials for a WebDAV remote.
-type WebDAVConfig struct {
-	URL      string `json:"url"`
+	// Host is the remote server hostname or IP (network protocols only).
+	Host string `json:"host,omitempty"`
+
+	// Port is the remote server port. If 0, the protocol default is used.
+	Port int `json:"port,omitempty"`
+
+	// Path is the remote base directory path, or the local filesystem path
+	// for the "local" protocol.
+	Path string `json:"path,omitempty"`
+
+	// Username for authentication (network protocols).
 	Username string `json:"username,omitempty"`
-	// Password is stored in plaintext for now. A future improvement could
-	// use the OS keychain. This is acceptable for self-hosted NAS setups
-	// where the config file is already on a trusted machine.
+
+	// Password for authentication. Stored in plaintext; a future
+	// improvement could use the OS keychain. Acceptable for self-hosted
+	// NAS setups where the config file is on a trusted machine.
 	Password string `json:"password,omitempty"`
+
+	// TLS enables encrypted transport (FTPS for FTP, HTTPS for WebDAV).
+	TLS bool `json:"tls,omitempty"`
+
+	// InsecureSkipVerify disables TLS certificate verification. Useful for
+	// self-signed certificates on self-hosted NAS servers. Only effective
+	// when TLS is true.
+	InsecureSkipVerify bool `json:"insecure_skip_verify,omitempty"`
+
+	// Share is the SMB share name (SMB protocol only).
+	Share string `json:"share,omitempty"`
+
+	// KeyPath is the path to a private key file for SSH authentication
+	// (SFTP protocol only). If empty, password authentication is used.
+	KeyPath string `json:"key_path,omitempty"`
 }
 
 // globalConfigPathOverride allows tests to redirect the global config to a
@@ -42,7 +64,6 @@ type WebDAVConfig struct {
 var globalConfigPathOverride string
 
 // globalConfigPath returns the path to ~/.drift/global.json.
-// The home directory is resolved via os.UserHomeDir().
 func globalConfigPath() (string, error) {
 	if globalConfigPathOverride != "" {
 		return globalConfigPathOverride, nil
@@ -102,22 +123,11 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 	return os.Rename(tmp, path)
 }
 
-// ProjectSyncConfig is the per-project sync state stored in .drift/config.json
-// under the "sync" key. It is managed by the cli package via config.Config.
-type ProjectSyncConfig struct {
-	Enabled   bool   `json:"enabled"`
-	ProjectID string `json:"project_id,omitempty"`
-	RemoteName string `json:"remote_name,omitempty"`
-	LastSync  string `json:"last_sync,omitempty"`
-}
-
 // NewProjectID generates a random 16-byte hex project identifier.
 // Called once at 'drift init' time.
 func NewProjectID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback should never happen in practice; crypto/rand failure
-		// is extremely rare on supported platforms.
 		return fmt.Sprintf("fallback-%d", os.Getpid())
 	}
 	return hex.EncodeToString(b)
@@ -127,34 +137,94 @@ func NewProjectID() string {
 type RemoteType int
 
 const (
-	RemoteNone    RemoteType = iota
-	RemoteLocal              // local filesystem (NAS mount, etc.)
-	RemoteWebDAV             // WebDAV server
+	RemoteNone   RemoteType = iota
+	RemoteLocal             // local filesystem (NAS mount, etc.)
+	RemoteWebDAV            // WebDAV server
+	RemoteFTP               // FTP server
+	RemoteSFTP              // SFTP server (SSH file transfer)
+	RemoteSMB               // SMB/CIFS share
 )
 
-// GetRemoteType returns the currently configured remote type.
+// GetRemoteType returns the configured remote type based on the Protocol field.
 func (g *GlobalConfig) GetRemoteType() RemoteType {
-	if g.WebDAV != nil && g.WebDAV.URL != "" {
-		return RemoteWebDAV
-	}
-	if g.RemoteRoot != "" {
+	switch g.Protocol {
+	case "local":
 		return RemoteLocal
+	case "webdav":
+		return RemoteWebDAV
+	case "ftp":
+		return RemoteFTP
+	case "sftp":
+		return RemoteSFTP
+	case "smb":
+		return RemoteSMB
+	default:
+		return RemoteNone
 	}
-	return RemoteNone
+}
+
+// defaultPort returns the default port for a protocol.
+// For webdav, the default depends on TLS (80 for HTTP, 443 for HTTPS),
+// so callers should use EffectivePort which has access to the TLS flag.
+func defaultPort(protocol string) int {
+	switch protocol {
+	case "ftp":
+		return 21
+	case "sftp":
+		return 22
+	case "smb":
+		return 445
+	case "webdav":
+		return 80 // default; EffectivePort overrides to 443 when TLS is set
+	default:
+		return 0
+	}
+}
+
+// EffectivePort returns the configured port or the protocol default.
+// For webdav, the default port depends on the TLS flag (443 for HTTPS, 80 for HTTP).
+func (g *GlobalConfig) EffectivePort() int {
+	if g.Port != 0 {
+		return g.Port
+	}
+	if g.Protocol == "webdav" && g.TLS {
+		return 443
+	}
+	return defaultPort(g.Protocol)
+}
+
+// webDAVBaseURL reconstructs the WebDAV base URL from unified config fields.
+func (g *GlobalConfig) webDAVBaseURL() string {
+	scheme := "http"
+	if g.TLS {
+		scheme = "https"
+	}
+	basePath := strings.Trim(g.Path, "/")
+	port := g.EffectivePort()
+	if basePath != "" {
+		return fmt.Sprintf("%s://%s:%d/%s", scheme, g.Host, port, basePath)
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, g.Host, port)
 }
 
 // ProjectTransportForConfig returns a Transport scoped to a project, based
-// on the global config. Returns nil if no remote is configured.
-func ProjectTransportForConfig(gcfg *GlobalConfig, remoteName string) Transport {
+// on the global config. The caller must call Close() when done.
+// Returns nil and an error if no remote is configured or connection fails.
+func ProjectTransportForConfig(gcfg *GlobalConfig, remoteName string) (Transport, error) {
 	switch gcfg.GetRemoteType() {
 	case RemoteLocal:
-		return NewLocalTransport(gcfg.RemoteRoot).ProjectTransport(remoteName)
+		return NewLocalTransport(gcfg.Path).ProjectTransport(remoteName), nil
 	case RemoteWebDAV:
-		// For WebDAV, the project is a subdirectory under the base URL.
-		baseURL := strings.TrimRight(gcfg.WebDAV.URL, "/") + "/" + remoteName
-		return NewWebDAVTransport(baseURL, gcfg.WebDAV.Username, gcfg.WebDAV.Password)
+		baseURL := gcfg.webDAVBaseURL() + "/" + remoteName
+		return NewWebDAVTransport(baseURL, gcfg.Username, gcfg.Password, gcfg.InsecureSkipVerify), nil
+	case RemoteFTP:
+		return NewFTPTransport(gcfg, remoteName)
+	case RemoteSFTP:
+		return NewSFTPTransport(gcfg, remoteName)
+	case RemoteSMB:
+		return NewSMBTransport(gcfg, remoteName)
 	}
-	return nil
+	return nil, fmt.Errorf("no remote configured")
 }
 
 // LocalTransport implements sync over a local filesystem path (NAS mount,
@@ -207,11 +277,9 @@ func (t *LocalTransport) ListProjects() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		// Skip hidden directories.
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		// Only list directories that look like drift projects.
 		if _, err := os.Stat(filepath.Join(t.remoteRoot, e.Name(), ".drift")); err == nil {
 			names = append(names, e.Name())
 		}
@@ -220,8 +288,6 @@ func (t *LocalTransport) ListProjects() ([]string, error) {
 }
 
 // Clone copies an entire remote project to a local destination directory.
-// The destination must not exist or must be empty. Both .drift/ and the
-// working tree files are copied so the project is immediately usable.
 func (t *LocalTransport) Clone(remoteName, destDir string) error {
 	src := t.remoteProjectDir(remoteName)
 	if exists, err := t.ProjectExists(remoteName); err != nil {
@@ -230,7 +296,6 @@ func (t *LocalTransport) Clone(remoteName, destDir string) error {
 		return fmt.Errorf("project %q not found on remote", remoteName)
 	}
 
-	// Destination must not exist or be empty.
 	if info, err := os.Stat(destDir); err == nil {
 		if !info.IsDir() {
 			return fmt.Errorf("destination %q exists and is not a directory", destDir)
@@ -247,15 +312,8 @@ func (t *LocalTransport) Clone(remoteName, destDir string) error {
 	return copyDir(src, destDir)
 }
 
-// --- Transport interface implementation ---
-//
-// For LocalTransport, the "remote" is a project subdirectory under
-// remoteRoot. The Transport interface methods operate on paths relative
-// to a project root, so the transport must be scoped to a specific project
-// via WithProject before being used with the Engine.
-
 // ProjectTransport returns a Transport scoped to a specific project on the
-// remote. The Engine uses this to sync files within one project.
+// remote.
 func (t *LocalTransport) ProjectTransport(remoteName string) Transport {
 	return &localProjectTransport{
 		root: filepath.Join(t.remoteRoot, remoteName),
@@ -274,6 +332,9 @@ func (t *localProjectTransport) abs(remotePath string) string {
 func (t *localProjectTransport) Get(remotePath string, dst io.Writer) error {
 	f, err := os.Open(t.abs(remotePath))
 	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
+		}
 		return err
 	}
 	defer f.Close()
@@ -296,7 +357,6 @@ func (t *localProjectTransport) Put(remotePath string, src io.Reader) error {
 		os.Remove(tmp)
 		return err
 	}
-	// Close before rename to release the file handle on Windows.
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
 		return err
@@ -307,6 +367,9 @@ func (t *localProjectTransport) Put(remotePath string, src io.Reader) error {
 func (t *localProjectTransport) Stat(remotePath string) (*RemoteStat, error) {
 	info, err := os.Stat(t.abs(remotePath))
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
+		}
 		return nil, err
 	}
 	return &RemoteStat{
@@ -361,8 +424,9 @@ func (t *localProjectTransport) Mkdir(remotePath string) error {
 	return os.MkdirAll(t.abs(remotePath), 0755)
 }
 
-// copyDir recursively copies src into dst. dst is created if it does not
-// exist. Symlinks are skipped to avoid escaping the project root.
+func (t *localProjectTransport) Close() error { return nil }
+
+// copyDir recursively copies src into dst. Symlinks are skipped.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -374,7 +438,6 @@ func copyDir(src, dst string) error {
 		}
 		target := filepath.Join(dst, rel)
 
-		// Skip symlinks for safety.
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
