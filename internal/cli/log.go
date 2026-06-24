@@ -101,7 +101,15 @@ func logAllBranches() error {
 		message string
 	}
 
+	// Collect and sort branch names for deterministic iteration order, so
+	// that a commit reachable from multiple branches always gets the same
+	// branch label across runs.
+	branches := make([]string, 0, len(refs))
 	for branchName := range refs {
+		branches = append(branches, branchName)
+	}
+	sort.Strings(branches)
+	for _, branchName := range branches {
 		if branchName == "HEAD" || strings.HasPrefix(branchName, "names/") {
 			continue
 		}
@@ -161,7 +169,11 @@ func logAllBranches() error {
 	fmt.Println("Version history:")
 	fmt.Println()
 	for _, c := range all {
-		fmt.Printf("  %s  [%s]  %s\n", c.id, c.branch, c.message)
+		msg := c.message
+		if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
+			msg = msg[:idx] + "..."
+		}
+		fmt.Printf("  %s  [%s]  %s\n", c.id, c.branch, msg)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/drift/drift/internal/repo"
 	"github.com/spf13/cobra"
@@ -43,9 +44,11 @@ var saveCmd = &cobra.Command{
 			fmt.Printf("Saved version %s\n", result.ID)
 		}
 
-		fmt.Printf("\n  %d file(s) saved:\n", len(result.StagedPaths))
-		for _, p := range result.StagedPaths {
-			fmt.Printf("    %s\n", p)
+		if len(result.StagedPaths) > 0 {
+			fmt.Printf("\n  %d file(s) saved:\n", len(result.StagedPaths))
+			for _, p := range result.StagedPaths {
+				fmt.Printf("    %s\n", p)
+			}
 		}
 
 		// Print name assignment if a name was provided.
@@ -54,7 +57,9 @@ var saveCmd = &cobra.Command{
 		}
 
 		// Auto-sync after a successful save (no-op if sync is disabled).
-		AutoSyncAfterSave(sharedDir, sharedConfig, sharedStore)
+		if err := AutoSyncAfterSave(sharedDir, sharedConfig, sharedStore); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: auto-sync failed: %v\n", err)
+		}
 		return nil
 	},
 }

@@ -10,14 +10,19 @@ import (
 
 // NormalizePathFilters converts raw path arguments into normalized,
 // repository-relative filter strings (no trailing slash, forward slashes).
-// Returns nil if no arguments are given.
-func NormalizePathFilters(args []string) ([]string, error) {
+// rootDir is the repository root used to compute repository-relative paths
+// (independent of process cwd). Returns nil if no arguments are given.
+func NormalizePathFilters(rootDir string, args []string) ([]string, error) {
 	if len(args) == 0 {
 		return nil, nil
 	}
 	filters := make([]string, 0, len(args))
 	for _, f := range args {
-		rel, err := filepath.Rel(".", f)
+		absPath, err := filepath.Abs(f)
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve relative path %q: %w", f, err)
+		}
+		rel, err := filepath.Rel(rootDir, absPath)
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve relative path %q: %w", f, err)
 		}

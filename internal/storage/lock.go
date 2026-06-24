@@ -31,6 +31,11 @@ func acquireFileLock(lockPath string) (*fileLock, error) {
 	if err := platformTryLock(f); err == nil {
 		writeLockPID(f)
 		return &fileLock{file: f}, nil
+	} else if !isLockBusy(err) {
+		// Non-busy errors (e.g. permission denied) should not be masked
+		// by the polling loop — return immediately.
+		f.Close()
+		return nil, err
 	}
 
 	// Check for a stale lock before waiting. If the PID recorded in the
@@ -39,15 +44,20 @@ func acquireFileLock(lockPath string) (*fileLock, error) {
 	// is released automatically on process death, but on Windows a
 	// crashed process may leave a dangling lock file — reporting the PID
 	// helps the user diagnose.
-	holderPID := readLockPID(f)
-
 	deadline := time.Now().Add(lockTimeout)
+	var holderPID int
 	for time.Now().Before(deadline) {
 		time.Sleep(100 * time.Millisecond)
 		if err := platformTryLock(f); err == nil {
 			writeLockPID(f)
 			return &fileLock{file: f}, nil
+		} else if !isLockBusy(err) {
+			f.Close()
+			return nil, err
 		}
+		// Re-read PID inside the loop: the holding process may change
+		// during polling.
+		holderPID = readLockPID(f)
 	}
 
 	f.Close()

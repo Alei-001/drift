@@ -77,7 +77,7 @@ Examples:
 
 		// Normalize file filter paths to repository-relative form.
 		if len(filePaths) > 0 {
-			normalized, err := worktree.NormalizePathFilters(filePaths)
+			normalized, err := worktree.NormalizePathFilters(sharedDir, filePaths)
 			if err != nil {
 				return err
 			}
@@ -87,6 +87,9 @@ Examples:
 		// Setup output destination
 		var output io.Writer = os.Stdout
 		if outputFile != "" {
+			if _, err := os.Stat(outputFile); err == nil {
+				return fmt.Errorf("output file already exists: %s", outputFile)
+			}
 			f, err := os.Create(outputFile)
 			if err != nil {
 				return fmt.Errorf("failed to create output file: %w", err)
@@ -310,7 +313,7 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []string) ([]F
 		// P2-#11: stream-compare file hash to blob hash. This reads the file
 		// in a streaming fashion (no full load into memory) and compares the
 		// SHA-256. If they match, the file is unmodified — skip it.
-		same, err := streamCompareFileToBlob(fullPath, sharedStore, blob.Hash)
+		same, err := fileHashMatchesBlob(fullPath, sharedStore, blob.Hash)
 		if err != nil {
 			continue
 		}
@@ -370,7 +373,7 @@ func collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []string) ([]F
 			return nil
 		})
 		if err != nil {
-			return diffs, nil
+			return diffs, fmt.Errorf("failed to walk working dir: %w", err)
 		}
 	}
 
@@ -692,11 +695,10 @@ func isBinary(data []byte) bool {
 	return false
 }
 
-// streamCompareFileToBlob reports whether the file at filePath has the same
-// content as the stored blob, by streaming both through hashers and comparing
-// the resulting hashes. This avoids loading either side fully into memory,
-// which matters for large creative files (PSD, video). P2-#11.
-func streamCompareFileToBlob(filePath string, store *storage.Store, blobHash string) (bool, error) {
+// fileHashMatchesBlob reports whether the file at filePath has the same
+// content as the stored blob, by computing the file's hash and comparing it
+// to the blob hash. P2-#11.
+func fileHashMatchesBlob(filePath string, store *storage.Store, blobHash string) (bool, error) {
 	fileHash, err := core.CalculateHashFromFile(filePath)
 	if err != nil {
 		return false, err

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	driftsync "github.com/drift/drift/internal/sync"
 	"github.com/spf13/cobra"
@@ -45,7 +46,11 @@ Examples:
 
 		// For local remotes, use the efficient directory copy.
 		if gcfg.GetRemoteType() == driftsync.RemoteLocal {
+			if err := checkCloneDest(destDir); err != nil {
+				return err
+			}
 			transport := driftsync.NewLocalTransport(gcfg.Path)
+			defer transport.Close()
 			exists, err := transport.ProjectExists(remoteName)
 			if err != nil {
 				return err
@@ -76,17 +81,8 @@ Examples:
 // cloneFromRemote clones a project from any network remote by listing all
 // files and downloading them via the Transport interface.
 func cloneFromRemote(gcfg *driftsync.GlobalConfig, remoteName, destDir string) error {
-	if info, err := os.Stat(destDir); err == nil {
-		if !info.IsDir() {
-			return fmt.Errorf("destination %q exists and is not a directory", destDir)
-		}
-		entries, err := os.ReadDir(destDir)
-		if err != nil {
-			return err
-		}
-		if len(entries) > 0 {
-			return fmt.Errorf("destination %q is not empty", destDir)
-		}
+	if err := checkCloneDest(destDir); err != nil {
+		return err
 	}
 
 	transport, err := driftsync.ProjectTransportForConfig(gcfg, remoteName)
@@ -109,6 +105,10 @@ func cloneFromRemote(gcfg *driftsync.GlobalConfig, remoteName, destDir string) e
 	}
 
 	for _, remotePath := range files {
+		cleaned := filepath.Clean(filepath.FromSlash(remotePath))
+		if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
+			return fmt.Errorf("invalid remote path: %s", remotePath)
+		}
 		localPath := filepath.Join(destDir, filepath.FromSlash(remotePath))
 		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 			return err
@@ -124,6 +124,24 @@ func cloneFromRemote(gcfg *driftsync.GlobalConfig, remoteName, destDir string) e
 		f.Close()
 	}
 
+	return nil
+}
+
+// checkCloneDest verifies the destination directory is usable for cloning:
+// it must not exist, or if it exists it must be an empty directory.
+func checkCloneDest(destDir string) error {
+	if info, err := os.Stat(destDir); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("destination %q exists and is not a directory", destDir)
+		}
+		entries, err := os.ReadDir(destDir)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("destination %q is not empty", destDir)
+		}
+	}
 	return nil
 }
 

@@ -14,7 +14,7 @@ var addCmd = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Expand glob patterns and collect unique paths.
-		paths, err := worktree.ExpandAddPaths(args)
+		paths, err := worktree.ExpandAddPaths(sharedDir, args)
 		if err != nil {
 			return err
 		}

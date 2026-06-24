@@ -21,6 +21,9 @@ With a name, creates a new branch pointing to the current commit.
 Use -d to delete a branch, -m to rename a branch.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if branchDelete && branchMove != "" {
+			return fmt.Errorf("cannot use -d and -m together")
+		}
 		switch {
 		case branchDelete:
 			if len(args) == 0 {
@@ -94,6 +97,6 @@ func renameBranch(oldName, newName string) error {
 	if err := sharedRepo.RenameBranch(oldName, newName); err != nil {
 		return err
 	}
-	fmt.Printf("Renamed branch: %s → %s\n", oldName, newName)
+	fmt.Printf("Renamed branch: %s to %s\n", oldName, newName)
 	return nil
 }

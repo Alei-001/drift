@@ -19,6 +19,11 @@ func ValidateNameLabel(label string) error {
 	if label == "." || label == ".." {
 		return fmt.Errorf("name cannot be '.' or '..'")
 	}
+	for _, c := range label {
+		if c == 0 || c < 0x20 {
+			return fmt.Errorf("name cannot contain null bytes or control characters")
+		}
+	}
 	return nil
 }
 

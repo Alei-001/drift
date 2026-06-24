@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/spf13/cobra"
@@ -21,6 +22,7 @@ The working tree files are never modified — only the index is updated.`,
 		// Single-file unstage: remove just that entry from the index.
 		if len(args) == 1 {
 			path := args[0]
+			path = filepath.ToSlash(path)
 			if err := core.ValidateTreePath(path); err != nil {
 				return fmt.Errorf("invalid path: %w", err)
 			}

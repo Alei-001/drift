@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bytes"
-	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +109,10 @@ func resetAllFlags() {
 	saveCmd.Flags().Set("message", "")
 	saveCmd.Flags().Set("name", "")
 	saveCmd.Flags().Set("all", "false")
+	saveCmd.Flags().Set("amend", "false")
+
+	// status command package-level vars
+	statusPorcelain = false
 
 	// log command package-level vars
 	logOneline = false
@@ -621,27 +625,37 @@ func (h *TestHelper) RunMv(args ...string) (string, error) {
 
 func init() {
 	// Suppress cobra output during tests
-	initCmd.SetOutput(&bytes.Buffer{})
-	addCmd.SetOutput(&bytes.Buffer{})
-	statusCmd.SetOutput(&bytes.Buffer{})
-	unstageCmd.SetOutput(&bytes.Buffer{})
-	saveCmd.SetOutput(&bytes.Buffer{})
-	exportCmd.SetOutput(&bytes.Buffer{})
-	restoreCmd.SetOutput(&bytes.Buffer{})
-	branchCmd.SetOutput(&bytes.Buffer{})
-	switchCmd.SetOutput(&bytes.Buffer{})
-	diffCmd.SetOutput(&bytes.Buffer{})
-	logCmd.SetOutput(&bytes.Buffer{})
-	configCmd.SetOutput(&bytes.Buffer{})
-	rmCmd.SetOutput(&bytes.Buffer{})
-	mvCmd.SetOutput(&bytes.Buffer{})
+	initCmd.SetOut(io.Discard)
+	initCmd.SetErr(io.Discard)
+	addCmd.SetOut(io.Discard)
+	addCmd.SetErr(io.Discard)
+	statusCmd.SetOut(io.Discard)
+	statusCmd.SetErr(io.Discard)
+	unstageCmd.SetOut(io.Discard)
+	unstageCmd.SetErr(io.Discard)
+	saveCmd.SetOut(io.Discard)
+	saveCmd.SetErr(io.Discard)
+	exportCmd.SetOut(io.Discard)
+	exportCmd.SetErr(io.Discard)
+	restoreCmd.SetOut(io.Discard)
+	restoreCmd.SetErr(io.Discard)
+	branchCmd.SetOut(io.Discard)
+	branchCmd.SetErr(io.Discard)
+	switchCmd.SetOut(io.Discard)
+	switchCmd.SetErr(io.Discard)
+	diffCmd.SetOut(io.Discard)
+	diffCmd.SetErr(io.Discard)
+	logCmd.SetOut(io.Discard)
+	logCmd.SetErr(io.Discard)
+	configCmd.SetOut(io.Discard)
+	configCmd.SetErr(io.Discard)
+	rmCmd.SetOut(io.Discard)
+	rmCmd.SetErr(io.Discard)
+	mvCmd.SetOut(io.Discard)
+	mvCmd.SetErr(io.Discard)
 }
 
 // Helper to format expected output
 func formatExpected(parts ...string) string {
 	return strings.Join(parts, "\n")
 }
-
-// Suppress unused import warnings
-var _ = fmt.Sprintf
-var _ = filepath.Join

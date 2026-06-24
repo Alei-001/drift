@@ -40,7 +40,9 @@ type RefChange struct {
 }
 
 // RecordOperation appends an operation entry to the operations log.
-func (r *Repository) RecordOperation(op OpType, desc string, changes []RefChange) {
+// The write is serialized via the store's lock to prevent interleaved
+// lines from concurrent writers, and the write error is returned.
+func (r *Repository) RecordOperation(op OpType, desc string, changes []RefChange) error {
 	entry := OperationEntry{
 		Timestamp:  time.Now(),
 		Op:         op,
@@ -51,16 +53,21 @@ func (r *Repository) RecordOperation(op OpType, desc string, changes []RefChange
 	path := filepath.Join(r.Store.DriftDir(), operationsFile)
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return
+		return err
 	}
 	data = append(data, '\n')
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	f.Write(data)
+	return r.Store.WithLock(func() error {
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if _, err := f.Write(data); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // ReadOperations reads all operations from the log, newest first.
@@ -117,7 +124,13 @@ func (r *Repository) RemoveLastOperation() error {
 		out += "\n"
 	}
 
-	return os.WriteFile(path, []byte(out), 0644)
+	// Atomic write: write to a temp file then rename, so a crash mid-write
+	// cannot truncate or corrupt the operations log.
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(out), 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // Undo reverts the most recent operation by restoring refs to their before-state.

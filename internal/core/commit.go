@@ -45,6 +45,15 @@ func (c *Commit) calculateHash() string {
 	// Issue 29: use UnixMilli (matches the stored precision) instead of
 	// RFC3339 (second-level). RFC3339 would collide for two commits in the
 	// same second with otherwise identical fields.
-	data := c.ID + c.Message + strconv.FormatInt(c.Timestamp.UnixMilli(), 10) + c.Parent + c.Branch + c.TreeHash + c.Author.Name + c.Author.Email
+	// Use \x00 as a separator between fields to prevent ambiguity (e.g.
+	// ID="a",Message="b" vs ID="ab",Message="" producing the same hash).
+	sep := "\x00"
+	data := c.ID + sep + c.Message + sep + strconv.FormatInt(c.Timestamp.UnixMilli(), 10) + sep + c.Parent + sep + c.Branch + sep + c.TreeHash + sep + c.Author.Name + sep + c.Author.Email
 	return CalculateHash([]byte(data))
+}
+
+// ComputeHash recomputes the commit's hash from its fields. Used by the
+// storage layer to verify integrity on read.
+func (c *Commit) ComputeHash() string {
+	return c.calculateHash()
 }

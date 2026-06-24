@@ -281,7 +281,7 @@ func TestStore_PutCommit_GetCommit(t *testing.T) {
 // TestStore_GetCommit_NotFound verifies that a missing commit returns ErrObjectNotFound.
 func TestStore_GetCommit_NotFound(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.GetCommit("missing")
+	_, err := s.GetCommit("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 	if err != ErrObjectNotFound {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}

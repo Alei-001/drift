@@ -22,6 +22,7 @@ import (
 var historyCmd = &cobra.Command{
 	Use:   "history",
 	Short: "Show recent operations (for undo reference)",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		entries, err := sharedRepo.ReadOperations()
 		if err != nil {

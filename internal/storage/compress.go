@@ -12,13 +12,13 @@ import (
 // Compressed object format:
 //   magic: 4 bytes "DRZL"
 //   version: 1 byte (currently 1)
-//   original size: uint32 LE (for pre-allocation)
+//   original size: uint64 LE (for pre-allocation)
 //   zlib-compressed payload
 
 const (
 	compressedMagic    = "DRZL"
 	compressedVersion  = 1
-	compressedHeaderSz = 4 + 1 + 4 // magic + version + size
+	compressedHeaderSz = 4 + 1 + 8 // magic + version + size
 )
 
 // ErrCorruptedObject is returned when an object file cannot be parsed
@@ -34,7 +34,7 @@ func compressBytes(data []byte) ([]byte, error) {
 	// Write header.
 	buf.WriteString(compressedMagic)
 	buf.WriteByte(compressedVersion)
-	if err := binary.Write(&buf, binary.LittleEndian, uint32(len(data))); err != nil {
+	if err := binary.Write(&buf, binary.LittleEndian, uint64(len(data))); err != nil {
 		return nil, err
 	}
 
@@ -70,8 +70,8 @@ func decompressBytes(data []byte) ([]byte, error) {
 		return nil, ErrCorruptedObject
 	}
 
-	origSize := binary.LittleEndian.Uint32(data[5:9])
-	payload := data[9:]
+	origSize := binary.LittleEndian.Uint64(data[5:13])
+	payload := data[13:]
 
 	zr, err := zlib.NewReader(bytes.NewReader(payload))
 	if err != nil {
@@ -126,8 +126,10 @@ func readAndDecompress(path string) ([]byte, error) {
 }
 
 // streamingDecompressReader wraps a reader containing DRZL-compressed data.
-// It returns a reader that decompresses on the fly.
-func streamingDecompressReader(r io.Reader) (io.Reader, error) {
+// It returns an io.ReadCloser that decompresses on the fly. The caller must
+// close the returned reader to release zlib resources and verify the
+// Adler-32 checksum.
+func streamingDecompressReader(r io.Reader) (io.ReadCloser, error) {
 	// Read the header.
 	header := make([]byte, compressedHeaderSz)
 	n, err := io.ReadFull(r, header)
@@ -144,7 +146,7 @@ func streamingDecompressReader(r io.Reader) (io.Reader, error) {
 		return nil, ErrCorruptedObject
 	}
 
-	zr, err := zlib.NewReader(io.MultiReader(bytes.NewReader(header[9:]), r))
+	zr, err := zlib.NewReader(r)
 	if err != nil {
 		return nil, err
 	}

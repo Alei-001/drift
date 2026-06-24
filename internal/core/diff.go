@@ -71,15 +71,19 @@ func Myers(a, b []string) []DiffEdit {
 
 	oldOff, newOff := start, start
 	for _, e := range midEdits {
-		e.OldN = oldOff
-		e.NewN = newOff
 		switch e.Op {
 		case DiffKeep:
+			e.OldN = oldOff
+			e.NewN = newOff
 			oldOff++
 			newOff++
 		case DiffDelete:
+			e.OldN = oldOff
+			e.NewN = -1
 			oldOff++
 		case DiffInsert:
+			e.OldN = -1
+			e.NewN = newOff
 			newOff++
 		}
 		edits = append(edits, e)

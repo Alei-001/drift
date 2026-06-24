@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,22 +39,30 @@ func (r *Repository) Switch(branch string, opts SwitchOptions) (*SwitchResult, e
 	}
 
 	if !opts.Force {
-		// Auto-save pending work to WIP before switching.
-		if hasPending, err := r.HasPendingStagedChanges(&idx, nil); err == nil && hasPending {
-			if err := r.WT.SaveWIP(currentBranch, &idx); err != nil {
-				return nil, fmt.Errorf("failed to save work-in-progress: %w", err)
-			}
-			result.WIPSaved = true
-			emptyIdx := &core.Index{}
-			if err := r.Store.SaveIndex(emptyIdx); err != nil {
-				return nil, fmt.Errorf("failed to clear index: %w", err)
-			}
+		// Capture any pending work (staged + unstaged) into WIP before switching.
+		// Merge the two checks so WIP is saved only once with all changes.
+		hasPending, err := r.HasPendingStagedChanges(&idx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check pending staged changes: %w", err)
 		}
 
-		currentCommit, _ := r.CurrentCommit()
-		if dirty, err := r.WT.HasModifications(currentCommit, &idx, nil); err == nil && dirty {
-			if err := r.WT.StageWorktreeChanges(&idx); err != nil {
-				return nil, fmt.Errorf("failed to capture worktree changes: %w", err)
+		currentCommit, err := r.CurrentCommit()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load current commit: %w", err)
+		}
+
+		dirty, err := r.WT.HasModifications(currentCommit, &idx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check worktree modifications: %w", err)
+		}
+
+		if hasPending || dirty {
+			// Re-stage worktree changes so they are captured in WIP alongside
+			// any already-staged changes.
+			if dirty {
+				if err := r.WT.StageWorktreeChanges(&idx); err != nil {
+					return nil, fmt.Errorf("failed to capture worktree changes: %w", err)
+				}
 			}
 			if err := r.WT.SaveWIP(currentBranch, &idx); err != nil {
 				return nil, fmt.Errorf("failed to save work-in-progress: %w", err)
@@ -191,6 +200,7 @@ func (r *Repository) RestoreWIP(branch string) (int, error) {
 	}
 
 	var restored int
+	var errs []error
 	for _, e := range wip.Entries {
 		entry := core.IndexEntry{
 			Path: e.Path,
@@ -198,10 +208,12 @@ func (r *Repository) RestoreWIP(branch string) (int, error) {
 			Mode: e.Mode,
 		}
 		if err := idx.Add(entry); err != nil {
+			errs = append(errs, fmt.Errorf("failed to add %s to index: %w", e.Path, err))
 			continue
 		}
 		blob := core.BlobEntry{Path: e.Path, Hash: e.Hash, Mode: e.Mode}
 		if _, err := r.WT.WriteBlob(blob); err != nil {
+			errs = append(errs, fmt.Errorf("failed to write %s: %w", e.Path, err))
 			continue
 		}
 		restored++
@@ -212,5 +224,5 @@ func (r *Repository) RestoreWIP(branch string) (int, error) {
 	}
 
 	_ = worktree.DeleteWIP(r.Store, branch)
-	return restored, nil
+	return restored, errors.Join(errs...)
 }

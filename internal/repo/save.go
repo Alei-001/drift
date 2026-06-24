@@ -26,6 +26,10 @@ type SaveResult struct {
 
 // Save creates a new version from the staging area.
 func (r *Repository) Save(opts SaveOptions) (*SaveResult, error) {
+	if r.Config == nil {
+		return nil, fmt.Errorf("repository config is not initialized")
+	}
+
 	// --all: auto-stage all changes before saving.
 	if opts.All {
 		var idx core.Index

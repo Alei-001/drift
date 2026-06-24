@@ -49,7 +49,11 @@ Examples:
 		for _, e := range idx.Entries {
 			tracked[e.Path] = true
 		}
-		for p := range sharedRepo.WT.LoadParentTreeHashes() {
+		parentHashes, err := sharedRepo.WT.LoadParentTreeHashes()
+		if err != nil {
+			return fmt.Errorf("failed to load tracked paths: %w", err)
+		}
+		for p := range parentHashes {
 			tracked[p] = true
 		}
 
@@ -115,7 +119,11 @@ func expandRmPaths(args []string, recursive bool) ([]string, error) {
 				return nil, fmt.Errorf("invalid glob pattern %q: %w", arg, err)
 			}
 			for _, m := range matches {
-				rel, err := filepath.Rel(".", m)
+				absPath, err := filepath.Abs(m)
+				if err != nil {
+					absPath = m
+				}
+				rel, err := filepath.Rel(sharedDir, absPath)
 				if err != nil {
 					rel = m
 				}
@@ -152,7 +160,11 @@ func expandRmPaths(args []string, recursive bool) ([]string, error) {
 			continue
 		}
 
-		rel, err := filepath.Rel(".", arg)
+		absPath, err := filepath.Abs(arg)
+		if err != nil {
+			absPath = arg
+		}
+		rel, err := filepath.Rel(sharedDir, absPath)
 		if err != nil {
 			rel = arg
 		}

@@ -51,9 +51,14 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("not a drift project (run 'drift init')")
 		}
 
-		sharedConfig, _ = config.LoadConfig(sharedStore.DriftDir())
-		if sharedConfig == nil {
+		cfg, err := config.LoadConfig(sharedStore.DriftDir())
+		if err != nil {
+			if !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", err)
+			}
 			sharedConfig = config.DefaultConfig()
+		} else {
+			sharedConfig = cfg
 		}
 
 		sharedRepo = repo.New(sharedStore, sharedConfig, dir)

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,8 @@ var (
 	ErrNotInitialized  = errors.New("drift project not initialized (run 'drift init')")
 	ErrObjectNotFound  = errors.New("object not found")
 	ErrObjectCorrupted = errors.New("object corrupted (hash mismatch)")
+	ErrInvalidHash     = errors.New("invalid object hash")
+	ErrInvalidRefName  = errors.New("invalid ref name")
 )
 
 const (
@@ -39,6 +42,36 @@ type Store struct {
 
 func NewStore(root string) *Store {
 	return &Store{root: root, treeCache: newTreeLRUCache()}
+}
+
+// validateHash checks that hash is exactly 64 hexadecimal characters.
+// This prevents path traversal via crafted hash values containing ".." or "/".
+func validateHash(hash string) error {
+	if len(hash) != 64 {
+		return fmt.Errorf("%w: expected 64 hex characters, got %d", ErrInvalidHash, len(hash))
+	}
+	if _, err := hex.DecodeString(hash); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidHash, err)
+	}
+	return nil
+}
+
+// validateRefName checks that name only contains [A-Za-z0-9._-/] and does
+// not contain "..". This prevents path traversal via crafted ref names.
+func validateRefName(name string) error {
+	if name == "" {
+		return fmt.Errorf("%w: empty ref name", ErrInvalidRefName)
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("%w: %q contains '..'", ErrInvalidRefName, name)
+	}
+	for _, c := range name {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '/') {
+			return fmt.Errorf("%w: %q contains invalid character %q", ErrInvalidRefName, name, c)
+		}
+	}
+	return nil
 }
 
 func (s *Store) DriftDir() string {
@@ -118,6 +151,9 @@ func (s *Store) PutBlob(data []byte) (string, error) {
 	defer unlock()
 
 	hash := core.CalculateHash(data)
+	if err := validateHash(hash); err != nil {
+		return "", err
+	}
 	path := s.blobPath(hash)
 
 	if _, err := os.Stat(path); err == nil {
@@ -137,6 +173,9 @@ func (s *Store) PutBlob(data []byte) (string, error) {
 }
 
 func (s *Store) GetBlob(hash string) ([]byte, error) {
+	if err := validateHash(hash); err != nil {
+		return nil, err
+	}
 	path := s.blobPath(hash)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -162,6 +201,9 @@ func (s *Store) GetBlob(hash string) ([]byte, error) {
 // GetBlobSize returns the original (uncompressed) size of the stored blob
 // without fully reading its content into memory. Reads only the DRZL header.
 func (s *Store) GetBlobSize(hash string) (int64, error) {
+	if err := validateHash(hash); err != nil {
+		return 0, err
+	}
 	path := s.blobPath(hash)
 	f, err := os.Open(path)
 	if err != nil {
@@ -184,13 +226,16 @@ func (s *Store) GetBlobSize(hash string) (int64, error) {
 		return 0, ErrCorruptedObject
 	}
 
-	return int64(binary.LittleEndian.Uint32(header[5:9])), nil
+	return int64(binary.LittleEndian.Uint64(header[5:13])), nil
 }
 
 // GetBlobToWriter streams a blob's content to the given writer without loading
 // the entire blob into memory. This is essential for large files (PSD, video)
 // that creative workers handle. The hash is verified via a streaming hasher.
 func (s *Store) GetBlobToWriter(hash string, w io.Writer) error {
+	if err := validateHash(hash); err != nil {
+		return err
+	}
 	path := s.blobPath(hash)
 	f, err := os.Open(path)
 	if err != nil {
@@ -206,6 +251,7 @@ func (s *Store) GetBlobToWriter(hash string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
+	defer r.Close()
 
 	h := core.NewHasher()
 	if _, err := io.Copy(io.MultiWriter(w, h), r); err != nil {
@@ -255,6 +301,9 @@ func (s *Store) putBlobFromReaderLocked(r io.Reader) (string, error) {
 	}
 
 	hash := core.CalculateHash(data)
+	if err := validateHash(hash); err != nil {
+		return "", err
+	}
 	path := s.blobPath(hash)
 
 	if _, err := os.Stat(path); err == nil {
@@ -276,6 +325,9 @@ func (s *Store) putBlobFromReaderLocked(r io.Reader) (string, error) {
 func (s *Store) PutTree(t *core.Tree) error {
 	if t == nil {
 		return core.ErrInvalidTree
+	}
+	if err := validateHash(t.Hash); err != nil {
+		return err
 	}
 	unlock, err := s.lock()
 	if err != nil {
@@ -306,6 +358,9 @@ func (s *Store) PutTree(t *core.Tree) error {
 }
 
 func (s *Store) GetTree(hash string) (*core.Tree, error) {
+	if err := validateHash(hash); err != nil {
+		return nil, err
+	}
 	// B4: check cache before disk read.
 	if cached, ok := s.treeCache.Load(hash); ok {
 		return cached, nil
@@ -340,6 +395,9 @@ func (s *Store) GetTree(hash string) (*core.Tree, error) {
 }
 
 func (s *Store) PutCommit(c *core.Commit) error {
+	if err := validateHash(c.Hash); err != nil {
+		return err
+	}
 	unlock, err := s.lock()
 	if err != nil {
 		return err
@@ -367,6 +425,9 @@ func (s *Store) PutCommit(c *core.Commit) error {
 }
 
 func (s *Store) GetCommit(id string) (*core.Commit, error) {
+	if err := validateHash(id); err != nil {
+		return nil, err
+	}
 	path := s.commitPath(id)
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -386,13 +447,13 @@ func (s *Store) GetCommit(id string) (*core.Commit, error) {
 		return nil, err
 	}
 
-	// Verify the filename hash matches the hash stored inside the commit.
-	// This catches wrong-file reads and partial-write corruption where the
-	// internal field hash happens to be self-consistent but the file on disk
-	// is not the one the caller asked for.
-	if c.Hash != id {
-		return nil, fmt.Errorf("%w: filename hash %q does not match commit hash %q",
-			ErrObjectCorrupted, id, c.Hash)
+	// Recompute the hash from the commit's fields and verify it matches
+	// the filename, mirroring GetBlob/GetTree's integrity check. This
+	// catches corrupted objects where the stored Hash field has been
+	// forged to match the filename.
+	if recomputed := c.ComputeHash(); recomputed != id {
+		return nil, fmt.Errorf("%w: recomputed hash %q does not match filename %q",
+			ErrObjectCorrupted, recomputed, id)
 	}
 
 	return c, nil
@@ -404,23 +465,27 @@ func (s *Store) ListCommits() ([]*core.Commit, error) {
 	var files []string
 
 	entries, err := os.ReadDir(dir)
-	if err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() || len(entry.Name()) != 2 {
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || len(entry.Name()) != 2 {
+			continue
+		}
+		subDir := filepath.Join(dir, entry.Name())
+		subEntries, err := os.ReadDir(subDir)
+		if err != nil {
+			continue
+		}
+		for _, se := range subEntries {
+			if se.IsDir() || filepath.Ext(se.Name()) != ".dcm" {
 				continue
 			}
-			subDir := filepath.Join(dir, entry.Name())
-			subEntries, err := os.ReadDir(subDir)
-			if err != nil {
-				continue
-			}
-			for _, se := range subEntries {
-				if se.IsDir() || filepath.Ext(se.Name()) != ".dcm" {
-					continue
-				}
-				hash := entry.Name() + se.Name()[:len(se.Name())-4]
-				files = append(files, hash)
-			}
+			hash := entry.Name() + se.Name()[:len(se.Name())-4]
+			files = append(files, hash)
 		}
 	}
 
@@ -454,6 +519,9 @@ func (s *Store) WithLock(fn func() error) error {
 }
 
 func (s *Store) SaveRef(name, commitHash string) error {
+	if err := validateRefName(name); err != nil {
+		return err
+	}
 	unlock, err := s.lock()
 	if err != nil {
 		return err
@@ -484,6 +552,9 @@ func (s *Store) SaveRef(name, commitHash string) error {
 }
 
 func (s *Store) GetRef(name string) (string, error) {
+	if err := validateRefName(name); err != nil {
+		return "", err
+	}
 	path := filepath.Join(s.DriftDir(), refsDir, name+refExt)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -543,6 +614,9 @@ func (s *Store) ListRefs() (map[string]string, error) {
 // DeleteRef removes a branch ref. It refuses to delete "HEAD" or the
 // currently checked-out branch. Mirrors go-git's Reference deletion.
 func (s *Store) DeleteRef(name string) error {
+	if err := validateRefName(name); err != nil {
+		return err
+	}
 	if name == "HEAD" {
 		return fmt.Errorf("cannot delete HEAD")
 	}
@@ -566,6 +640,12 @@ func (s *Store) DeleteRef(name string) error {
 // RenameRef renames a branch ref from oldName to newName. HEAD is updated
 // if it pointed at oldName. Mirrors go-git's branch rename.
 func (s *Store) RenameRef(oldName, newName string) error {
+	if err := validateRefName(oldName); err != nil {
+		return err
+	}
+	if err := validateRefName(newName); err != nil {
+		return err
+	}
 	if oldName == "HEAD" || newName == "HEAD" {
 		return fmt.Errorf("cannot rename HEAD")
 	}
@@ -579,10 +659,9 @@ func (s *Store) RenameRef(oldName, newName string) error {
 	}
 	defer unlock()
 
-	// Read old ref content.
+	// Read old ref content to verify it exists.
 	oldPath := filepath.Join(s.DriftDir(), refsDir, oldName+refExt)
-	data, err := os.ReadFile(oldPath)
-	if err != nil {
+	if _, err := os.Stat(oldPath); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("branch %q not found", oldName)
 		}
@@ -595,16 +674,13 @@ func (s *Store) RenameRef(oldName, newName string) error {
 		return fmt.Errorf("branch %q already exists", newName)
 	}
 
-	// Write new ref in plain-text format.
-	tmp := newPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	// Create parent directory for nested refs (e.g. "names/label").
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, newPath); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	if err := os.Remove(oldPath); err != nil {
+
+	// Atomically rename the ref file from oldName to newName.
+	if err := os.Rename(oldPath, newPath); err != nil {
 		return err
 	}
 
@@ -678,6 +754,12 @@ func (s *Store) LoadIndex(idx *core.Index) error {
 // `drift add` or `drift status` does not falsely report committed files as
 // deleted, and the status fast-path remains effective.
 func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, idx *core.Index) error {
+	if err := validateHash(c.Hash); err != nil {
+		return err
+	}
+	if err := validateRefName(branch); err != nil {
+		return err
+	}
 	unlock, err := s.lock()
 	if err != nil {
 		return err
@@ -744,7 +826,14 @@ func (s *Store) ListBranchCommits(branch string) ([]*core.Commit, error) {
 
 	var commits []*core.Commit
 	current := hash
+	seen := make(map[string]struct{})
 	for current != "" {
+		// Cycle detection: if we visit the same commit twice, the parent
+		// chain is corrupted and would loop forever.
+		if _, ok := seen[current]; ok {
+			return nil, fmt.Errorf("cycle detected in commit history at %s", current)
+		}
+		seen[current] = struct{}{}
 		c, err := s.GetCommit(current)
 		if err != nil {
 			return nil, fmt.Errorf("corrupted commit %s: %w", current, err)

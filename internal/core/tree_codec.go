@@ -58,7 +58,7 @@ func (t *Tree) writeHeader(w io.Writer) error {
 	return binary.Write(w, binary.LittleEndian, uint32(len(t.Entries)))
 }
 
-func (t *Tree) readHeader(r io.Reader) error {
+func (t *Tree) readHeader(r *bytes.Reader) error {
 	var magic [4]byte
 	if _, err := io.ReadFull(r, magic[:]); err != nil {
 		return ErrInvalidTree
@@ -70,6 +70,15 @@ func (t *Tree) readHeader(r io.Reader) error {
 	var count uint32
 	if err := binary.Read(r, binary.LittleEndian, &count); err != nil {
 		return ErrInvalidTree
+	}
+
+	// Validate count against remaining data to prevent OOM from malicious
+	// files. Each entry needs at least 39 bytes:
+	// nameLen(2) + name(0) + type(1) + hash(32) + mode(4).
+	const minEntrySize = 39
+	remaining := r.Len()
+	if uint64(count)*minEntrySize > uint64(remaining) {
+		return ErrTreeCorrupt
 	}
 
 	t.Entries = make([]TreeEntry, count)

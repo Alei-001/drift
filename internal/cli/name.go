@@ -108,14 +108,18 @@ func listNames() error {
 	for _, e := range entries {
 		commit, err := sharedRepo.Store.GetCommit(e.Hash)
 		msg := ""
-		id := e.Hash[:12]
+		id := e.Hash
+		if len(id) > 12 {
+			id = id[:12]
+		}
 		if err == nil {
 			msg = commit.Message
 			id = commit.ID
 		}
 		// Truncate long messages for display.
-		if len(msg) > 40 {
-			msg = msg[:37] + "..."
+		runes := []rune(msg)
+		if len(runes) > 40 {
+			msg = string(runes[:37]) + "..."
 		}
 		fmt.Printf("%-20s  %-12s  %s\n", e.Label, id, msg)
 	}

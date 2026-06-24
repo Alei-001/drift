@@ -167,11 +167,7 @@ func setRemoteFromFlags(gcfg *driftsync.GlobalConfig) error {
 		}
 		gcfg.Protocol = protocol
 		gcfg.Host = syncHost
-		if syncPort != 0 {
-			gcfg.Port = syncPort
-		} else {
-			gcfg.Port = 0 // use default
-		}
+		gcfg.Port = syncPort
 		gcfg.Path = syncPath
 		gcfg.Username = syncUser
 		gcfg.Password = syncPass
@@ -230,16 +226,19 @@ func setRemoteFromWebDAVURL(gcfg *driftsync.GlobalConfig, rawURL string) error {
 	}
 	gcfg.Username = syncUser
 	gcfg.Password = syncPass
+	gcfg.InsecureSkipVerify = syncInsecure
+	gcfg.Share = ""
+	gcfg.KeyPath = ""
 
 	// Prompt for credentials if not provided.
 	if gcfg.Username == "" {
 		fmt.Print("WebDAV username: ")
 		reader := bufio.NewReader(os.Stdin)
-		u, err := reader.ReadString('\n')
+		line, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read username: %w", err)
 		}
-		gcfg.Username = strings.TrimSpace(u)
+		gcfg.Username = strings.TrimSpace(line)
 	}
 	if gcfg.Password == "" {
 		fmt.Print("WebDAV password: ")
@@ -539,14 +538,15 @@ func printSyncResult(r *driftsync.SyncResult) {
 }
 
 // AutoSyncAfterSave is called after a successful 'drift save' to trigger
-// background synchronization. Silent if no remote configured; warns on failure.
-func AutoSyncAfterSave(localDir string, cfg *config.Config, store *storage.Store) {
+// background synchronization. Silent if no remote configured; returns an
+// error if synchronization fails so the caller can warn the user.
+func AutoSyncAfterSave(localDir string, cfg *config.Config, store *storage.Store) error {
 	if !cfg.Sync.Enabled {
-		return
+		return nil
 	}
 	gcfg, err := driftsync.LoadGlobalConfig()
 	if err != nil || gcfg.GetRemoteType() == driftsync.RemoteNone {
-		return
+		return nil
 	}
 
 	var lastErr error
@@ -556,11 +556,9 @@ func AutoSyncAfterSave(localDir string, cfg *config.Config, store *storage.Store
 			time.Sleep(time.Second)
 			continue
 		}
-		return
+		return nil
 	}
-	if lastErr != nil {
-		fmt.Fprintf(os.Stderr, "\n⚠ Sync failed: %v (will retry next save)\n", lastErr)
-	}
+	return lastErr
 }
 
 // readPassword reads a password from stdin. The password is echoed to the

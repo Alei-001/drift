@@ -46,7 +46,7 @@ var exportCmd = &cobra.Command{
 
 		// Filter by path arguments if provided.
 		if pathFilters := args[1:]; len(pathFilters) > 0 {
-			normalized, err := worktree.NormalizePathFilters(pathFilters)
+			normalized, err := worktree.NormalizePathFilters(sharedDir, pathFilters)
 			if err != nil {
 				return err
 			}

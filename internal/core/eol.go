@@ -36,10 +36,6 @@ func (c *crlfToLFWriter) Write(data []byte) (int, error) {
 		c.pendingCR = false
 	}
 
-	if len(data) == 0 {
-		return n, nil
-	}
-
 	for {
 		window := data[n:]
 

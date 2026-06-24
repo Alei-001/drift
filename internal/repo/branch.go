@@ -1,8 +1,11 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/drift/drift/internal/storage"
 )
 
 // ListBranches returns all branch names (excluding HEAD), sorted alphabetically.
@@ -25,9 +28,10 @@ func (r *Repository) ListBranches() ([]string, error) {
 
 // CreateBranch creates a new branch pointing to the current commit.
 func (r *Repository) CreateBranch(name string) error {
-	if existing, err := r.Store.GetRef(name); err == nil || existing != "" {
-		_ = existing
+	if _, err := r.Store.GetRef(name); err == nil {
 		return fmt.Errorf("branch %q already exists", name)
+	} else if !errors.Is(err, storage.ErrObjectNotFound) {
+		return fmt.Errorf("failed to check branch %q: %w", name, err)
 	}
 
 	currentBranch := r.CurrentBranch()
@@ -69,13 +73,22 @@ func (r *Repository) DeleteBranch(name string) error {
 func (r *Repository) RenameBranch(oldName, newName string) error {
 	headBefore, _ := r.Store.GetRef("HEAD")
 
+	// Capture the old hash before renaming so Undo can restore oldName.
+	oldHash, err := r.Store.GetRef(oldName)
+	if err != nil {
+		return fmt.Errorf("failed to read branch %q before rename: %w", oldName, err)
+	}
+
 	if err := r.Store.RenameRef(oldName, newName); err != nil {
 		return err
 	}
 
+	// After renaming, newName holds the same hash. Record it so Undo can
+	// restore oldName with oldHash.
+	newHash, _ := r.Store.GetRef(newName)
 	headAfter, _ := r.Store.GetRef("HEAD")
 	changes := []RefChange{
-		{Ref: oldName, Before: "", After: ""},
+		{Ref: oldName, Before: oldHash, After: newHash},
 	}
 	if headBefore != headAfter {
 		changes = append(changes, RefChange{Ref: "HEAD", Before: headBefore, After: headAfter})

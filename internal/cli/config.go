@@ -71,6 +71,7 @@ Examples:
 		if err := config.SaveConfig(sharedStore.DriftDir(), sharedConfig); err != nil {
 			return fmt.Errorf("failed to save config: %w", err)
 		}
+		fmt.Printf("Set %s to %s\n", key, value)
 		return nil
 	},
 }
@@ -116,9 +117,6 @@ func getConfigValue(cfg *config.Config, key string) (string, error) {
 	case "core.default_branch":
 		return cfg.Core.DefaultBranch, nil
 	case "core.autocrlf":
-		if cfg.Core.AutoCRLF == "" {
-			return "", nil
-		}
 		return cfg.Core.AutoCRLF, nil
 	default:
 		return "", fmt.Errorf("unknown config key: %s (supported: user.name, user.email, core.default_branch, core.autocrlf)", key)
@@ -149,7 +147,7 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 	case "user.email":
 		cfg.User.Email = ""
 	case "core.default_branch":
-		cfg.Core.DefaultBranch = ""
+		cfg.Core.DefaultBranch = "main"
 	case "core.autocrlf":
 		cfg.Core.AutoCRLF = ""
 	default:

@@ -193,11 +193,10 @@ func isFTPNotFound(err error) bool {
 		return false
 	}
 	s := strings.ToLower(err.Error())
-	// 550 with "no such file" or "not found" text → genuine not-found.
-	if strings.Contains(s, "550") {
-		return strings.Contains(s, "no such file") || strings.Contains(s, "not found")
-	}
-	return strings.Contains(s, "no such file") || strings.Contains(s, "not found")
+	// Only a 550 status with "no such file" or "not found" text is a
+	// genuine not-found; other 550 errors (e.g. permission denied) are not.
+	return strings.Contains(s, "550") &&
+		(strings.Contains(s, "no such file") || strings.Contains(s, "not found"))
 }
 
 // isFTPAlreadyExists checks if an FTP error indicates the directory already exists.

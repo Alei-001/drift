@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -89,6 +90,14 @@ func fileHash(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// hashBytes computes the SHA-256 hash of a byte slice and returns it as a
+// hex-encoded string.
+func hashBytes(data []byte) string {
+	h := sha256.New()
+	h.Write(data)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // scanFiles walks the local project directory and returns a map of
@@ -189,12 +198,19 @@ func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 
 	// 1. Load manifest from remote.
 	manifest := newManifest(e.projectID)
-	if data, err := e.getRemoteFile(manifestPath); err == nil {
+	data, err := e.getRemoteFile(manifestPath)
+	if err != nil {
+		// A missing manifest means this is the first sync — use an empty
+		// manifest. Any other error (network failure, permission denied,
+		// etc.) must abort sync to avoid data loss from a stale baseline.
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("load remote manifest: %w", err)
+		}
+	} else {
 		if err := json.Unmarshal(data, manifest); err != nil {
 			return nil, fmt.Errorf("invalid remote manifest: %w", err)
 		}
 	}
-	// If manifest doesn't exist, that's fine — first sync.
 
 	// 2. Scan local files.
 	localFiles, err := scanFiles(localDir)
@@ -244,12 +260,26 @@ func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 		// Detect conflict: local changed (localHash != manifestHash) and
 		// remote also exists and may have changed. Use file size as a
 		// quick heuristic — if sizes differ, the remote likely changed too.
+		// If sizes match, the remote may still have been edited to the same
+		// size with different content, so download it and compare its hash
+		// to the manifest to be sure.
 		if remoteHas && inManifest && manifestHash != localHash {
 			fullPath := filepath.Join(localDir, filepath.FromSlash(path))
 			if localInfo, err := os.Stat(fullPath); err == nil {
 				if remoteStat, err := e.transport.Stat(path); err == nil {
 					if remoteStat.Size != localInfo.Size() {
 						result.Conflicts = append(result.Conflicts, path)
+					} else if remoteData, err := e.getRemoteFile(path); err == nil {
+						// Sizes match — content might still differ. Compare
+						// the remote hash to the manifest to detect a
+						// same-size edit. If the remote changed, this is a
+						// real conflict: skip the push to avoid overwriting
+						// the remote version (the user is warned via
+						// result.Conflicts).
+						if hashBytes(remoteData) != manifestHash {
+							result.Conflicts = append(result.Conflicts, path)
+							continue
+						}
 					}
 				}
 			}
@@ -293,8 +323,19 @@ func (e *Engine) Sync(localDir string) (*SyncResult, error) {
 		manifestHash, inManifest := manifest.Files[path]
 
 		if localHas && inManifest && manifestHash == localHash {
-			// Unchanged — skip.
-			continue
+			// Local is unchanged since the manifest. The remote may still
+			// have been modified by another device (bidirectional sync), so
+			// compare the remote file size against the local file before
+			// skipping the pull. If Stat fails or sizes differ, fall through
+			// to pulling to avoid losing remote changes.
+			fullPath := filepath.Join(localDir, filepath.FromSlash(path))
+			if localInfo, err := os.Stat(fullPath); err == nil {
+				if remoteStat, err := e.transport.Stat(path); err == nil {
+					if remoteStat.Size == localInfo.Size() {
+						continue // sizes match — assume unchanged
+					}
+				}
+			}
 		}
 
 		// Need to download.

@@ -100,7 +100,7 @@ func (idx *Index) writeHeader(w io.Writer) error {
 	return nil
 }
 
-func (idx *Index) readHeader(r io.Reader) error {
+func (idx *Index) readHeader(r *bytes.Reader) error {
 	var magic [4]byte
 	if _, err := io.ReadFull(r, magic[:]); err != nil {
 		return ErrInvalidIndex
@@ -122,6 +122,15 @@ func (idx *Index) readHeader(r io.Reader) error {
 		return ErrInvalidIndex
 	}
 
+	// Validate count against remaining data to prevent OOM from malicious
+	// files. Each entry needs at least 54 bytes:
+	// pathLen(2) + path(0) + hash(32) + timestamp(8) + size(8) + mode(4).
+	const minEntrySize = 54
+	remaining := r.Len()
+	if uint64(count)*minEntrySize > uint64(remaining) {
+		return ErrIndexCorrupt
+	}
+
 	idx.Entries = make([]IndexEntry, count)
 	return nil
 }
@@ -139,7 +148,7 @@ func (idx *Index) writeEntry(w io.Writer, entry *IndexEntry) error {
 		return err
 	}
 
-	hashBytes, err := hexDecode(entry.Hash)
+	hashBytes, err := hex.DecodeString(entry.Hash)
 	if err != nil {
 		return fmt.Errorf("invalid hash: %w", err)
 	}
@@ -199,17 +208,9 @@ func (idx *Index) readEntry(r io.Reader) (*IndexEntry, error) {
 
 	return &IndexEntry{
 		Path:       string(pathBytes),
-		Hash:       hexEncode(hashBytes),
+		Hash:       hex.EncodeToString(hashBytes),
 		ModifiedAt: time.UnixMilli(timestamp),
 		Size:       size,
 		Mode:       mode,
 	}, nil
-}
-
-func hexEncode(data []byte) string {
-	return hex.EncodeToString(data)
-}
-
-func hexDecode(s string) ([]byte, error) {
-	return hex.DecodeString(s)
 }

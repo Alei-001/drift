@@ -14,9 +14,12 @@ import (
 // StageAll stages all working-tree changes (equivalent to 'drift add .').
 // Returns the count of newly staged files.
 func (w *Worktree) StageAll(idx *core.Index) (int, error) {
-	parentHashes := w.LoadParentTreeHashes()
+	parentHashes, err := w.LoadParentTreeHashes()
+	if err != nil {
+		return 0, fmt.Errorf("failed to load parent tree hashes: %w", err)
+	}
 	var added int
-	err := core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
+	err = core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
 		wasAdded, err := w.addFile(path, fullPath, info, idx, parentHashes)
 		if err != nil {
@@ -35,7 +38,10 @@ func (w *Worktree) StageAll(idx *core.Index) (int, error) {
 
 // StagePaths stages specific paths. Returns the count of newly staged files.
 func (w *Worktree) StagePaths(idx *core.Index, paths []string) (int, error) {
-	parentHashes := w.LoadParentTreeHashes()
+	parentHashes, err := w.LoadParentTreeHashes()
+	if err != nil {
+		return 0, fmt.Errorf("failed to load parent tree hashes: %w", err)
+	}
 	var added int
 
 	for _, p := range paths {
@@ -68,33 +74,36 @@ func (w *Worktree) StagePaths(idx *core.Index, paths []string) (int, error) {
 // so they can be captured by WIP save. This is a simplified version of
 // StageAll that only updates entries for files that changed.
 func (w *Worktree) StageWorktreeChanges(idx *core.Index) error {
-	parentHashes := w.LoadParentTreeHashes()
+	parentHashes, err := w.LoadParentTreeHashes()
+	if err != nil {
+		return fmt.Errorf("failed to load parent tree hashes: %w", err)
+	}
 
 	return core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
 
 		mode, err := core.NormalizeModeForPath(info.Mode(), path)
 		if err != nil {
-			return nil
+			return fmt.Errorf("failed to normalize mode for %s: %w", path, err)
 		}
 
 		var hash string
 		if mode == core.ModeSymlink {
 			target, err := os.Readlink(fullPath)
 			if err != nil {
-				return nil
+				return fmt.Errorf("failed to read symlink %s: %w", path, err)
 			}
 			if err := core.ValidateSymlinkTarget(w.Root, path, target); err != nil {
-				return nil
+				return fmt.Errorf("unsafe symlink %s: %w", path, err)
 			}
 			hash, err = w.Store.PutBlob([]byte(target))
 			if err != nil {
-				return nil
+				return fmt.Errorf("failed to store symlink %s: %w", path, err)
 			}
 		} else {
 			hash, err = w.PutBlobForAdd(fullPath)
 			if err != nil {
-				return nil
+				return fmt.Errorf("failed to store %s: %w", path, err)
 			}
 		}
 
@@ -235,8 +244,9 @@ func (w *Worktree) addDirectoryInto(dirPath string, idx *core.Index, parentHashe
 }
 
 // ExpandAddPaths expands glob patterns in the given arguments and returns
-// a deduplicated list of repository-relative paths.
-func ExpandAddPaths(args []string) ([]string, error) {
+// a deduplicated list of repository-relative paths. rootDir is the repository
+// root used to compute repository-relative paths (independent of process cwd).
+func ExpandAddPaths(rootDir string, args []string) ([]string, error) {
 	seen := make(map[string]bool)
 	var result []string
 
@@ -258,7 +268,11 @@ func ExpandAddPaths(args []string) ([]string, error) {
 				return nil, fmt.Errorf("no matches for pattern: %s", arg)
 			}
 			for _, m := range matches {
-				rel, err := filepath.Rel(".", m)
+				absPath, err := filepath.Abs(m)
+				if err != nil {
+					return nil, fmt.Errorf("cannot resolve relative path %q: %w", m, err)
+				}
+				rel, err := filepath.Rel(rootDir, absPath)
 				if err != nil {
 					return nil, fmt.Errorf("cannot resolve relative path %q: %w", m, err)
 				}
@@ -272,7 +286,11 @@ func ExpandAddPaths(args []string) ([]string, error) {
 			if _, err := os.Lstat(arg); err != nil {
 				return nil, fmt.Errorf("path not found: %s", arg)
 			}
-			rel, err := filepath.Rel(".", arg)
+			absPath, err := filepath.Abs(arg)
+			if err != nil {
+				return nil, fmt.Errorf("cannot resolve relative path %q: %w", arg, err)
+			}
+			rel, err := filepath.Rel(rootDir, absPath)
 			if err != nil {
 				return nil, fmt.Errorf("cannot resolve relative path %q: %w", arg, err)
 			}

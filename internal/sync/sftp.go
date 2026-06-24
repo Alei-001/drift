@@ -152,9 +152,14 @@ func (t *SFTPTransport) List(prefix string) ([]string, error) {
 			continue
 		}
 		// Compute relative path by trimming the base path prefix.
+		// Use HasPrefix with a trailing slash so that a base path of
+		// "/foo" does not match "/foobar/x".
 		full := walker.Path()
-		rel := strings.TrimPrefix(full, t.basePath)
-		rel = strings.TrimPrefix(rel, "/")
+		prefix := t.basePath + "/"
+		if !strings.HasPrefix(full, prefix) {
+			continue
+		}
+		rel := strings.TrimPrefix(full, prefix)
 		if rel == "" || rel == "." {
 			continue
 		}
@@ -179,7 +184,7 @@ func (t *SFTPTransport) Mkdir(remotePath string) error {
 // mkdirAll creates all directories in the path.
 func (t *SFTPTransport) mkdirAll(absPath string) error {
 	parts := strings.Split(strings.TrimPrefix(absPath, "/"), "/")
-	current := ""
+	current := "/"
 	for _, part := range parts {
 		if part == "" {
 			continue

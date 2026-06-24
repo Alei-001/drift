@@ -3,12 +3,12 @@
 ## Build & Test
 
 ```bash
-go build ./cmd/drift/          # compile CLI binary
-go test ./...                  # all tests (~8s)
-go test ./internal/cli/...     # CLI tests only (slowest, ~5s)
+go build -o dist/drift ./cmd/drift/   # compile CLI binary to dist/
+go test ./...                         # all tests (~8s)
+go test ./internal/cli/...            # CLI tests only (slowest, ~5s)
 ```
 
-No Makefile. No lint config.
+Build output goes to `dist/` (gitignored). No Makefile. No lint config.
 
 ## Architecture
 

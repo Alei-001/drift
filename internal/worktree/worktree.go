@@ -5,6 +5,7 @@
 package worktree
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,7 +58,10 @@ func (w *Worktree) WriteBlob(blob core.BlobEntry) (core.IndexEntry, error) {
 		if err := os.Symlink(target, fullPath); err != nil {
 			return core.IndexEntry{}, fmt.Errorf("failed to create symlink %s: %w", blob.Path, err)
 		}
-		info, _ := os.Lstat(fullPath)
+		info, err := os.Lstat(fullPath)
+		if err != nil {
+			return core.IndexEntry{}, fmt.Errorf("failed to stat symlink %s: %w", blob.Path, err)
+		}
 		return core.IndexEntry{
 			Path:       blob.Path,
 			Hash:       blob.Hash,
@@ -78,7 +82,10 @@ func (w *Worktree) WriteBlob(blob core.BlobEntry) (core.IndexEntry, error) {
 				fileHash, hashErr := core.CalculateHashFromFile(fullPath)
 				if hashErr == nil && fileHash == blob.Hash {
 					_ = os.Chmod(fullPath, perm)
-					info, _ := os.Stat(fullPath)
+					info, err := os.Stat(fullPath)
+					if err != nil {
+						return core.IndexEntry{}, fmt.Errorf("failed to stat %s: %w", blob.Path, err)
+					}
 					return core.IndexEntry{
 						Path:       blob.Path,
 						Hash:       blob.Hash,
@@ -107,6 +114,7 @@ func (w *Worktree) WriteBlob(blob core.BlobEntry) (core.IndexEntry, error) {
 
 	if err := w.Store.GetBlobToWriter(blob.Hash, writer); err != nil {
 		f.Close()
+		_ = os.Remove(fullPath)
 		return core.IndexEntry{}, err
 	}
 	if err := f.Close(); err != nil {
@@ -116,7 +124,10 @@ func (w *Worktree) WriteBlob(blob core.BlobEntry) (core.IndexEntry, error) {
 		return core.IndexEntry{}, err
 	}
 
-	info, _ := os.Stat(fullPath)
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		return core.IndexEntry{}, fmt.Errorf("failed to stat %s: %w", blob.Path, err)
+	}
 	return core.IndexEntry{
 		Path:       blob.Path,
 		Hash:       blob.Hash,
@@ -172,7 +183,7 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 
 	tree, err := w.Store.GetTree(commit.TreeHash)
 	if err != nil {
-		return false, nil
+		return false, err
 	}
 
 	reader := core.NewTreeReader(w.Store)
@@ -231,31 +242,43 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 
 // LoadParentTreeHashes returns a map of path -> blob hash from the current
 // branch's latest commit tree. Returns nil if no commit exists yet.
-func (w *Worktree) LoadParentTreeHashes() map[string]string {
-	branch, _ := w.Store.GetRef("HEAD")
-	if branch == "" {
+func (w *Worktree) LoadParentTreeHashes() (map[string]string, error) {
+	branch, err := w.Store.GetRef("HEAD")
+	if err != nil {
+		if !errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, err
+		}
 		branch = "main"
 	}
 	commitHash, err := w.Store.GetRef(branch)
-	if err != nil || commitHash == "" {
-		return nil
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if commitHash == "" {
+		return nil, nil
 	}
 	commit, err := w.Store.GetCommit(commitHash)
 	if err != nil {
-		return nil
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	tree, err := w.Store.GetTree(commit.TreeHash)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	reader := core.NewTreeReader(w.Store)
 	blobs, err := reader.ListBlobs(tree, "")
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	m := make(map[string]string, len(blobs))
 	for _, b := range blobs {
 		m[b.Path] = b.Hash
 	}
-	return m
+	return m, nil
 }

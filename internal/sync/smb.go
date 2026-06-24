@@ -22,6 +22,9 @@ type SMBTransport struct {
 	basePath string // path within the share
 }
 
+// Compile-time guard to ensure SMBTransport implements Transport.
+var _ Transport = (*SMBTransport)(nil)
+
 // NewSMBTransport connects to an SMB share and returns a transport scoped
 // to the project directory under the configured base path.
 func NewSMBTransport(gcfg *GlobalConfig, remoteName string) (*SMBTransport, error) {

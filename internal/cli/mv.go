@@ -45,13 +45,19 @@ Examples:
 		for _, e := range idx.Entries {
 			tracked[e.Path] = true
 		}
-		for p := range sharedRepo.WT.LoadParentTreeHashes() {
+		parentHashes, err := sharedRepo.WT.LoadParentTreeHashes()
+		if err != nil {
+			return fmt.Errorf("failed to load parent tree: %w", err)
+		}
+		for p := range parentHashes {
 			tracked[p] = true
 		}
 
 		var moved int
 		for _, src := range sources {
-			srcRel := filepath.ToSlash(src)
+			absSrc, _ := filepath.Abs(src)
+			srcRel, _ := filepath.Rel(sharedDir, absSrc)
+			srcRel = filepath.ToSlash(srcRel)
 			if !tracked[srcRel] {
 				return fmt.Errorf("source '%s' is not tracked (use 'drift add' first)", srcRel)
 			}
@@ -73,6 +79,11 @@ Examples:
 			// Create destination parent directory if needed.
 			if err := os.MkdirAll(filepath.Dir(destFull), 0755); err != nil {
 				return fmt.Errorf("failed to create destination directory: %w", err)
+			}
+
+			// Refuse to overwrite an existing destination file.
+			if _, err := os.Stat(destFull); err == nil {
+				return fmt.Errorf("destination already exists: %s", destRel)
 			}
 
 			// Move the file on disk.
@@ -139,7 +150,9 @@ Examples:
 		// Clean up empty source directories.
 		var srcDirs []string
 		for _, src := range sources {
-			srcRel := filepath.ToSlash(src)
+			absSrc, _ := filepath.Abs(src)
+			srcRel, _ := filepath.Rel(sharedDir, absSrc)
+			srcRel = filepath.ToSlash(srcRel)
 			dir := filepath.Dir(srcRel)
 			if dir != "." && dir != "" {
 				srcDirs = append(srcDirs, dir)

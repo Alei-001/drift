@@ -33,9 +33,9 @@ var statusCmd = &cobra.Command{
 		}
 
 		var commitTree *core.Tree
-		if latest, _ := sharedRepo.CurrentCommit(); latest != nil {
-			if latest.TreeHash != "" {
-				t, err := sharedStore.GetTree(latest.TreeHash)
+		if commit != nil {
+			if commit.TreeHash != "" {
+				t, err := sharedStore.GetTree(commit.TreeHash)
 				if err == nil {
 					commitTree = t
 				}
@@ -67,9 +67,17 @@ func printStatus(s core.Status) {
 		return
 	}
 
+	// Collect and sort paths for deterministic output order.
+	paths := make([]string, 0, len(s))
+	for path := range s {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
 	// Issue 25: single pass to collect groups, avoiding repeated iteration.
 	var staged, unstaged, untracked []string
-	for path, fs := range s {
+	for _, path := range paths {
+		fs := s[path]
 		if fs.Staging != core.Unmodified && fs.Staging != core.Untracked {
 			staged = append(staged, fmt.Sprintf("  %s %s", fs.Staging, path))
 		}

@@ -28,11 +28,22 @@ func (r *Repository) Restore(version string, filters []string, force bool) (*Res
 	}
 
 	if !force {
-		if hasPending, err := r.HasPendingStagedChanges(&oldIdx, filters); err == nil && hasPending {
+		hasPending, err := r.HasPendingStagedChanges(&oldIdx, filters)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check pending staged changes: %w", err)
+		}
+		if hasPending {
 			return nil, fmt.Errorf("staging area has pending changes (use --force to discard)")
 		}
-		currentCommit, _ := r.CurrentCommit()
-		if dirty, err := r.WT.HasModifications(currentCommit, &oldIdx, filters); err == nil && dirty {
+		currentCommit, err := r.CurrentCommit()
+		if err != nil {
+			return nil, fmt.Errorf("failed to load current commit: %w", err)
+		}
+		dirty, err := r.WT.HasModifications(currentCommit, &oldIdx, filters)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check worktree modifications: %w", err)
+		}
+		if dirty {
 			return nil, fmt.Errorf("working tree has unstaged modifications (use --force to discard)")
 		}
 	}

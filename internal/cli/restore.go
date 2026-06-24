@@ -26,7 +26,7 @@ the working tree.`,
 		version := args[0]
 		force, _ := cmd.Flags().GetBool("force")
 
-		filters, err := worktree.NormalizePathFilters(args[1:])
+		filters, err := worktree.NormalizePathFilters(sharedDir, args[1:])
 		if err != nil {
 			return err
 		}

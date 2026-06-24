@@ -52,7 +52,10 @@ func (r *Repository) CurrentCommit() (*core.Commit, error) {
 	branch := r.CurrentBranch()
 	hash, err := r.Store.GetRef(branch)
 	if err != nil {
-		return nil, nil
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return r.FindCommitByHash(hash)
 }
@@ -113,11 +116,13 @@ func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 	// Try version ID in current branch, then any branch.
 	currentBranch := r.CurrentBranch()
 
-	if commits, err := r.Store.ListBranchCommits(currentBranch); err == nil {
-		for _, c := range commits {
-			if c.ID == version {
-				return c, nil
-			}
+	currentCommits, err := r.Store.ListBranchCommits(currentBranch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list commits for branch %s: %w", currentBranch, err)
+	}
+	for _, c := range currentCommits {
+		if c.ID == version {
+			return c, nil
 		}
 	}
 
@@ -134,7 +139,7 @@ func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 		}
 		commits, err := r.Store.ListBranchCommits(branchName)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to list commits for branch %s: %w", branchName, err)
 		}
 		for _, c := range commits {
 			if c.ID == version {

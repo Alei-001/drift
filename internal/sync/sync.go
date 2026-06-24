@@ -117,7 +117,9 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	// Use 0600 so the plaintext password in the config is only readable by
+	// the owner.
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -238,6 +240,10 @@ type LocalTransport struct {
 func NewLocalTransport(remoteRoot string) *LocalTransport {
 	return &LocalTransport{remoteRoot: remoteRoot}
 }
+
+// Close releases any resources held by the transport. The local transport
+// holds no resources, so this is a no-op.
+func (t *LocalTransport) Close() error { return nil }
 
 // RemoteRoot returns the configured remote root path.
 func (t *LocalTransport) RemoteRoot() string {
@@ -464,8 +470,16 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		os.Remove(dst)
+		return copyErr
+	}
+	if closeErr != nil {
+		os.Remove(dst)
+		return closeErr
+	}
+	return nil
 }
