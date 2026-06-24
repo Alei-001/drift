@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.png" alt="Drift" width="96"></p>
+
 # Drift
 
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
