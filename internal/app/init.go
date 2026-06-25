@@ -2,9 +2,11 @@ package app
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/storage"
+	driftsync "github.com/drift/drift/internal/sync"
 	"github.com/drift/drift/internal/worktree"
 )
 
@@ -18,6 +20,18 @@ func (a *App) Init() error {
 	if err := a.store.SaveRef("HEAD", "main"); err != nil {
 		return fmt.Errorf("failed to set HEAD: %w", err)
 	}
+
+	// Generate a project ID for sync support.
+	cfg := config.DefaultConfig()
+	cfg.Sync.ProjectID = driftsync.NewProjectID()
+
+	// Save project config (core settings + project ID; user info
+	// comes from global config unless overridden per-project).
+	if err := config.SaveConfig(a.store.DriftDir(), cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save config: %v\n", err)
+	}
+	a.config = cfg
+
 	return nil
 }
 

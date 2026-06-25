@@ -222,6 +222,28 @@ func listGlobalConfig(gcfg *driftsync.GlobalConfig) []ConfigEntry {
 	if gcfg.User.Email != "" {
 		entries = append(entries, ConfigEntry{Key: "user.email", Value: gcfg.User.Email})
 	}
+	// Add remote.* keys
+	if gcfg.Protocol != "" {
+		entries = append(entries, ConfigEntry{Key: "remote.protocol", Value: gcfg.Protocol})
+	}
+	if gcfg.Host != "" {
+		entries = append(entries, ConfigEntry{Key: "remote.host", Value: gcfg.Host})
+	}
+	if gcfg.Port != 0 {
+		entries = append(entries, ConfigEntry{Key: "remote.port", Value: strconv.Itoa(gcfg.Port)})
+	}
+	if gcfg.Path != "" {
+		entries = append(entries, ConfigEntry{Key: "remote.path", Value: gcfg.Path})
+	}
+	if gcfg.Username != "" {
+		entries = append(entries, ConfigEntry{Key: "remote.username", Value: gcfg.Username})
+	}
+	if gcfg.TLS {
+		entries = append(entries, ConfigEntry{Key: "remote.tls", Value: "true"})
+	}
+	if gcfg.Share != "" {
+		entries = append(entries, ConfigEntry{Key: "remote.share", Value: gcfg.Share})
+	}
 	return entries
 }
 

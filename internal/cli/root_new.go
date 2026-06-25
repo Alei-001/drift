@@ -85,10 +85,31 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	root.PersistentFlags().BoolVar(&globalDryRun, "dry-run", false, "Preview without executing")
 	root.PersistentFlags().BoolVar(&globalNoColor, "no-color", false, "Disable color output")
 
-	// Subcommands are registered in P4.
-	// root.AddCommand(NewInitCmd(application))
-	// root.AddCommand(NewAddCmd(application))
-	// ...
+	// Register version command (reuses old versionCmd variable from version.go)
+	root.AddCommand(versionCmd)
+
+	// Register all new commands
+	root.AddCommand(NewInitCmd(application))
+	root.AddCommand(NewAddCmd(application))
+	root.AddCommand(NewUnstageCmd(application))
+	root.AddCommand(NewSaveCmd(application))
+	root.AddCommand(NewHistoryCmd(application))
+	root.AddCommand(NewUndoCmd(application))
+	root.AddCommand(NewLogCmd(application))
+	root.AddCommand(NewStatusCmd(application))
+	root.AddCommand(NewDiffCmd(application))
+	root.AddCommand(NewExportCmd(application))
+	root.AddCommand(NewRestoreCmd(application))
+	root.AddCommand(NewSwitchCmd(application))
+	root.AddCommand(NewBranchCmd(application))
+	root.AddCommand(NewNameCmd(application))
+	root.AddCommand(NewRmCmd(application))
+	root.AddCommand(NewMvCmd(application))
+	root.AddCommand(NewWIPCmd(application))
+	root.AddCommand(NewCleanCmd(application))
+	root.AddCommand(NewCloneCmd(application))
+	root.AddCommand(NewConfigCmd(application))
+	root.AddCommand(NewSyncCmd(application))
 
 	return root
 }

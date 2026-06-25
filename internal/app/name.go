@@ -6,8 +6,10 @@ import (
 )
 
 type NameEntry struct {
-	Label string
-	Hash  string
+	Label   string
+	Hash    string
+	ID      string
+	Message string
 }
 
 func validateNameLabel(label string) error {
@@ -69,7 +71,13 @@ func (a *App) NameList() ([]NameEntry, error) {
 	for refName, hash := range refs {
 		if strings.HasPrefix(refName, "names/") {
 			label := strings.TrimPrefix(refName, "names/")
-			entries = append(entries, NameEntry{Label: label, Hash: hash})
+			entry := NameEntry{Label: label, Hash: hash}
+			// Best-effort: populate ID and Message from commit
+			if commit, err := a.findCommitByHash(hash); err == nil {
+				entry.ID = commit.ID
+				entry.Message = commit.Message
+			}
+			entries = append(entries, entry)
 		}
 	}
 	return entries, nil

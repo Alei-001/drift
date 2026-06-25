@@ -32,6 +32,10 @@ func (a *App) WIPList(branch string) ([]WIPEntry, error) {
 	return entries, nil
 }
 
+func (a *App) WIPListAll() ([]string, error) {
+	return worktree.ListWIPBranches(a.store)
+}
+
 func (a *App) WIPSave(branch string) error {
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {

@@ -12,6 +12,7 @@ import (
 type RemoveOptions struct {
 	Cached    bool
 	Recursive bool
+	DryRun    bool
 }
 
 type MoveOptions struct {
@@ -23,18 +24,18 @@ type CleanOptions struct {
 	Dirs   bool
 }
 
-func (a *App) Remove(paths []string, opts RemoveOptions) error {
+func (a *App) Remove(paths []string, opts RemoveOptions) ([]string, error) {
 	expanded, err := a.expandRemovePaths(paths, opts.Recursive)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(expanded) == 0 {
-		return fmt.Errorf("no matching files found")
+		return nil, fmt.Errorf("no matching files found")
 	}
 
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {
-		return fmt.Errorf("failed to load index: %w", err)
+		return nil, fmt.Errorf("failed to load index: %w", err)
 	}
 
 	tracked := make(map[string]bool)
@@ -43,7 +44,7 @@ func (a *App) Remove(paths []string, opts RemoveOptions) error {
 	}
 	parentHashes, err := a.wt.LoadParentTreeHashes()
 	if err != nil {
-		return fmt.Errorf("failed to load tracked paths: %w", err)
+		return nil, fmt.Errorf("failed to load tracked paths: %w", err)
 	}
 	for p := range parentHashes {
 		tracked[p] = true
@@ -57,7 +58,12 @@ func (a *App) Remove(paths []string, opts RemoveOptions) error {
 	}
 
 	if len(toRemove) == 0 {
-		return fmt.Errorf("no tracked files matched")
+		return nil, fmt.Errorf("no tracked files matched")
+	}
+
+	// DryRun: return list of files that would be removed without actually removing them
+	if opts.DryRun {
+		return toRemove, nil
 	}
 
 	for _, p := range toRemove {
@@ -65,20 +71,20 @@ func (a *App) Remove(paths []string, opts RemoveOptions) error {
 		if !opts.Cached {
 			fullPath := filepath.Join(a.dir, filepath.FromSlash(p))
 			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to remove %s: %w", p, err)
+				return nil, fmt.Errorf("failed to remove %s: %w", p, err)
 			}
 		}
 	}
 
 	if err := a.store.SaveIndex(&idx); err != nil {
-		return fmt.Errorf("failed to save index: %w", err)
+		return nil, fmt.Errorf("failed to save index: %w", err)
 	}
 
 	if !opts.Cached {
 		a.wt.CleanEmptyDirs(toRemove)
 	}
 
-	return nil
+	return toRemove, nil
 }
 
 func (a *App) expandRemovePaths(args []string, recursive bool) ([]string, error) {

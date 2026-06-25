@@ -29,6 +29,16 @@ type SyncRemoteOptions struct {
 	KeyPath           string
 }
 
+type SyncRemoteInfo struct {
+	Protocol string
+	Host     string
+	Port     int
+	Path     string
+	Username string
+	TLS      bool
+	Share    string
+}
+
 func (a *App) SyncEnable() error {
 	if !a.IsInitialized() {
 		return fmt.Errorf("not a drift repository")
@@ -137,6 +147,13 @@ func (a *App) SyncEnabled() bool {
 	return a.IsInitialized() && a.config.Sync.Enabled
 }
 
+func (a *App) AutoSync() error {
+	if !a.SyncEnabled() {
+		return nil
+	}
+	return a.SyncNow()
+}
+
 func (a *App) SyncRemoteSet(protocol string, opts SyncRemoteOptions) error {
 	gcfg := &driftsync.GlobalConfig{
 		Protocol:           protocol,
@@ -166,6 +183,43 @@ func (a *App) SyncRemoteSet(protocol string, opts SyncRemoteOptions) error {
 		gcfg.Path = abs
 	}
 
+	return driftsync.SaveGlobalConfig(gcfg)
+}
+
+func (a *App) SyncRemoteShow() (*SyncRemoteInfo, error) {
+	gcfg, err := driftsync.LoadGlobalConfig()
+	if err != nil {
+		return nil, err
+	}
+	if gcfg.Protocol == "" {
+		return nil, fmt.Errorf("no remote configured")
+	}
+	return &SyncRemoteInfo{
+		Protocol: gcfg.Protocol,
+		Host:     gcfg.Host,
+		Port:     gcfg.Port,
+		Path:     gcfg.Path,
+		Username: gcfg.Username,
+		TLS:      gcfg.TLS,
+		Share:    gcfg.Share,
+	}, nil
+}
+
+func (a *App) SyncRemoteUnset() error {
+	gcfg, err := driftsync.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	gcfg.Protocol = ""
+	gcfg.Host = ""
+	gcfg.Port = 0
+	gcfg.Path = ""
+	gcfg.Username = ""
+	gcfg.Password = ""
+	gcfg.TLS = false
+	gcfg.InsecureSkipVerify = false
+	gcfg.Share = ""
+	gcfg.KeyPath = ""
 	return driftsync.SaveGlobalConfig(gcfg)
 }
 

@@ -39,15 +39,15 @@ func (a *App) Add(paths []string) (int, error) {
 	return added, nil
 }
 
-func (a *App) Unstage(paths []string) (int, error) {
+func (a *App) Unstage(paths []string) (unstaged []string, notFound []string, err error) {
 	expanded, err := worktree.ExpandAddPaths(a.dir, paths)
 	if err != nil {
-		return 0, err
+		return nil, nil, err
 	}
 
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {
-		return 0, fmt.Errorf("failed to load index: %w", err)
+		return nil, nil, fmt.Errorf("failed to load index: %w", err)
 	}
 
 	matched := make(map[string]bool)
@@ -63,17 +63,24 @@ func (a *App) Unstage(paths []string) (int, error) {
 	}
 	sort.Strings(toRemove)
 
+	// Find paths that were requested but not found in index
+	for _, p := range expanded {
+		if !matched[p] {
+			notFound = append(notFound, p)
+		}
+	}
+
 	for _, p := range toRemove {
 		idx.Remove(p)
 	}
 
 	if len(toRemove) > 0 {
 		if err := a.store.SaveIndex(&idx); err != nil {
-			return 0, fmt.Errorf("failed to save index: %w", err)
+			return nil, nil, fmt.Errorf("failed to save index: %w", err)
 		}
 	}
 
-	return len(toRemove), nil
+	return toRemove, notFound, nil
 }
 
 func (a *App) ClearStaging() error {

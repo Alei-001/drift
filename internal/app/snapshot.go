@@ -78,7 +78,11 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 	}
 
 	if hasFilter {
-		targetBlobs = worktree.FilterBlobs(targetBlobs, filters)
+		normalized, err := worktree.NormalizePathFilters(a.dir, filters)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize filters: %w", err)
+		}
+		targetBlobs = worktree.FilterBlobs(targetBlobs, normalized)
 		if len(targetBlobs) == 0 {
 			return nil, fmt.Errorf("no matching files found in %s for given paths", version)
 		}
@@ -195,7 +199,7 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 	}, nil
 }
 
-func (a *App) Export(version, output string, format ExportFormat) error {
+func (a *App) Export(version, output string, format ExportFormat, filters []string) error {
 	commit, err := a.ResolveCommit(version)
 	if err != nil {
 		return err
@@ -210,6 +214,15 @@ func (a *App) Export(version, output string, format ExportFormat) error {
 	blobs, err := reader.ListBlobs(tree, "")
 	if err != nil {
 		return fmt.Errorf("failed to list files: %w", err)
+	}
+
+	// Apply path filters if provided.
+	if len(filters) > 0 {
+		normalized, err := worktree.NormalizePathFilters(a.dir, filters)
+		if err != nil {
+			return fmt.Errorf("failed to normalize filters: %w", err)
+		}
+		blobs = worktree.FilterBlobs(blobs, normalized)
 	}
 
 	switch format {
