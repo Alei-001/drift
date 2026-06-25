@@ -32,6 +32,10 @@ func New(store *storage.Store, cfg *config.Config, dir string) *App {
 	}
 }
 
+func (a *App) Config() *config.Config {
+	return a.config
+}
+
 func (a *App) Author() core.Signature {
 	if a.config != nil && a.config.User.Name != "" {
 		return core.Signature{

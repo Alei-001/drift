@@ -12,14 +12,20 @@ Build output goes to `dist/` (gitignored). No Makefile. No lint config.
 
 ## Architecture
 
-Single Go module `github.com/drift/drift`, single binary at `cmd/drift/main.go`. Four internal packages:
+Single Go module `github.com/drift/drift`, single binary at `cmd/drift/main.go`. Six internal packages:
 
 | Package | Role |
 |---------|------|
 | `internal/core` | Object model (Blob/Tree/Commit), SHA-256 hashing, binary codecs (DRIX/DREE/DCMT), walker, diff |
 | `internal/storage` | Filesystem store (`.drift/`), atomic writes, OS-level file locking |
-| `internal/cli` | All cobra commands, global mutable state (`sharedDir`/`sharedStore`/`sharedConfig`) |
+| `internal/app` | Application layer — all business logic (Save/Switch/Restore/Diff/Export/etc.) |
+| `internal/cli` | Presentation layer — cobra command constructors (`NewXxxCmd(app)`), output formatting |
 | `internal/config` | JSON config read/write |
+| `internal/worktree` | Working tree operations (staging, WIP, clean) |
+
+Architecture is layered: `cmd/drift` → `cli` (presentation) → `app` (business logic) → `core`/`storage`/`worktree`/`config` (infrastructure). CLI files import only `app/` and `core/` — never `storage`, `worktree`, `config`, or `repo` directly.
+
+`main.go` constructs an `app.App` instance and passes it to `cli.BuildRootCmd(app)`. No global mutable state in CLI — each command receives `*app.App` via closure.
 
 Storage uses content-addressing (pure SHA-256, not Git-compatible). Atomic writes via `tmp + Rename` everywhere.
 
@@ -27,21 +33,19 @@ Storage uses content-addressing (pure SHA-256, not Git-compatible). Atomic write
 
 Platform-specific lock implementations: `lock_windows.go` (LockFileEx) and `lock_unix.go` (flock). Paths internally use `/`; convert with `filepath.FromSlash`/`filepath.ToSlash` at filesystem boundaries.
 
-## Testing hazards
+## Testing
 
-**Global mutable state.** `internal/cli` uses three package-level vars (`sharedDir`, `sharedStore`, `sharedConfig`) set by `TestHelper.SetupSharedState()`. Tests change `os.Chdir()` into `T.TempDir()`. Cleanup resets globals and restores cwd.
+**No global mutable state.** Each test creates its own `app.App` via `NewTestHelper(t)` which sets up a temp dir, initializes a store, and constructs an App. No `SetupSharedState()`, no `resetAllFlags()`, no package-level vars.
 
-**Cobra flags are global.** Flag values persist across test cases. Every test must reset flags explicitly — see `resetAllFlags()` in `cli_test.go`. Add new flag resets there when adding new flags.
-
-**Test helpers** live in `cli_test.go`: `TestHelper` struct with `RunAdd`, `RunSave`, `RunStatus`, `RunExport`, etc. `CaptureOutput` redirects `os.Stdout` to capture command output.
+**Test helpers** live in `cli_test.go`: `TestHelper` struct with `RunAdd`, `RunSave`, `RunStatus`, `RunExport`, etc. Each `RunXxx` method uses `BuildRootCmd(h.App)` + `cmd.SetArgs()` to execute commands. `CaptureOutput` redirects `os.Stdout` to capture command output.
 
 **Tests use real filesystem** — no mocking of `os.ReadFile` etc. Tests create temp dirs, run real `drift init`/`drift save`, then assert file tree state.
 
 ## Key conventions
 
 - `.drift/` is the VCS directory (analogous to `.git/`)
-- Commit IDs use per-branch sequential version numbers (`v1`, `v2`, …), not hashes, for user-facing commands
-- Commits are stored by SHA-256 hash as filename; the sequential `v1`/`v2` is a convenience layer
+- Commit IDs are hash-based (8 hex chars), not sequential version numbers
+- Commits are stored by SHA-256 hash as filename; the 8-char ID is a display convenience
 - No merge — branches are independent creative exploration lines
 - Documentation in `docs/` is project design docs, not user-facing help
 - Code output and error messages must be in English (no Chinese in `.go` files)

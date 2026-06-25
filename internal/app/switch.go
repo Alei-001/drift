@@ -16,16 +16,17 @@ type SwitchOptions struct {
 }
 
 type SwitchResult struct {
-	Branch      string
-	Created     bool
-	WIPSaved    bool
-	EmptyBranch bool
+	Branch         string
+	Created        bool
+	WIPSaved       bool
+	EmptyBranch    bool
+	AlreadyOnBranch bool
 }
 
 func (a *App) Switch(branch string, opts SwitchOptions) (*SwitchResult, error) {
 	currentBranch := a.CurrentBranch()
 	if branch == currentBranch {
-		return &SwitchResult{Branch: branch}, nil
+		return &SwitchResult{Branch: branch, AlreadyOnBranch: true}, nil
 	}
 
 	result := &SwitchResult{Branch: branch}

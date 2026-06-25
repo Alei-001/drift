@@ -29,6 +29,11 @@ func NewSwitchCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
+			if result.AlreadyOnBranch {
+				fmt.Printf("Already on branch %s\n", result.Branch)
+				return nil
+			}
+
 			if result.WIPSaved {
 				fmt.Println("Saved work in progress")
 			}

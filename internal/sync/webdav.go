@@ -1,6 +1,6 @@
 // webdav.go implements the WebDAV transport for remote synchronization.
 // This enables sync with WebDAV servers (Nextcloud, ownCloud, Synology NAS,
-// 坚果云, etc.) without requiring a local mount.
+// Nutstore, etc.) without requiring a local mount.
 //
 // Implementation uses the mature github.com/studio-b12/gowebdav library
 // instead of hand-rolled PROPFIND/PUT/GET XML handling.

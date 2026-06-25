@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	apppkg "github.com/drift/drift/internal/app"
-	driftsync "github.com/drift/drift/internal/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -28,28 +27,26 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 
 			fmt.Println("Drift project initialized")
 
-			// Load existing global config (may already have user info).
-			gcfg, _ := driftsync.LoadGlobalConfig()
+			// Load existing global user info as defaults for the prompt.
+			defaultName, _ := application.ConfigGet(apppkg.GlobalScope, "user.name")
+			defaultEmail, _ := application.ConfigGet(apppkg.GlobalScope, "user.email")
 
-			// If global config already has a user name, use it as default.
-			defaultName := gcfg.User.Name
-			defaultEmail := gcfg.User.Email
 			name, email := promptUserInfoNew(defaultName, defaultEmail)
 
 			// Save user info to global config so all projects inherit it.
 			// Only update if the user provided new values.
 			if name != "" {
-				gcfg.User.Name = name
+				if err := application.ConfigSet(apppkg.GlobalScope, "user.name", name); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+				}
 			}
 			if email != "" {
-				gcfg.User.Email = email
+				if err := application.ConfigSet(apppkg.GlobalScope, "user.email", email); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+				}
 			}
 			if name != "" || email != "" {
-				if err := driftsync.SaveGlobalConfig(gcfg); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
-				} else {
-					fmt.Println("Saved your name and email globally for all projects.")
-				}
+				fmt.Println("Saved your name and email globally for all projects.")
 			}
 
 			fmt.Println("\nNext steps:")
