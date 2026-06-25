@@ -3,100 +3,75 @@ package cli
 import (
 	"fmt"
 
+	apppkg "github.com/drift/drift/internal/app"
 	"github.com/spf13/cobra"
 )
 
-var (
-	branchDelete bool
-	branchMove   string
-)
+// NewBranchCmd creates the branch subcommand.
+func NewBranchCmd(application *apppkg.App) *cobra.Command {
+	var (
+		deleteBranch string
+		moveBranch   string
+	)
 
-var branchCmd = &cobra.Command{
-	Use:   "branch [name]",
-	Short: "List, create, delete, or rename branches",
-	Long: `List all branches, or create a new branch from the current version.
-
-Without arguments, lists all branches.
-With a name, creates a new branch pointing to the current commit.
-Use -d to delete a branch, -m to rename a branch.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if branchDelete && branchMove != "" {
-			return fmt.Errorf("cannot use -d and -m together")
-		}
-		switch {
-		case branchDelete:
-			if len(args) == 0 {
-				return fmt.Errorf("branch name required for -d")
+	cmd := &cobra.Command{
+		Use:   "branch [<name>]",
+		Short: "List, create, delete, or rename branches",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Delete branch
+			if deleteBranch != "" {
+				if err := application.BranchDelete(deleteBranch); err != nil {
+					return err
+				}
+				fmt.Printf("Deleted branch %s\n", deleteBranch)
+				return nil
 			}
-			return deleteBranch(args[0])
-		case branchMove != "":
-			if len(args) == 0 {
-				return fmt.Errorf("branch name required for -m")
+
+			// Rename branch
+			if moveBranch != "" {
+				if len(args) == 0 {
+					return fmt.Errorf("new branch name required")
+				}
+				newName := args[0]
+				if err := application.BranchRename(moveBranch, newName); err != nil {
+					return err
+				}
+				fmt.Printf("Renamed branch %s to %s\n", moveBranch, newName)
+				return nil
 			}
-			return renameBranch(args[0], branchMove)
-		case len(args) == 0 || args[0] == "list":
-			return listBranches()
-		default:
-			return createBranch(args[0])
-		}
-	},
-}
 
-func init() {
-	branchCmd.Flags().BoolVarP(&branchDelete, "delete", "d", false, "Delete a branch")
-	branchCmd.Flags().StringVarP(&branchMove, "move", "m", "", "Rename a branch")
-	rootCmd.AddCommand(branchCmd)
-}
+			// Create branch
+			if len(args) > 0 {
+				name := args[0]
+				if err := application.BranchCreate(name); err != nil {
+					return err
+				}
+				fmt.Printf("Created branch %s\n", name)
+				return nil
+			}
 
-func listBranches() error {
-	currentBranch := sharedRepo.CurrentBranch()
+			// List branches
+			branches, err := application.BranchList()
+			if err != nil {
+				return err
+			}
 
-	names, err := sharedRepo.ListBranches()
-	if err != nil {
-		return fmt.Errorf("failed to list branches: %w", err)
+			currentBranch := application.CurrentBranch()
+			for _, b := range branches {
+				if b == currentBranch {
+					fmt.Printf("* %s\n", b)
+				} else {
+					fmt.Printf("  %s\n", b)
+				}
+			}
+
+			return nil
+		},
 	}
 
-	if len(names) == 0 {
-		fmt.Println("No branches yet")
-		return nil
-	}
+	cmd.Flags().StringVarP(&deleteBranch, "delete", "d", "", "Delete a branch")
+	cmd.Flags().StringVarP(&moveBranch, "move", "m", "", "Rename a branch")
 
-	for _, name := range names {
-		prefix := "  "
-		if name == currentBranch {
-			prefix = "* "
-		}
-		fmt.Printf("%s%s\n", prefix, name)
-	}
-
-	return nil
-}
-
-func createBranch(name string) error {
-	if err := sharedRepo.CreateBranch(name); err != nil {
-		return err
-	}
-	fmt.Printf("Created branch: %s\n", name)
-	return nil
-}
-
-// deleteBranch removes a branch ref. It refuses to delete the current branch
-// or HEAD. Mirrors `git branch -d`.
-func deleteBranch(name string) error {
-	if err := sharedRepo.DeleteBranch(name); err != nil {
-		return err
-	}
-	fmt.Printf("Deleted branch: %s\n", name)
-	return nil
-}
-
-// renameBranch renames a branch. HEAD is updated if it pointed at the old
-// name. Mirrors `git branch -m`.
-func renameBranch(oldName, newName string) error {
-	if err := sharedRepo.RenameBranch(oldName, newName); err != nil {
-		return err
-	}
-	fmt.Printf("Renamed branch: %s to %s\n", oldName, newName)
-	return nil
+	return cmd
 }

@@ -4,61 +4,36 @@ import (
 	"fmt"
 	"sort"
 
+	apppkg "github.com/drift/drift/internal/app"
 	"github.com/drift/drift/internal/core"
 	"github.com/spf13/cobra"
 )
 
-var statusPorcelain bool
+// NewStatusCmd creates the status subcommand.
+func NewStatusCmd(application *apppkg.App) *cobra.Command {
+	var porcelain bool
 
-var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show current branch, version, and working tree status",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Show current branch and version
-		currentBranch, _ := sharedStore.GetRef("HEAD")
-		if currentBranch == "" {
-			currentBranch = "main"
-		}
-
-		commit, _ := sharedRepo.CurrentCommit()
-		if commit != nil {
-			fmt.Printf("On branch %s, version %s\n\n", currentBranch, commit.ID)
-		} else {
-			fmt.Printf("On branch %s, no commits yet\n\n", currentBranch)
-		}
-
-		var idx core.Index
-		if err := sharedStore.LoadIndex(&idx); err != nil {
-			return fmt.Errorf("failed to load index: %w", err)
-		}
-
-		var commitTree *core.Tree
-		if commit != nil {
-			if commit.TreeHash != "" {
-				t, err := sharedStore.GetTree(commit.TreeHash)
-				if err == nil {
-					commitTree = t
-				}
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show working tree status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status, err := application.Status()
+			if err != nil {
+				return err
 			}
-		}
 
-		status, err := core.ComputeStatus(commitTree, &idx, sharedDir, sharedStore)
-		if err != nil {
-			return fmt.Errorf("failed to compute status: %w", err)
-		}
+			if porcelain {
+				printStatusPorcelain(*status)
+			} else {
+				printStatus(*status)
+			}
+			return nil
+		},
+	}
 
-		if statusPorcelain {
-			printStatusPorcelain(status)
-		} else {
-			printStatus(status)
-		}
-		return nil
-	},
-}
+	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
 
-func init() {
-	statusCmd.Flags().BoolVar(&statusPorcelain, "porcelain", false, "Machine-readable output (XY path format)")
-	rootCmd.AddCommand(statusCmd)
+	return cmd
 }
 
 func printStatus(s core.Status) {
@@ -113,9 +88,6 @@ func printStatus(s core.Status) {
 	}
 }
 
-// printStatusPorcelain outputs status in a machine-readable format similar
-// to `git status --porcelain`: two status characters (staged + worktree)
-// followed by the file path, one per line.
 func printStatusPorcelain(s core.Status) {
 	// Collect and sort paths for deterministic output.
 	paths := make([]string, 0, len(s))
@@ -135,18 +107,6 @@ func printStatusPorcelain(s core.Status) {
 	}
 }
 
-// statusCode converts a StatusCode to a single character for porcelain output.
 func statusCode(c core.StatusCode) byte {
-	switch c {
-	case core.Modified:
-		return 'M'
-	case core.Added:
-		return 'A'
-	case core.Deleted:
-		return 'D'
-	case core.Untracked:
-		return '?'
-	default:
-		return ' '
-	}
+	return byte(c)
 }

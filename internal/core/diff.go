@@ -1,9 +1,5 @@
 package core
 
-import (
-	"bytes"
-)
-
 // MyersDiff implements the Myers O(ND) diff algorithm — the same algorithm
 // Git uses. It computes the shortest edit script (SES) between two string
 // slices in O((M+N)+D²) time and O(M+N) space, where D is the edit distance.
@@ -224,30 +220,4 @@ func backtrack(a, b []string, trace [][]int, m, n, offset int) []DiffEdit {
 	}
 
 	return edits
-}
-
-// DiffEditScriptToUnified converts a Myers edit script into unified-diff
-// output suitable for display. Returns lines prefixed with ' ', '+', or '-'.
-func DiffEditScriptToUnified(edits []DiffEdit) []byte {
-	var buf bytes.Buffer
-	for _, e := range edits {
-		buf.WriteByte(byte(e.Op))
-		buf.WriteString(e.Line)
-		buf.WriteByte('\n')
-	}
-	return buf.Bytes()
-}
-
-// DiffCountChanges returns the number of added and deleted lines from
-// a Myers edit script.
-func DiffCountChanges(edits []DiffEdit) (added, deleted int) {
-	for _, e := range edits {
-		switch e.Op {
-		case DiffInsert:
-			added++
-		case DiffDelete:
-			deleted++
-		}
-	}
-	return
 }

@@ -2,72 +2,56 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/drift/drift/internal/repo"
+	apppkg "github.com/drift/drift/internal/app"
 	"github.com/spf13/cobra"
 )
 
-var saveCmd = &cobra.Command{
-	Use:   "save [-m message] [--amend] [--all] [--name label]",
-	Short: "Save staged changes as a new version",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		message, _ := cmd.Flags().GetString("message")
-		amend, _ := cmd.Flags().GetBool("amend")
-		all, _ := cmd.Flags().GetBool("all")
-		nameLabel, _ := cmd.Flags().GetString("name")
+// NewSaveCmd creates the save subcommand.
+func NewSaveCmd(application *apppkg.App) *cobra.Command {
+	var (
+		message string
+		amend   bool
+		all     bool
+		name    string
+	)
 
-		// Validate name label early so we fail before saving.
-		if nameLabel != "" {
-			if err := repo.ValidateNameLabel(nameLabel); err != nil {
+	cmd := &cobra.Command{
+		Use:   "save",
+		Short: "Save staged changes to the repository",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			result, err := application.Save(message, apppkg.SaveOptions{
+				Amend: amend,
+				All:   all,
+				Name:  name,
+			})
+			if err != nil {
 				return err
 			}
-		}
 
-		opts := repo.SaveOptions{
-			Message: message,
-			Amend:   amend,
-			All:     all,
-			Name:    nameLabel,
-		}
-
-		result, err := sharedRepo.Save(opts)
-		if err != nil {
-			return err
-		}
-
-		if result.Amended {
-			fmt.Printf("Amended version %s: %s\n", result.ID, result.Message)
-		} else if result.Message != "" {
-			fmt.Printf("Saved version %s: %s\n", result.ID, result.Message)
-		} else {
-			fmt.Printf("Saved version %s\n", result.ID)
-		}
-
-		if len(result.StagedPaths) > 0 {
-			fmt.Printf("\n  %d file(s) saved:\n", len(result.StagedPaths))
-			for _, p := range result.StagedPaths {
-				fmt.Printf("    %s\n", p)
+			if result.Amended {
+				fmt.Printf("Amended: %s (%s)\n", result.ID, result.Message)
+			} else {
+				fmt.Printf("Saved: %s (%s)\n", result.ID, result.Message)
 			}
-		}
 
-		// Print name assignment if a name was provided.
-		if nameLabel != "" {
-			fmt.Printf("Named %s as '%s'\n", result.ID, nameLabel)
-		}
+			if len(result.StagedPaths) > 0 {
+				fmt.Printf("Staged %d file(s)\n", len(result.StagedPaths))
+			}
 
-		// Auto-sync after a successful save (no-op if sync is disabled).
-		if err := AutoSyncAfterSave(sharedDir, sharedConfig, sharedStore); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: auto-sync failed: %v\n", err)
-		}
-		return nil
-	},
-}
+			// AutoSync after save (best-effort)
+			if err := application.AutoSync(); err != nil {
+				fmt.Printf("Warning: sync failed: %v\n", err)
+			}
 
-func init() {
-	saveCmd.Flags().StringP("message", "m", "", "Version message")
-	saveCmd.Flags().Bool("amend", false, "Amend the most recent version instead of creating a new one")
-	saveCmd.Flags().BoolP("all", "a", false, "Automatically stage all changes before saving")
-	saveCmd.Flags().String("name", "", "Assign a version name (alias) to this version")
-	rootCmd.AddCommand(saveCmd)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Commit message")
+	cmd.Flags().BoolVar(&amend, "amend", false, "Amend the last commit")
+	cmd.Flags().BoolVarP(&all, "all", "a", false, "Stage all changes before saving")
+	cmd.Flags().StringVar(&name, "name", "", "Name this version")
+
+	return cmd
 }
