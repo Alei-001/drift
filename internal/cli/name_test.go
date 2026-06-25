@@ -10,11 +10,11 @@ func TestName_Add(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("a.txt", "content")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
-	output, err := h.RunName("v1", "final")
+	output, err := h.RunName(id1, "final")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Named v1")
+	h.AssertContains(output, "Named "+id1)
 	h.AssertContains(output, "final")
 }
 
@@ -24,9 +24,9 @@ func TestName_List(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("a.txt", "content")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
-	_, err := h.RunName("v1", "draft")
+	_, err := h.RunName(id1, "draft")
 	h.AssertNoError(err)
 
 	output, err := h.RunName("--list")
@@ -51,9 +51,9 @@ func TestName_Delete(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("a.txt", "content")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
-	_, err := h.RunName("v1", "temp")
+	_, err := h.RunName(id1, "temp")
 	h.AssertNoError(err)
 
 	output, err := h.RunName("--delete=temp")
@@ -81,14 +81,14 @@ func TestName_InvalidLabel(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("a.txt", "content")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
 	// Path separator in label
-	_, err := h.RunName("v1", "bad/name")
+	_, err := h.RunName(id1, "bad/name")
 	h.AssertError(err)
 
 	// Empty label
-	_, err = h.RunName("v1", "")
+	_, err = h.RunName(id1, "")
 	h.AssertError(err)
 }
 
@@ -116,10 +116,10 @@ func TestName_ResolveByName(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("a.txt", "v1")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
 	// Assign a name
-	_, err := h.RunName("v1", "milestone")
+	_, err := h.RunName(id1, "milestone")
 	h.AssertNoError(err)
 
 	// Use the name to export (resolveCommit should find it)
@@ -135,17 +135,17 @@ func TestName_Overwrite(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("a.txt", "v1")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
 	h.WriteFile("a.txt", "v2")
-	h.AddAndSave([]string{"a.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"a.txt"}, "v2")
 
 	// Assign name to v1
-	_, err := h.RunName("v1", "label")
+	_, err := h.RunName(id1, "label")
 	h.AssertNoError(err)
 
 	// Reassign to v2
-	_, err = h.RunName("v2", "label")
+	_, err = h.RunName(id2, "label")
 	h.AssertNoError(err)
 
 	// Verify it now points to v2
@@ -165,14 +165,15 @@ func TestSave_WithName(t *testing.T) {
 
 	output, err := h.RunSaveWithName("my version", "final")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 	h.AssertContains(output, "final")
 
 	// Verify the name was assigned
 	output, err = h.RunName("--list")
 	h.AssertNoError(err)
 	h.AssertContains(output, "final")
-	h.AssertContains(output, "v1")
+	h.AssertContains(output, id1)
 }
 
 // TC-NAME-012: save --name with invalid label fails before saving
@@ -229,7 +230,8 @@ func TestSave_WithoutName(t *testing.T) {
 	h.AssertNoError(err)
 	output, err := h.RunSave("v2")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v2")
+	id2 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id2)
 
 	// Verify "first" still points to v1
 	output, err = h.RunName("--list")

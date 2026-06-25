@@ -50,14 +50,13 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 					s.File(path).Staging = Modified
 				}
 			} else {
-				// Deleted from index.
+				// Deleted from index (staged deletion). The worktree status
+				// is relative to the index (which no longer has the file):
+				//   - file absent in worktree → Unmodified (matches index)
+				//   - file present in worktree → Untracked (handled by step 4)
+				// So we do NOT set Worktree=Deleted here — that would compare
+				// worktree vs commit instead of worktree vs index.
 				s.File(path).Staging = Deleted
-				// Also check if worktree was modified since the last commit.
-				if h, err := hashWorktreeFile(workDir, path, store, hash); err == nil {
-					if h != hash {
-						s.File(path).Worktree = Modified
-					}
-				}
 			}
 		}
 
@@ -104,54 +103,61 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 		}
 
 		// Check committed-but-not-staged files.
-		for path, hash := range commitFiles {
-			if seen[path] {
-				continue
-			}
-			seen[path] = true
-
-			fullPath := filepath.Join(workDir, filepath.FromSlash(path))
-			info, err := os.Lstat(fullPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					s.File(path).Worktree = Deleted
+		// This only runs when the index is empty (e.g. after `drift unstage`).
+		// When the index is non-empty, files in the commit but not in the index
+		// are staged for deletion — their worktree status is relative to the
+		// index (absent), so Unmodified if also absent from worktree, or
+		// Untracked if still present (handled by step 4).
+		if len(idx.Entries) == 0 {
+			for path, hash := range commitFiles {
+				if seen[path] {
+					continue
 				}
-				continue
-			}
+				seen[path] = true
 
-			// Symlink: compare target string.
-			if info.Mode()&os.ModeSymlink != 0 {
-				target, err := os.Readlink(fullPath)
+				fullPath := filepath.Join(workDir, filepath.FromSlash(path))
+				info, err := os.Lstat(fullPath)
+				if err != nil {
+					if os.IsNotExist(err) {
+						s.File(path).Worktree = Deleted
+					}
+					continue
+				}
+
+				// Symlink: compare target string.
+				if info.Mode()&os.ModeSymlink != 0 {
+					target, err := os.Readlink(fullPath)
+					if err != nil {
+						continue
+					}
+					data, err := store.GetBlob(hash)
+					if err != nil {
+						continue
+					}
+					if target != string(data) {
+						s.File(path).Worktree = Modified
+					}
+					continue
+				}
+
+				// Size fast-path (no mtime for committed files).
+				blobSize, err := store.GetBlobSize(hash)
 				if err != nil {
 					continue
 				}
-				data, err := store.GetBlob(hash)
+				if info.Size() != blobSize {
+					s.File(path).Worktree = Modified
+					continue
+				}
+
+				fileHash, err := CalculateHashFromFile(fullPath)
 				if err != nil {
 					continue
 				}
-				if target != string(data) {
+
+				if fileHash != hash {
 					s.File(path).Worktree = Modified
 				}
-				continue
-			}
-
-			// Size fast-path (no mtime for committed files).
-			blobSize, err := store.GetBlobSize(hash)
-			if err != nil {
-				continue
-			}
-			if info.Size() != blobSize {
-				s.File(path).Worktree = Modified
-				continue
-			}
-
-			fileHash, err := CalculateHashFromFile(fullPath)
-			if err != nil {
-				continue
-			}
-
-			if fileHash != hash {
-				s.File(path).Worktree = Modified
 			}
 		}
 	}
@@ -161,11 +167,19 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 		if idx.Has(path) {
 			return nil
 		}
-		if _, inCommit := commitFiles[path]; inCommit {
+		_, inCommit := commitFiles[path]
+		// When the index is empty, committed files are handled by step 3
+		// (compared to commit). Don't mark them as Untracked.
+		if inCommit && len(idx.Entries) == 0 {
 			return nil
 		}
 		fs := s.File(path)
-		fs.Staging = Untracked
+		if !inCommit {
+			// Truly untracked file (not in commit, not in index).
+			fs.Staging = Untracked
+		}
+		// If inCommit and index is non-empty, Staging is already Deleted
+		// (staged deletion). The file still in worktree is Untracked.
 		fs.Worktree = Untracked
 		return nil
 	})
@@ -174,33 +188,4 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 	}
 
 	return s, nil
-}
-
-// hashWorktreeFile computes the SHA-256 of the worktree file at relPath
-// relative to workDir. The file is expected to be tracked (its blob hash
-// is oldHash). Returns the computed hash or an error.
-func hashWorktreeFile(workDir, relPath string, store StoreReader, oldHash string) (string, error) {
-	fullPath := filepath.Join(workDir, filepath.FromSlash(relPath))
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		return "", err
-	}
-
-	// Symlink: compare target string.
-	if info.Mode()&os.ModeSymlink != 0 {
-		target, err := os.Readlink(fullPath)
-		if err != nil {
-			return "", err
-		}
-		data, err := store.GetBlob(oldHash)
-		if err != nil {
-			return "", err
-		}
-		if target == string(data) {
-			return oldHash, nil
-		}
-		return CalculateHash([]byte(target)), nil
-	}
-
-	return CalculateHashFromFile(fullPath)
 }

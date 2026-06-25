@@ -114,10 +114,15 @@ func resetAllFlags() {
 	// status command package-level vars
 	statusPorcelain = false
 
-	// log command package-level vars
-	logOneline = false
-	logAll = false
-	logCount = 0
+	// history command package-level vars (commit history)
+	historyOneline = false
+	historyAll = false
+	historyCount = 0
+	historyPorcelain = false
+
+	// log command package-level vars (operation log)
+	logLimit = 20
+	logPorcelain = false
 
 	// branch command package-level vars
 	branchDelete = false
@@ -126,10 +131,20 @@ func resetAllFlags() {
 	// rm command package-level vars
 	rmCached = false
 	rmRecursive = false
+	rmForce = false
+
+	// mv command package-level vars
+	mvForce = false
+
+	// clean command package-level vars
+	cleanDirs = false
+	cleanForce = false
+	cleanDryRun = false
 
 	// config command package-level vars
 	configList = false
 	configUnset = false
+	configGlobal = false
 
 	// name command flags
 	nameCmd.Flags().Set("list", "false")
@@ -148,6 +163,19 @@ func resetAllFlags() {
 	syncInsecure = false
 	syncShare = ""
 	syncKeyPath = ""
+
+	// undo command flags
+	undoCount = 1
+
+	// wip drop command flag
+	wipDropForce = false
+
+	// global persistent flags
+	globalVerbose = false
+	globalQuiet = false
+	globalDryRun = false
+	globalNoColor = false
+	globalRepoPath = ""
 }
 
 // WriteFile creates a file with the given content.
@@ -215,15 +243,24 @@ func (h *TestHelper) AssertNotContains(output, expected string) {
 }
 
 // CaptureOutput captures stdout during fn execution.
+// It also redirects stdin to an empty pipe so that isInteractive() returns
+// false and confirmAction auto-proceeds — matching non-interactive test mode.
 func CaptureOutput(fn func() error) (string, error) {
-	old := os.Stdout
+	oldOut := os.Stdout
+	oldIn := os.Stdin
 	r, w, _ := os.Pipe()
 	os.Stdout = w
+	// Redirect stdin to an empty pipe so confirmAction sees a non-TTY
+	// and auto-proceeds without blocking on user input.
+	inR, inW, _ := os.Pipe()
+	inW.Close()
+	os.Stdin = inR
 
 	err := fn()
 
 	w.Close()
-	os.Stdout = old
+	os.Stdout = oldOut
+	os.Stdin = oldIn
 
 	var buf bytes.Buffer
 	buf.ReadFrom(r)
@@ -484,7 +521,27 @@ func (h *TestHelper) AddAndSave(files []string, message string) string {
 	if err != nil {
 		h.T.Fatalf("save failed: %v", err)
 	}
-	return output
+	return h.ExtractSaveID(output)
+}
+
+// ExtractSaveID parses the commit ID from save command output.
+// The output format is "Saved version <ID>: <message>" or "Saved version <ID>".
+func (h *TestHelper) ExtractSaveID(output string) string {
+	h.T.Helper()
+	const prefix = "Saved version "
+	idx := strings.Index(output, prefix)
+	if idx < 0 {
+		h.T.Fatalf("could not find save ID in output: %s", output)
+	}
+	rest := output[idx+len(prefix):]
+	end := len(rest)
+	for i, c := range rest {
+		if c == ':' || c == '\n' || c == ' ' {
+			end = i
+			break
+		}
+	}
+	return rest[:end]
 }
 
 // AssertNoError fails the test if err is not nil.
@@ -513,51 +570,55 @@ func (h *TestHelper) VersionCount() int {
 	return len(commits)
 }
 
-// RunLog runs the log command.
-func (h *TestHelper) RunLog(args ...string) (string, error) {
+// RunHistory runs the history command (commit history).
+func (h *TestHelper) RunHistory(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
-	logOneline = false
-	logAll = false
-	logCount = 0
+	historyOneline = false
+	historyAll = false
+	historyCount = 0
+	historyPorcelain = false
 	return CaptureOutput(func() error {
-		return logCmd.RunE(logCmd, args)
+		return historyCmd.RunE(historyCmd, args)
 	})
 }
 
-// RunLogOneline runs the log command with --oneline.
-func (h *TestHelper) RunLogOneline(args ...string) (string, error) {
+// RunHistoryOneline runs the history command with --oneline.
+func (h *TestHelper) RunHistoryOneline(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
-	logOneline = true
-	logAll = false
-	logCount = 0
+	historyOneline = true
+	historyAll = false
+	historyCount = 0
+	historyPorcelain = false
 	return CaptureOutput(func() error {
-		return logCmd.RunE(logCmd, args)
+		return historyCmd.RunE(historyCmd, args)
 	})
 }
 
-// RunLogAll runs the log command with --all (replaces former RunList).
-func (h *TestHelper) RunLogAll(args ...string) (string, error) {
+// RunHistoryAll runs the history command with --all (replaces former RunList).
+func (h *TestHelper) RunHistoryAll(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
-	logOneline = false
-	logAll = true
-	logCount = 0
+	historyOneline = false
+	historyAll = true
+	historyCount = 0
+	historyPorcelain = false
 	return CaptureOutput(func() error {
-		return logCmd.RunE(logCmd, args)
+		return historyCmd.RunE(historyCmd, args)
 	})
 }
 
-// RunLogLimit runs the log command with -n limit.
-func (h *TestHelper) RunLogLimit(limit int, args ...string) (string, error) {
+// RunHistoryLimit runs the history command with -n limit.
+func (h *TestHelper) RunHistoryLimit(limit int, args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
-	logOneline = false
-	logAll = false
-	logCount = limit
+	historyOneline = false
+	historyAll = false
+	historyCount = limit
+	historyPorcelain = false
 	return CaptureOutput(func() error {
-		return logCmd.RunE(logCmd, args)
+		return historyCmd.RunE(historyCmd, args)
 	})
 }
 
@@ -598,7 +659,7 @@ func (h *TestHelper) RunRm(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	return CaptureOutput(func() error {
-		// Parse --cached and -r/--recursive flags from args.
+		// Parse --cached, -r/--recursive, and -f/--force flags from args.
 		var filteredArgs []string
 		for _, arg := range args {
 			switch arg {
@@ -606,6 +667,8 @@ func (h *TestHelper) RunRm(args ...string) (string, error) {
 				rmCached = true
 			case "-r", "--recursive":
 				rmRecursive = true
+			case "-f", "--force":
+				rmForce = true
 			default:
 				filteredArgs = append(filteredArgs, arg)
 			}
@@ -619,7 +682,104 @@ func (h *TestHelper) RunMv(args ...string) (string, error) {
 	h.T.Helper()
 	h.SetupSharedState()
 	return CaptureOutput(func() error {
-		return mvCmd.RunE(mvCmd, args)
+		// Parse -f/--force flag from args.
+		var filteredArgs []string
+		for _, arg := range args {
+			if arg == "-f" || arg == "--force" {
+				mvForce = true
+			} else {
+				filteredArgs = append(filteredArgs, arg)
+			}
+		}
+		return mvCmd.RunE(mvCmd, filteredArgs)
+	})
+}
+
+// RunClean runs the clean command with args.
+func (h *TestHelper) RunClean(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	cleanDirs = false
+	cleanForce = false
+	cleanDryRun = false
+	for _, arg := range args {
+		switch arg {
+		case "-d", "--dirs":
+			cleanDirs = true
+		case "-f", "--force":
+			cleanForce = true
+		case "-n", "--dry-run":
+			cleanDryRun = true
+		}
+	}
+	return CaptureOutput(func() error {
+		return cleanCmd.RunE(cleanCmd, nil)
+	})
+}
+
+// RunLog runs the log command (operation log) with the given limit (0 = all).
+func (h *TestHelper) RunLog(limit int) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	logLimit = limit
+	logPorcelain = false
+	return CaptureOutput(func() error {
+		return logCmd.RunE(logCmd, nil)
+	})
+}
+
+// RunUndo runs the undo command with the given count.
+func (h *TestHelper) RunUndo(count int) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	undoCount = count
+	return CaptureOutput(func() error {
+		return undoCmd.RunE(undoCmd, nil)
+	})
+}
+
+// RunWipList runs the 'wip list' subcommand.
+func (h *TestHelper) RunWipList() (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	return CaptureOutput(func() error {
+		return wipListCmd.RunE(wipListCmd, nil)
+	})
+}
+
+// RunWipSave runs the 'wip save' subcommand.
+func (h *TestHelper) RunWipSave() (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	return CaptureOutput(func() error {
+		return wipSaveCmd.RunE(wipSaveCmd, nil)
+	})
+}
+
+// RunWipRestore runs the 'wip restore' subcommand with an optional branch.
+func (h *TestHelper) RunWipRestore(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	return CaptureOutput(func() error {
+		return wipRestoreCmd.RunE(wipRestoreCmd, args)
+	})
+}
+
+// RunWipDrop runs the 'wip drop' subcommand with an optional branch.
+// Pass "--force" in args to skip the confirmation prompt.
+func (h *TestHelper) RunWipDrop(args ...string) (string, error) {
+	h.T.Helper()
+	h.SetupSharedState()
+	var filteredArgs []string
+	for _, arg := range args {
+		if arg == "--force" || arg == "-f" {
+			wipDropCmd.Flags().Set("force", "true")
+		} else {
+			filteredArgs = append(filteredArgs, arg)
+		}
+	}
+	return CaptureOutput(func() error {
+		return wipDropCmd.RunE(wipDropCmd, filteredArgs)
 	})
 }
 
@@ -653,6 +813,16 @@ func init() {
 	rmCmd.SetErr(io.Discard)
 	mvCmd.SetOut(io.Discard)
 	mvCmd.SetErr(io.Discard)
+	cleanCmd.SetOut(io.Discard)
+	cleanCmd.SetErr(io.Discard)
+	wipListCmd.SetOut(io.Discard)
+	wipListCmd.SetErr(io.Discard)
+	wipSaveCmd.SetOut(io.Discard)
+	wipSaveCmd.SetErr(io.Discard)
+	wipRestoreCmd.SetOut(io.Discard)
+	wipRestoreCmd.SetErr(io.Discard)
+	wipDropCmd.SetOut(io.Discard)
+	wipDropCmd.SetErr(io.Discard)
 }
 
 // Helper to format expected output

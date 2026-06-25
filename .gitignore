@@ -6,8 +6,6 @@ dist/
 *.exe
 
 # Install scripts (will be distributed via releases instead)
-install.bat
-install.sh
 *.exe~
 *.dll
 *.so
@@ -36,3 +34,7 @@ storage_cover
 # OS
 .DS_Store
 Thumbs.db
+
+# docs
+docs/flowchart
+docs/issues

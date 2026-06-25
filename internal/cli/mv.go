@@ -9,18 +9,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var mvForce bool
+
 var mvCmd = &cobra.Command{
 	Use:   "mv <source> <destination>",
 	Short: "Move or rename a tracked file",
 	Long: `Move or rename a tracked file, updating both the working tree and the index.
 
 The source must be tracked (staged or committed). If the destination exists
-and is a directory, the source is moved into that directory.
+and is a directory, the source is moved into this directory.
+
+By default, mv refuses to overwrite an existing destination file. Use -f
+to overwrite.
 
 Examples:
   drift mv old.txt new.txt       # rename a file
   drift mv note.txt docs/        # move into a directory
-  drift mv a.txt b.txt c.txt d/  # move multiple files into a directory`,
+  drift mv a.txt b.txt c.txt d/  # move multiple files into a directory
+  drift mv -f old.txt existing   # overwrite an existing destination`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// The last argument is the destination; all preceding are sources.
@@ -81,9 +87,15 @@ Examples:
 				return fmt.Errorf("failed to create destination directory: %w", err)
 			}
 
-			// Refuse to overwrite an existing destination file.
+			// Refuse to overwrite an existing destination file unless --force.
 			if _, err := os.Stat(destFull); err == nil {
-				return fmt.Errorf("destination already exists: %s", destRel)
+				if !mvForce {
+					return fmt.Errorf("destination exists (use -f to overwrite): %s", destRel)
+				}
+				// Force: remove the existing destination before renaming.
+				if err := os.Remove(destFull); err != nil {
+					return fmt.Errorf("failed to remove existing destination %s: %w", destRel, err)
+				}
 			}
 
 			// Move the file on disk.
@@ -168,5 +180,6 @@ Examples:
 }
 
 func init() {
+	mvCmd.Flags().BoolVarP(&mvForce, "force", "f", false, "Overwrite existing destination files")
 	rootCmd.AddCommand(mvCmd)
 }

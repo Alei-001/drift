@@ -17,7 +17,8 @@ func TestFlow_TypicalCreativeWorkflow(t *testing.T) {
 	output, _ := h.RunAdd(".")
 	h.AssertContains(output, "Added")
 	output, _ = h.RunSave("初稿")
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 
 	// 2. Modify chapter 1
 	h.WriteFile("chapter1.txt", "第一章 修改版")
@@ -42,15 +43,15 @@ func TestFlow_TypicalCreativeWorkflow(t *testing.T) {
 	h.AddAndSave([]string{"ending.txt"}, "结局B")
 
 	// 5. Verify branch independence
-	output, _ = h.RunLogAll()
-	h.AssertContains(output, "v1")
+	output, _ = h.RunHistoryAll()
+	h.AssertContains(output, id1)
 	h.AssertContains(output, "修改第一章")
 	h.AssertContains(output, "结局B")
 
 	// 6. Switch to ending-a and verify
 	_, err = h.RunSwitch("ending-a")
 	h.AssertNoError(err)
-	output, _ = h.RunLogAll()
+	output, _ = h.RunHistoryAll()
 	h.AssertContains(output, "结局A")
 
 	// 7. Export using branch name (main's v1)
@@ -96,7 +97,7 @@ func TestFlow_RestoreWorkflow(t *testing.T) {
 
 	// Create multiple versions
 	h.WriteFile("draft.txt", "初稿内容")
-	h.AddAndSave([]string{"draft.txt"}, "初稿")
+	id1 := h.AddAndSave([]string{"draft.txt"}, "初稿")
 
 	h.WriteFile("draft.txt", "修改稿内容")
 	h.AddAndSave([]string{"draft.txt"}, "修改稿")
@@ -105,9 +106,9 @@ func TestFlow_RestoreWorkflow(t *testing.T) {
 	h.AddAndSave([]string{"draft.txt"}, "终稿")
 
 	// Restore to v1
-	output, err := h.RunRestore("v1")
+	output, err := h.RunRestore(id1)
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 
 	// Verify content
 	content := h.ReadFile("draft.txt")
@@ -168,11 +169,11 @@ func TestFlow_ExportAndVerify(t *testing.T) {
 	h.WriteFile("src/main.go", "package main")
 	h.WriteFile("src/utils.go", "package utils")
 	h.WriteFile("README.md", "# Project")
-	h.AddAndSave([]string{"src/main.go", "src/utils.go", "README.md"}, "initial")
+	id1 := h.AddAndSave([]string{"src/main.go", "src/utils.go", "README.md"}, "initial")
 
 	// Export to directory
 	outputDir := filepath.Join(h.Dir, "release")
-	output, err := h.RunExport("v1", "-o", outputDir)
+	output, err := h.RunExport(id1, "-o", outputDir)
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 3 file(s)")
 
@@ -189,7 +190,7 @@ func TestFlow_ExportAndVerify(t *testing.T) {
 
 	// Export to zip
 	zipPath := filepath.Join(h.Dir, "release.zip")
-	output, err = h.RunExport("v1", "-o", zipPath, "-f", "zip")
+	output, err = h.RunExport(id1, "-o", zipPath, "-f", "zip")
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 3 file(s)")
 	if _, err := os.Stat(zipPath); err != nil {

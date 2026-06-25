@@ -242,3 +242,112 @@ func loadIndex(t *testing.T, h *TestHelper) *core.Index {
 	}
 	return idx
 }
+
+// TC-RM-008: rm with -f flag skips confirmation (non-interactive in tests)
+func TestRm_WithForce(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	output, err := h.RunRm("-f", "note.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Removed: note.txt")
+	h.AssertContains(output, "Removed 1 file(s)")
+
+	if h.FileExists("note.txt") {
+		t.Error("note.txt should be removed from working tree")
+	}
+}
+
+// TC-RM-009: rm without -f still proceeds in non-interactive mode
+func TestRm_NonInteractiveAutoProceed(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// Without -f, confirmAction auto-proceeds in non-interactive (test) mode.
+	output, err := h.RunRm("note.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Removed: note.txt")
+
+	if h.FileExists("note.txt") {
+		t.Error("note.txt should be removed from working tree")
+	}
+}
+
+// TC-RM-010: rm --cached does not require confirmation
+func TestRm_CachedNoConfirmation(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("note.txt", "content")
+	h.AddAndSave([]string{"note.txt"}, "v1")
+
+	// --cached only modifies the index, no confirmation needed.
+	_, err := h.RunRm("--cached", "note.txt")
+	h.AssertNoError(err)
+
+	if !h.FileExists("note.txt") {
+		t.Error("note.txt should still exist with --cached")
+	}
+}
+
+// TC-MV-006: mv without -f refuses to overwrite existing destination
+func TestMv_OverwriteWithoutForce(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("old.txt", "old content")
+	h.WriteFile("existing.txt", "existing content")
+	h.AddAndSave([]string{"old.txt", "existing.txt"}, "v1")
+
+	_, err := h.RunMv("old.txt", "existing.txt")
+	h.AssertError(err)
+
+	// Both files should still exist with original content.
+	if !h.FileExists("old.txt") {
+		t.Error("old.txt should still exist (move refused)")
+	}
+	if h.ReadFile("existing.txt") != "existing content" {
+		t.Error("existing.txt content should be unchanged")
+	}
+}
+
+// TC-MV-007: mv with -f overwrites existing destination
+func TestMv_OverwriteWithForce(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("old.txt", "old content")
+	h.WriteFile("existing.txt", "existing content")
+	h.AddAndSave([]string{"old.txt", "existing.txt"}, "v1")
+
+	output, err := h.RunMv("-f", "old.txt", "existing.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Moved: old.txt -> existing.txt")
+
+	// old.txt should be gone, existing.txt should have old.txt's content.
+	if h.FileExists("old.txt") {
+		t.Error("old.txt should not exist after forced move")
+	}
+	if !h.FileExists("existing.txt") {
+		t.Error("existing.txt should exist after overwrite")
+	}
+	if h.ReadFile("existing.txt") != "old content" {
+		t.Errorf("existing.txt content = %q, want %q",
+			h.ReadFile("existing.txt"), "old content")
+	}
+
+	// Index should have existing.txt, not old.txt.
+	var idx = loadIndex(t, h)
+	if idx.Has("old.txt") {
+		t.Error("index should not contain old.txt")
+	}
+	if !idx.Has("existing.txt") {
+		t.Error("index should contain existing.txt")
+	}
+}

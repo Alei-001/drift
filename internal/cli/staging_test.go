@@ -421,3 +421,111 @@ func TestUnstage_InvalidPath(t *testing.T) {
 	_, err = h.RunUnstage("file\x00.txt")
 	h.AssertError(err)
 }
+
+// TC-UNSTAGE-006: Unstage multiple paths in one call
+func TestUnstage_MultiplePaths(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "file a")
+	h.WriteFile("b.txt", "file b")
+	h.WriteFile("c.txt", "file c")
+	_, err := h.RunAdd("a.txt", "b.txt", "c.txt")
+	h.AssertNoError(err)
+
+	output, err := h.RunUnstage("a.txt", "c.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Unstaged: a.txt")
+	h.AssertContains(output, "Unstaged: c.txt")
+	h.AssertNotContains(output, "Unstaged: b.txt")
+
+	// a.txt and c.txt should be untracked, b.txt should still be staged.
+	output, err = h.RunStatus()
+	h.AssertNoError(err)
+	h.AssertContains(output, "A b.txt")
+}
+
+// TC-UNSTAGE-007: Unstage with glob pattern
+func TestUnstage_GlobPattern(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.tmp", "tmp1")
+	h.WriteFile("b.tmp", "tmp2")
+	h.WriteFile("keep.txt", "keep")
+	_, err := h.RunAdd("a.tmp", "b.tmp", "keep.txt")
+	h.AssertNoError(err)
+
+	output, err := h.RunUnstage("*.tmp")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Unstaged: a.tmp")
+	h.AssertContains(output, "Unstaged: b.tmp")
+	h.AssertNotContains(output, "Unstaged: keep.txt")
+
+	// keep.txt should still be staged.
+	output, err = h.RunStatus()
+	h.AssertNoError(err)
+	h.AssertContains(output, "A keep.txt")
+}
+
+// TC-UNSTAGE-008: Unstage a directory removes all files beneath it
+func TestUnstage_Directory(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("docs/a.txt", "a")
+	h.WriteFile("docs/b.txt", "b")
+	h.WriteFile("root.txt", "root")
+	_, err := h.RunAdd("docs")
+	h.AssertNoError(err)
+	_, err = h.RunAdd("root.txt")
+	h.AssertNoError(err)
+
+	output, err := h.RunUnstage("docs")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Unstaged: docs/a.txt")
+	h.AssertContains(output, "Unstaged: docs/b.txt")
+	h.AssertNotContains(output, "Unstaged: root.txt")
+
+	// root.txt should still be staged.
+	output, err = h.RunStatus()
+	h.AssertNoError(err)
+	h.AssertContains(output, "A root.txt")
+}
+
+// TC-UNSTAGE-009: Unstage "." clears the entire staging area
+func TestUnstage_DotClearsAll(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "a")
+	h.WriteFile("b.txt", "b")
+	_, err := h.RunAdd("a.txt", "b.txt")
+	h.AssertNoError(err)
+
+	output, err := h.RunUnstage(".")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Staging area cleared")
+
+	// Index should be empty.
+	var idx = loadIndex(t, h)
+	if len(idx.Entries) != 0 {
+		t.Errorf("index should be empty, got %d entries", len(idx.Entries))
+	}
+}
+
+// TC-UNSTAGE-010: Unstage multiple paths where one is not staged
+func TestUnstage_MultiplePathsWithNotStaged(t *testing.T) {
+	h := NewTestHelper(t)
+	h.InitProject()
+
+	h.WriteFile("a.txt", "a")
+	h.WriteFile("b.txt", "b")
+	_, err := h.RunAdd("a.txt")
+	h.AssertNoError(err)
+
+	output, err := h.RunUnstage("a.txt", "b.txt")
+	h.AssertNoError(err)
+	h.AssertContains(output, "Unstaged: a.txt")
+	h.AssertContains(output, "b.txt is not staged")
+}

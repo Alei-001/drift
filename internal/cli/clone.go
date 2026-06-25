@@ -72,7 +72,7 @@ Examples:
 		fmt.Printf("Cloned %s to %s\n", remoteName, destDir)
 		fmt.Println("\nNext steps:")
 		fmt.Printf("  cd %s\n", filepath.Base(destDir))
-		fmt.Println("  drift log --all   # view history")
+		fmt.Println("  drift history --all   # view history")
 		fmt.Println("  drift status      # check working tree")
 		return nil
 	},

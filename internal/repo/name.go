@@ -90,3 +90,18 @@ func (r *Repository) ListNames() ([]NameEntry, error) {
 	}
 	return entries, nil
 }
+
+// NamesForHash returns all name labels assigned to the given commit hash.
+func (r *Repository) NamesForHash(hash string) []string {
+	entries, err := r.ListNames()
+	if err != nil {
+		return nil
+	}
+	var labels []string
+	for _, e := range entries {
+		if e.Hash == hash {
+			labels = append(labels, e.Label)
+		}
+	}
+	return labels
+}

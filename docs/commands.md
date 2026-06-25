@@ -32,6 +32,7 @@
 | `wip` | 工作进度管理 | ✅ |
 | `sync` | 远程同步（NAS/WebDAV） | ✅ |
 | `clone` | 从远程克隆项目 | ✅ |
+| `version` | 显示版本号 | ✅ |
 
 ---
 
@@ -50,6 +51,8 @@ drift init
 - 初始化存储结构和默认配置
 - 创建 `main` 分支并设置 HEAD
 - 交互式提示输入 `user.name` 和 `user.email`（在终端中运行时）
+- 用户信息保存到**全局配置**（`~/.drift/global.json`），所有项目共享
+- 如已存在全局用户信息，则作为默认值显示（按 Enter 保留）
 - 显示下一步指引
 
 ---
@@ -154,17 +157,16 @@ drift save --all              # 等同于 drift add . + drift save
 
 **行为：**
 - 从暂存区构建 Tree 对象
-- 创建 Commit 对象（每个分支独立递增：main 的 v1, v2...；feature 的 v1, v2...）
+- 创建 Commit 对象，版本 ID 为提交哈希的前 8 位（如 `a1b2c3d4`），类似 Git 的短哈希
 - 更新当前分支引用并清空暂存区
 - 若文件内容与上一版本完全相同，拒绝保存
-- 保存后列出本次所有保存的文件
+- 保存后列出本次实际变更的文件（与上一版本比较，非全部已跟踪文件）
 - 若指定 `--name`，保存成功后自动创建别名
 - 若指定 `--all`，保存前自动暂存所有改动（含新增、修改、删除的已跟踪文件）
 
 **--amend 行为：**
-- 替换最近一条提交，保留版本号（ID）和 parent
+- 替换最近一条提交，生成新的版本 ID（新哈希前缀）
 - 更新 Tree 和 Message
-- 不会创建新的版本号
 - 用于修正最近保存的版本
 
 ### `drift log` ✅
@@ -194,7 +196,8 @@ drift log --all --oneline    # 所有分支单行模式
 
 ```
 commit abc123def456...
-Version: v3
+Version: a1b2c3d4
+Names:   初稿
 Branch:  main
 Date:    2024-06-15 10:30:00
 Author:  张三 <zhangsan@example.com>
@@ -202,7 +205,7 @@ Author:  张三 <zhangsan@example.com>
     完成前四章
 
 commit def456abc123...
-Version: v2
+Version: e5f6a7b8
 Branch:  main
 Date:    2024-06-15 09:00:00
 
@@ -214,17 +217,17 @@ Date:    2024-06-15 09:00:00
 ```
 Version history:
 
-  v3  [main]  完成前四章
-  v2  [main]  修改配色方案
-  v1  [feature]  方案A初稿
+  a1b2c3d4 (初稿)  [main]  完成前四章
+  e5f6a7b8         [main]  修改配色方案
+  c9d0e1f2         [feature]  方案A初稿
 ```
 
 **输出示例（单行模式）：**
 
 ```
-v3 [main] 完成前四章
-v2 [main] 修改配色方案
-v1 [main] 项目初始化
+a1b2c3d4 (初稿) [main] 完成前四章
+e5f6a7b8 [main] 修改配色方案
+c9d0e1f2 [main] 项目初始化
 ```
 
 > **注意**：`drift log` 不带参数时默认查看当前分支历史；`drift log --all` 查看所有分支历史（去重）。前者适合专注当前工作线，后者适合总览全局。
@@ -234,18 +237,28 @@ v1 [main] 项目初始化
 导出指定版本到文件系统。
 
 ```bash
-drift export <版本> -o <输出路径> [-f <格式>]
+drift export <版本> -o <输出路径> [-f <格式>] [<路径>...]
 
-drift export v1 -o ./交付客户           # 导出到目录（默认）
-drift export v1 -o ./交付.zip -f zip    # 导出为 zip
-drift export v1 -o ./交付.tar.gz -f tar # 导出为 tar.gz
+# 基本用法
+drift export a1b2c3d4 -o ./交付客户           # 导出到目录（默认）
+drift export a1b2c3d4 -o ./交付.zip -f zip    # 导出为 zip
+drift export a1b2c3d4 -o ./交付.tar.gz -f tar # 导出为 tar.gz
 drift export main -o ./main-branch     # 导出分支最新版本
+drift export 初稿 -o ./draft           # 使用别名导出
+
+# 路径过滤（只导出指定文件/目录）
+drift export a1b2c3d4 -o ./部分 章节/         # 只导出 章节/ 目录
+drift export a1b2c3d4 -o ./部分 章节/ 笔记/   # 导出多个目录
+drift export a1b2c3d4 -o ./单文件 章节/第一章.txt  # 只导出单个文件
 ```
 
 **参数：**
-- `<版本>` — 版本 ID（如 v1、v2）、分支名（如 main）或别名（如 初稿）
+- `<版本>` — 版本 ID（如 `a1b2c3d4`，支持缩写前缀）、分支名（如 main）或别名（如 初稿）
 - `-o` / `--output` — **必填**，输出路径
 - `-f` / `--format` — 可选，`dir`（默认）/ `zip` / `tar`
+- `<路径>...` — 可选，指定要导出的文件或目录（支持目录前缀匹配）。不指定则导出整个版本。
+
+> **注意**：`-f` 在 `export` 命令中表示 `--format`（导出格式），而在 `diff` 命令中表示 `--file`（过滤文件）。两个命令的标志空间相互独立，但使用时请注意上下文。
 
 ### `drift restore` ✅
 
@@ -255,12 +268,13 @@ drift export main -o ./main-branch     # 导出分支最新版本
 drift restore <版本>                    # 恢复整个工作区到指定版本
 drift restore <版本> --force            # 强制恢复（丢弃暂存区改动）
 drift restore main                      # 恢复到分支最新版本
-drift restore v2 章节/第一章.txt         # 仅恢复指定文件到 v2
-drift restore v2 章节/第一章.txt 笔记/   # 仅恢复指定文件/目录到 v2
+drift restore a1b2c3d4 章节/第一章.txt   # 仅恢复指定文件到该版本
+drift restore a1b2c3d4 章节/第一章.txt 笔记/   # 仅恢复指定文件/目录
+drift restore 初稿                       # 使用别名恢复
 ```
 
 **参数：**
-- `<版本>` — 版本 ID（如 v1、v2）、分支名（如 main）或别名（如 初稿）
+- `<版本>` — 版本 ID（如 `a1b2c3d4`，支持缩写前缀）、分支名（如 main）或别名（如 初稿）
 - `<路径>...` — 可选，指定要恢复的文件或目录。不指定则恢复整个工作区。
 
 **行为：**
@@ -300,6 +314,33 @@ drift rm *.tmp                    # 支持 glob 通配符
 - `--cached` 保留磁盘文件，仅更新暂存区
 - 自动清理因此而变空的父目录
 
+**示例：**
+
+```bash
+# 删除单个文件
+drift rm 章节/旧稿.txt
+
+# 删除多个文件
+drift rm 章节/旧稿.txt 笔记/废弃.txt
+
+# 递归删除整个目录（必须加 -r）
+drift rm -r 旧素材/
+
+# 使用 glob 通配符批量删除
+drift rm *.tmp
+drift rm *.bak *.old
+
+# 仅从暂存区移除，保留磁盘文件（停止跟踪该文件）
+drift rm --cached 大文件.psd
+
+# 删除后查看状态
+drift rm 章节/旧稿.txt
+drift status          # 会显示该文件为 D（删除）
+drift save -m "删除旧稿"  # 提交删除
+```
+
+> **注意**：`drift rm` 只能删除已被 Drift 跟踪的文件。删除未被跟踪的文件会报错 `pathspec did not match any tracked files` —— 这种情况请直接用系统命令（如资源管理器或 `rm`）删除，无需通过 Drift。
+
 ### `drift mv` ✅
 
 移动或重命名已跟踪的文件。
@@ -315,6 +356,29 @@ drift mv <文件1> <文件2> <目录>     # 多个文件移入目录
 - 同时更新工作区和暂存区
 - 目标为已存在的目录时，自动将源移入该目录
 - 自动清理空的源目录
+
+**示例：**
+
+```bash
+# 重命名单个文件
+drift mv 章节/第一章.txt 章节/序章.txt
+
+# 将文件移入已存在的目录
+drift mv 封面.png 素材/
+
+# 多个文件移入同一目录（最后一个参数必须是目录）
+drift mv 封面.png 插图.png 素材/
+
+# 重命名目录（目录名即新文件名）
+drift mv 旧章节/ 新章节/
+
+# 移动后查看状态并提交
+drift mv 章节/第一章.txt 章节/序章.txt
+drift status          # 会显示 R（重命名）
+drift save -m "重命名第一章为序章"
+```
+
+> **提示**：`drift mv` 等价于先复制到新位置再从旧位置删除，但会保留文件历史关联。移动后建议执行 `drift save` 提交改动。
 
 ---
 
@@ -382,17 +446,17 @@ drift switch <名称> -c          # --create 简写
 **默认显示摘要统计：**
 
 ```bash
-drift diff                # 工作区 vs 当前分支最新版本（摘要）
-drift diff v1             # 工作区 vs v1（摘要）
-drift diff v1 v2          # v1 vs v2（摘要）
-drift diff main feature   # main 最新 vs feature 最新（摘要）
-drift diff main/v1 feature/v1  # 跨分支精确比较（摘要）
+drift diff                         # 工作区 vs 当前分支最新版本（摘要）
+drift diff a1b2c3d4                # 工作区 vs 指定版本（摘要）
+drift diff a1b2c3d4 e5f6a7b8       # 两个版本对比（摘要）
+drift diff main feature            # main 最新 vs feature 最新（摘要）
+drift diff main/a1b2c3d4 feature/a1b2c3d4  # 跨分支精确比较（摘要）
 ```
 
 **摘要输出示例：**
 
 ```
-Changed files between v1 and v2:
+Changed files between a1b2c3d4 and e5f6a7b8:
 
   M 章节/第一章.txt    +15 -3   (text)
   M 章节/第二章.txt    +8 -2    (text)
@@ -406,15 +470,15 @@ Summary: 5 files changed (3 text, 1 binary), 23 insertions(+), 5 deletions(-)
 **查看详细差异：**
 
 ```bash
-drift diff -p             # 工作区 vs 当前分支（详细）
-drift diff v1 v2 -p       # v1 vs v2（详细）
+drift diff -p                      # 工作区 vs 当前分支（详细）
+drift diff a1b2c3d4 e5f6a7b8 -p    # 两个版本对比（详细）
 ```
 
 **详细输出示例（文本文件）：**
 
 ```
---- v1/章节/第一章.txt
-+++ v2/章节/第一章.txt
+--- a1b2c3d4/章节/第一章.txt
++++ e5f6a7b8/章节/第一章.txt
 @@ -1,5 +1,8 @@
  第一章 开始
  
@@ -436,20 +500,20 @@ Binary file 素材/封面.psd changed (1234567 -> 1567890 bytes)
 
 ```bash
 # 三种等价的文件过滤方式（可混用）：
-drift diff v1 v2 --file 章节/第一章.txt         # --file 标志
-drift diff v1 v2 -f 章节/第一章.txt              # -f 简写
-drift diff v1 v2 -- 章节/第一章.txt              # -- 分隔符后直接跟路径
+drift diff a1b2c3d4 e5f6a7b8 --file 章节/第一章.txt   # --file 标志
+drift diff a1b2c3d4 e5f6a7b8 -f 章节/第一章.txt        # -f 简写
+drift diff a1b2c3d4 e5f6a7b8 -- 章节/第一章.txt        # -- 分隔符后直接跟路径
 
 # 多个文件/目录（每种方式都支持重复）：
-drift diff v1 v2 --file 章节/ --file 笔记/
-drift diff v1 v2 -f 章节/ -f 笔记/
-drift diff v1 v2 -- 章节/ 笔记/
+drift diff a1b2c3d4 e5f6a7b8 --file 章节/ --file 笔记/
+drift diff a1b2c3d4 e5f6a7b8 -f 章节/ -f 笔记/
+drift diff a1b2c3d4 e5f6a7b8 -- 章节/ 笔记/
 ```
 
 **输出到文件：**
 
 ```bash
-drift diff v1 v2 -p --output diff.txt      # 保存差异到文件
+drift diff a1b2c3d4 e5f6a7b8 -p --output diff.txt   # 保存差异到文件
 ```
 
 **参数说明：**
@@ -466,10 +530,12 @@ drift diff v1 v2 -p --output diff.txt      # 保存差异到文件
 
 | 格式 | 示例 | 说明 |
 |------|------|------|
-| 版本 ID | `v1` | 当前分支的版本（如有歧义会提示） |
+| 版本 ID | `a1b2c3d4` | 提交哈希前 8 位，支持缩写前缀（如 `a1b2`） |
 | 分支名 | `main` | 该分支的最新版本 |
-| 分支/版本 | `main/v1` | 精确指定某分支的某版本 |
+| 分支/版本 | `main/a1b2c3d4` | 精确指定某分支的某版本 |
 | 别名 | `初稿` | 通过 `drift name` 设置的别名 |
+
+> **说明**：`drift diff` 支持同分支内不同版本对比（最常用），也支持跨分支对比。由于 Drift 不做合并，分支是独立的创作线，跨分支对比主要用于查看两条创作线之间的差异。
 
 ---
 
@@ -488,16 +554,19 @@ drift name --delete <标签名>  # 删除别名
 **示例：**
 
 ```bash
-drift name v1 初稿
-drift name v3 终稿
-drift name --list
-drift name --delete 初稿
+drift name a1b2c3d4 初稿          # 为版本 a1b2c3d4 设置别名 "初稿"
+drift name e5f6a7b8 终稿          # 为版本 e5f6a7b8 设置别名 "终稿"
+drift name a1b2 初稿              # 支持缩写前缀（等价于上一条）
+drift name --list                 # 查看所有别名
+drift name --delete 初稿          # 删除别名
 ```
 
 **行为：**
 - 别名为版本提供一个易记的名称
 - 别名可在所有需要版本号的命令中使用（diff、export、restore 等）
 - 别名以 `refs/names/<标签>.ref` 存储在 `.drift/` 中
+- 同一版本可拥有多个别名
+- 别名显示在 `drift log` 输出中（如 `a1b2c3d4 (初稿) [main] ...`）
 
 ---
 
@@ -508,38 +577,59 @@ drift name --delete 初稿
 查看操作历史记录。
 
 ```bash
-drift history                 # 查看所有操作记录
+drift history                 # 默认显示最近 20 条
 drift history -n 10           # 只显示最近 10 条
+drift history -n 0            # 显示全部操作记录
 ```
+
+**参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `-n` / `--number` | 显示的条目数量，默认 20；`0` 表示显示全部 |
 
 **输出示例：**
 
 ```
-2024-06-23 10:30:00  save v3  (修改配色) on main
-2024-06-23 10:25:00  save v2  on main
-2024-06-23 10:20:00  branch | create experiment
-2024-06-23 10:15:00  save v1  on main
+Recent operations (newest first):
+
+  1. 2024-06-23 10:30:00  save  修改配色 on main
+  2. 2024-06-23 10:25:00  save  on main
+  3. 2024-06-23 10:20:00  branch-create  experiment
+  4. 2024-06-23 10:15:00  save  on main
+
+To undo the most recent operation: drift undo
 ```
 
 **记录的操作类型：**
 - `save` — 保存版本
-- `branch` — 创建/删除/重命名分支
 - `switch` — 切换分支（HEAD 变更）
+- `branch-delete` — 删除分支
+- `branch-rename` — 重命名分支
+- `restore` — 恢复工作区
+- `name-add` / `name-delete` — 别名增删
 
 ### `drift undo` ✅
 
 撤销最近的操作。
 
 ```bash
-drift undo                    # 撤销最近一次操作
+drift undo                    # 撤销最近 1 次操作
 drift undo -n 3               # 撤销最近 3 次操作
 ```
+
+**参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `-n` / `--number` | 撤销的操作数量，默认 1；必须为正整数 |
 
 **行为：**
 - 恢复被操作影响的分支引用到操作前的状态
 - 例如：撤销 `save` 会移除该提交并恢复分支指向
 - 撤销 `branch -d` 会恢复被删除的分支
 - 撤销 `branch -m` 会恢复分支原名
+- 使用 `-n` 批量撤销时，按从新到旧的顺序依次回滚；若中途某次撤销失败（如操作日志已空），会停止并报告已撤销的数量
 - 操作历史本身也会记录撤销操作
 
 ---
@@ -585,35 +675,72 @@ drift restore-wip <分支名>     # 恢复指定分支的 WIP
 
 ### `drift config` ✅
 
-查看或设置配置选项。
+查看或设置配置选项。支持项目级配置（`.drift/config.json`）和全局配置（`~/.drift/global.json`）。
 
 ```bash
 drift config <key>              # 查看配置值
-drift config <key> <value>      # 设置配置值
-drift config --list             # 列出所有配置
-drift config --unset <key>      # 清除配置值
+drift config <key> <value>      # 设置项目配置值
+drift config --global <key> <value>  # 设置全局配置值
+drift config --list             # 列出所有配置（含全局、项目、同步、远程）
+drift config --global --list    # 仅列出全局配置
+drift config --unset <key>      # 清除项目配置值
+drift config --global --unset <key>  # 清除全局配置值
 ```
+
+**配置层级：**
+
+| 层级 | 文件 | 说明 |
+|------|------|------|
+| 全局 | `~/.drift/global.json` | 所有项目共享，存储默认用户身份和远程同步根配置 |
+| 项目 | `.drift/config.json` | 当前项目专用，覆盖全局配置 |
+
+> **说明**：`user.name` 和 `user.email` 优先使用项目配置，若项目未设置则回退到全局配置。`drift init` 时输入的用户信息默认保存到全局配置，所有项目共享。
 
 **支持的配置项：**
 
-| 配置键 | 说明 | 默认值 |
-|--------|------|--------|
-| `user.name` | 用户姓名（用于版本记录） | 空 |
-| `user.email` | 用户邮箱（用于版本记录） | 空 |
-| `core.default_branch` | 默认分支名称 | `main` |
-| `core.autocrlf` | CRLF 换行符归一化策略 | `""`（不做转换） |
+| 配置键 | 作用域 | 说明 | 默认值 |
+|--------|--------|------|--------|
+| `user.name` | 全局/项目 | 用户姓名（用于版本记录） | 空 |
+| `user.email` | 全局/项目 | 用户邮箱（用于版本记录） | 空 |
+| `core.default_branch` | 项目 | 默认分支名称 | `main` |
+| `core.autocrlf` | 项目 | CRLF 换行符归一化策略 | `""`（不做转换） |
+| `sync.enabled` | 项目 | 是否启用自动同步 | `false` |
+| `sync.auto_after_save` | 项目 | 保存后是否自动触发同步 | `true` |
+| `remote.protocol` | 全局 | 远程协议（local/webdav/ftp/sftp/smb） | 空 |
+| `remote.host` | 全局 | 远程主机地址 | 空 |
+| `remote.port` | 全局 | 远程主机端口 | 空 |
+| `remote.path` | 全局 | 远程根路径 | 空 |
+| `remote.username` | 全局 | 远程登录用户名 | 空 |
+| `remote.tls` | 全局 | 是否启用 TLS | `false` |
+
+> **注意**：`remote.*` 配置项通常通过 `drift sync remote` 命令设置，直接用 `drift config` 设置时会提示使用 `drift sync remote`。
 
 **示例：**
 
 ```bash
-drift config user.name "张三"
-drift config user.email "zhangsan@example.com"
-drift config user.name        # 查看当前用户名
-drift config --list            # 列出所有配置
-drift config --unset user.email  # 清除邮箱配置
-drift config core.default_branch dev  # 设置默认分支为 dev
-drift config core.autocrlf true       # 开启 CRLF 归一化
-drift config core.autocrlf input      # 仅 add 时 CRLF→LF
+# 用户身份（推荐在 drift init 时设置到全局）
+drift config --global user.name "张三"
+drift config --global user.email "zhangsan@example.com"
+drift config user.name "项目专用名"     # 项目级覆盖全局
+drift config user.name                  # 查看当前用户名（项目优先，回退全局）
+
+# 列出配置
+drift config --list                     # 列出所有配置（全局+项目+同步+远程）
+drift config --global --list            # 仅列出全局配置
+
+# 清除配置
+drift config --unset user.email         # 清除项目级邮箱（回退到全局）
+drift config --global --unset user.email  # 清除全局邮箱
+
+# 核心配置
+drift config core.default_branch dev    # 设置默认分支为 dev
+drift config core.autocrlf true         # 开启 CRLF 归一化
+drift config core.autocrlf input        # 仅 add 时 CRLF→LF
+
+# 同步配置
+drift config sync.enabled true          # 启用同步
+drift config sync.enabled               # 查看同步是否启用
+drift config --unset sync.enabled       # 关闭同步
 ```
 
 ---
@@ -622,43 +749,82 @@ drift config core.autocrlf input      # 仅 add 时 CRLF→LF
 
 ### `drift sync` ✅
 
-管理远程同步，支持本地路径（NAS 挂载、网盘同步文件夹）和 WebDAV 服务器（Nextcloud、ownCloud、群晖 NAS、坚果云等）。
+管理远程同步，支持五种协议：本地路径（NAS 挂载、网盘同步文件夹）、WebDAV（Nextcloud、ownCloud、群晖 NAS、坚果云等）、FTP/FTPS、SFTP（SSH 文件传输）、SMB/CIFS（Windows 共享、NAS）。
 
 #### `drift sync remote` — 配置远程根路径
 
+支持两种配置方式：**显式协议模式**（推荐，字段统一清晰）和**简写自动检测模式**（兼容旧用法）。
+
 ```bash
+# ===== 显式协议模式（推荐）=====
+
 # 本地路径（NAS 挂载、网盘文件夹）
+drift sync remote --protocol local --path /mnt/nas
+
+# WebDAV 服务器
+drift sync remote --protocol webdav --host cloud.example.com --path /dav \
+  --tls --user alice --pass secret
+
+# FTP/FTPS 服务器
+drift sync remote --protocol ftp --host nas.local --path /backups \
+  --user alice --pass secret
+drift sync remote --protocol ftp --host nas.local --tls --insecure   # FTPS, 自签证书
+
+# SFTP 服务器（密码或密钥认证）
+drift sync remote --protocol sftp --host nas.local --path /backups --user alice
+drift sync remote --protocol sftp --host nas.local --user alice --key-path ~/.ssh/id_rsa
+
+# SMB/CIFS 共享（Windows 共享、NAS）
+drift sync remote --protocol smb --host nas.local --share photos --user alice
+
+# ===== 简写自动检测模式（兼容）=====
+
+# 本地路径
 drift sync remote /mnt/nas
 
-# WebDAV 服务器（交互式输入用户名密码）
-drift sync remote https://cloud.example.com/dav
-
-# WebDAV 服务器（通过参数指定凭据）
+# WebDAV URL
 drift sync remote https://cloud.example.com/dav --user alice --pass secret
 
-# 查看当前远程
-drift sync remote --show
+# ===== 管理远程配置 =====
 
-# 取消远程配置
-drift sync remote --unset
+drift sync remote --show    # 查看当前远程
+drift sync remote --unset   # 移除远程配置
 ```
 
 **参数：**
 
 | 参数 | 说明 |
 |------|------|
-| `<path>` | 本地目录路径（NAS 挂载点等） |
-| `<url>` | WebDAV 服务器 URL（`http://` 或 `https://` 开头） |
-| `--user` | WebDAV 用户名（可选） |
-| `--pass` | WebDAV 密码（可选） |
+| `--protocol` | 协议类型：`local` / `webdav` / `ftp` / `sftp` / `smb` |
+| `--host` | 远程服务器主机名或 IP（网络协议必填） |
+| `--port` | 远程服务器端口（0 = 协议默认值） |
+| `--path` | 远程基础路径（网络协议）或本地文件系统路径（local 协议，必填） |
+| `--user` | 认证用户名（可选，未提供则交互式输入） |
+| `--pass` | 认证密码（可选，未提供则交互式输入） |
+| `--tls` | 启用 TLS（FTPS、HTTPS） |
+| `--insecure` | 跳过 TLS 证书验证（自签证书场景） |
+| `--share` | SMB 共享名（smb 协议必填） |
+| `--key-path` | SFTP 私钥路径（密钥认证，提供后可免输密码） |
 | `--show` | 显示当前远程配置 |
 | `--unset` | 清除远程配置 |
+
+**协议默认端口：**
+
+| 协议 | 默认端口 | TLS 支持 |
+|------|---------|---------|
+| `local` | — | — |
+| `webdav` | 80 (http) / 443 (https) | `--tls` |
+| `ftp` | 21 | `--tls`（FTPS） |
+| `sftp` | 22 | 内置 SSH 加密 |
+| `smb` | 445 | — |
 
 **行为：**
 - 远程根路径是全局配置，存在 `~/.drift/global.json`，所有项目共享
 - 本地路径模式：验证目录存在，远程项目以子目录形式存储（可直接浏览文件）
-- WebDAV 模式：项目以子目录形式存储在 WebDAV 服务器上
-- WebDAV 凭据通过参数或交互式输入提供
+- 网络协议模式：项目以子目录形式存储在远程服务器上
+- 凭据通过参数或交互式输入提供；SFTP 支持密钥认证（`--key-path`）
+- SFTP 使用 TOFU（Trust On First Use）主机密钥验证，记录在 `~/.drift/known_hosts`
+- WebDAV/FTP 的 `--insecure` 标志用于自签证书场景
 
 #### `drift sync enable` — 为当前项目启用同步
 
@@ -689,7 +855,7 @@ drift sync status
 ```
 Project:  my-novel
 Remote:   /mnt/nas/my-novel
-Type:     local
+Protocol: local
 Enabled:  yes
 Last sync: 2026-06-24T10:30:00Z
 ```
@@ -751,14 +917,17 @@ drift clone my-novel my-book
 
 | 组件 | 说明 |
 |------|------|
-| **Transport 接口** | 抽象传输层，支持本地文件系统和 WebDAV |
+| **Transport 接口** | 抽象传输层，统一 `Get`/`Put`/`Stat`/`Delete`/`List`/`Close` 接口 |
 | **LocalTransport** | 本地文件系统传输（NAS 挂载、网盘文件夹） |
-| **WebDAVTransport** | WebDAV 协议传输（Nextcloud、ownCloud 等） |
-| **Engine** | 同步引擎，处理增量同步和删除追踪 |
+| **WebDAVTransport** | WebDAV 协议传输（Nextcloud、ownCloud、群晖、坚果云等） |
+| **FTPTransport** | FTP/FTPS 协议传输 |
+| **SFTPTransport** | SFTP 协议传输（SSH 文件传输，支持密码/密钥认证） |
+| **SMBTransport** | SMB/CIFS 协议传输（Windows 共享、NAS） |
+| **Engine** | 同步引擎，处理增量同步、删除追踪和冲突检测 |
 | **Manifest** | 远程清单文件（`.drift/sync/manifest.json`），记录文件状态 |
 | **项目 ID** | UUID，在 `drift init` 时生成，用于跨设备识别同一项目 |
 
-**自动同步：** 启用同步后，每次 `drift save` 会自动触发后台同步。如果同步失败（如 NAS 未连接），会显示警告但不影响 save 操作，下次 save 时自动重试。
+**自动同步：** 启用同步后，每次 `drift save` 会自动触发后台同步。如果同步失败（如 NAS 未连接），会重试 2 次后显示警告，但不影响 save 操作，下次 save 时自动重试。
 
 ---
 
@@ -768,6 +937,24 @@ drift clone my-novel my-book
 drift --help
 drift <命令> --help
 ```
+
+### `drift version` ✅
+
+显示 drift 版本号。
+
+```bash
+drift version
+```
+
+**输出示例：**
+
+```
+drift dev
+```
+
+> 版本号通过构建时 ldflags 注入（如 `0.1.0`）；开发环境（`go run` / `go test`）显示为 `dev`。
+
+---
 
 ## 退出码
 

@@ -262,7 +262,7 @@ func TestStore_GetTree_NotFound(t *testing.T) {
 // TestStore_PutCommit_GetCommit verifies commit storage and retrieval.
 func TestStore_PutCommit_GetCommit(t *testing.T) {
 	s := newTestStore(t)
-	c := core.NewCommit("v1", "msg", "", "main",
+	c := core.NewCommit("msg", "", "main",
 		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		core.Signature{Name: "alice", Email: "a@b.c"})
 	if err := s.PutCommit(c); err != nil {
@@ -291,14 +291,14 @@ func TestStore_GetCommit_NotFound(t *testing.T) {
 func TestStore_ListCommits_OrderedByTimestamp(t *testing.T) {
 	s := newTestStore(t)
 	treeHash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	older := core.NewCommit("v1", "old", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	older := core.NewCommit("old", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
 	if err := s.PutCommit(older); err != nil {
 		t.Fatal(err)
 	}
 
 	// Sleep to ensure newer commit has a strictly later timestamp.
 	time.Sleep(2 * time.Millisecond)
-	newer := core.NewCommit("v2", "new", older.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	newer := core.NewCommit("new", older.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
 	if err := s.PutCommit(newer); err != nil {
 		t.Fatal(err)
 	}
@@ -310,11 +310,11 @@ func TestStore_ListCommits_OrderedByTimestamp(t *testing.T) {
 	if len(commits) != 2 {
 		t.Fatalf("expected 2 commits, got %d", len(commits))
 	}
-	if commits[0].ID != "v1" {
-		t.Fatalf("expected v1 first, got %q", commits[0].ID)
+	if commits[0].ID != older.ID {
+		t.Fatalf("expected older first, got %q", commits[0].ID)
 	}
-	if commits[1].ID != "v2" {
-		t.Fatalf("expected v2 second, got %q", commits[1].ID)
+	if commits[1].ID != newer.ID {
+		t.Fatalf("expected newer second, got %q", commits[1].ID)
 	}
 }
 
@@ -799,7 +799,7 @@ func TestStore_RenameRef_SameName(t *testing.T) {
 func TestStore_SaveCommitTransaction(t *testing.T) {
 	s := newTestStore(t)
 	treeHash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	c := core.NewCommit("v1", "test commit", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	c := core.NewCommit("test commit", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
 
 	idx := &core.Index{}
 	idx.Add(core.IndexEntry{
@@ -819,8 +819,8 @@ func TestStore_SaveCommitTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCommit failed: %v", err)
 	}
-	if got.ID != "v1" {
-		t.Fatalf("commit ID = %q, want v1", got.ID)
+	if got.ID != c.ID {
+		t.Fatalf("commit ID = %q, want %q", got.ID, c.ID)
 	}
 
 	// Branch ref should point to the commit hash.
@@ -850,12 +850,12 @@ func TestStore_ListBranchCommits(t *testing.T) {
 	s := newTestStore(t)
 	treeHash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-	c1 := core.NewCommit("v1", "first", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	c1 := core.NewCommit("first", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
 	_ = s.PutCommit(c1)
 	_ = s.SaveRef("main", c1.Hash)
 
 	time.Sleep(2 * time.Millisecond)
-	c2 := core.NewCommit("v2", "second", c1.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	c2 := core.NewCommit("second", c1.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
 	_ = s.PutCommit(c2)
 	_ = s.SaveRef("main", c2.Hash)
 
@@ -866,11 +866,11 @@ func TestStore_ListBranchCommits(t *testing.T) {
 	if len(commits) != 2 {
 		t.Fatalf("expected 2 commits, got %d", len(commits))
 	}
-	if commits[0].ID != "v2" {
-		t.Fatalf("first commit = %q, want v2 (newest first)", commits[0].ID)
+	if commits[0].ID != c2.ID {
+		t.Fatalf("first commit = %q, want %q (newest first)", commits[0].ID, c2.ID)
 	}
-	if commits[1].ID != "v1" {
-		t.Fatalf("second commit = %q, want v1", commits[1].ID)
+	if commits[1].ID != c1.ID {
+		t.Fatalf("second commit = %q, want %q", commits[1].ID, c1.ID)
 	}
 }
 

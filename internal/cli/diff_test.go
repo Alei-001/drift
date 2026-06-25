@@ -117,7 +117,7 @@ func TestDiff_AgainstSpecificVersion_Summary(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("note.txt", "v1 content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Create v2
 	h.WriteFile("note.txt", "v2 content")
@@ -127,7 +127,7 @@ func TestDiff_AgainstSpecificVersion_Summary(t *testing.T) {
 	h.WriteFile("note.txt", "worktree content")
 
 	// Diff against v1 (summary)
-	output, err := h.RunDiff("v1")
+	output, err := h.RunDiff(id1)
 	h.AssertNoError(err)
 	h.AssertContains(output, "M note.txt")
 	h.AssertContains(output, "Summary:")
@@ -140,7 +140,7 @@ func TestDiff_AgainstSpecificVersion_Patch(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("note.txt", "v1 content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Create v2
 	h.WriteFile("note.txt", "v2 content")
@@ -150,7 +150,7 @@ func TestDiff_AgainstSpecificVersion_Patch(t *testing.T) {
 	h.WriteFile("note.txt", "worktree content")
 
 	// Diff against v1 (patch)
-	output, err := h.RunDiffWithPatch("v1")
+	output, err := h.RunDiffWithPatch(id1)
 	h.AssertNoError(err)
 	h.AssertContains(output, "-v1 content")
 	h.AssertContains(output, "+worktree content")
@@ -163,13 +163,13 @@ func TestDiff_BetweenVersions_Summary(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("note.txt", "v1 content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Create v2
 	h.WriteFile("note.txt", "v2 content")
-	h.AddAndSave([]string{"note.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"note.txt"}, "v2")
 
-	output, err := h.RunDiff("v1", "v2")
+	output, err := h.RunDiff(id1, id2)
 	h.AssertNoError(err)
 	h.AssertContains(output, "M note.txt")
 	h.AssertContains(output, "Summary:")
@@ -182,13 +182,13 @@ func TestDiff_BetweenVersions_Patch(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("note.txt", "v1 content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Create v2
 	h.WriteFile("note.txt", "v2 content")
-	h.AddAndSave([]string{"note.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"note.txt"}, "v2")
 
-	output, err := h.RunDiffWithPatch("v1", "v2")
+	output, err := h.RunDiffWithPatch(id1, id2)
 	h.AssertNoError(err)
 	h.AssertContains(output, "-v1 content")
 	h.AssertContains(output, "+v2 content")
@@ -337,14 +337,14 @@ func TestDiff_BetweenVersions_FileFilter(t *testing.T) {
 
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
 
 	h.WriteFile("a.txt", "v2 a")
 	h.WriteFile("b.txt", "v2 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
 
 	// Diff only a.txt between v1 and v2
-	output, err := h.RunDiffWithFile("a.txt", "v1", "v2")
+	output, err := h.RunDiffWithFile("a.txt", id1, id2)
 	h.AssertNoError(err)
 	h.AssertContains(output, "M a.txt")
 	h.AssertNotContains(output, "b.txt")
@@ -358,15 +358,15 @@ func TestDiff_BetweenVersions_DirectoryFilter(t *testing.T) {
 	h.WriteFile("src/main.go", "v1 main")
 	h.WriteFile("src/lib/helper.go", "v1 helper")
 	h.WriteFile("docs/guide.md", "v1 guide")
-	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v1")
+	id1 := h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v1")
 
 	h.WriteFile("src/main.go", "v2 main")
 	h.WriteFile("src/lib/helper.go", "v2 helper")
 	h.WriteFile("docs/guide.md", "v2 guide")
-	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v2")
+	id2 := h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v2")
 
 	// Diff only src/ between v1 and v2
-	output, err := h.RunDiffWithFile("src/", "v1", "v2")
+	output, err := h.RunDiffWithFile("src/", id1, id2)
 	h.AssertNoError(err)
 	h.AssertContains(output, "M src/main.go")
 	h.AssertContains(output, "M src/lib/helper.go")
@@ -380,14 +380,14 @@ func TestDiff_NormalizedPath(t *testing.T) {
 
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
 
 	h.WriteFile("a.txt", "v2 a")
 	h.WriteFile("b.txt", "v2 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
 
 	// Diff with ./ prefix should normalize and match
-	output, err := h.RunDiffWithFile("./a.txt", "v1", "v2")
+	output, err := h.RunDiffWithFile("./a.txt", id1, id2)
 	h.AssertNoError(err)
 	h.AssertContains(output, "M a.txt")
 	h.AssertNotContains(output, "b.txt")
@@ -400,15 +400,15 @@ func TestDiff_DashDashSeparator(t *testing.T) {
 
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
 
 	h.WriteFile("a.txt", "v2 a")
 	h.WriteFile("b.txt", "v2 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
 
 	// drift diff v1 v2 -- a.txt
 	// Cobra passes post-"--" args as part of args slice.
-	output, err := h.RunDiff("v1", "v2", "a.txt")
+	output, err := h.RunDiff(id1, id2, "a.txt")
 	h.AssertNoError(err)
 	h.AssertContains(output, "M a.txt")
 	h.AssertNotContains(output, "b.txt")
@@ -422,15 +422,15 @@ func TestDiff_DashDashMultipleFiles(t *testing.T) {
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
 	h.WriteFile("c.txt", "v1 c")
-	h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v1")
 
 	h.WriteFile("a.txt", "v2 a")
 	h.WriteFile("b.txt", "v2 b")
 	h.WriteFile("c.txt", "v2 c")
-	h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v2")
 
 	// drift diff v1 v2 -- a.txt c.txt
-	output, err := h.RunDiff("v1", "v2", "a.txt", "c.txt")
+	output, err := h.RunDiff(id1, id2, "a.txt", "c.txt")
 	h.AssertNoError(err)
 	h.AssertContains(output, "M a.txt")
 	h.AssertContains(output, "M c.txt")
@@ -444,17 +444,17 @@ func TestDiff_ShortFlag(t *testing.T) {
 
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
 
 	h.WriteFile("a.txt", "v2 a")
 	h.WriteFile("b.txt", "v2 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
+	id2 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
 
 	// Use -f shorthand by setting the flag directly
 	h.SetupSharedState()
 	diffFilePaths = []string{"a.txt"}
 	output, err := CaptureOutput(func() error {
-		return diffCmd.RunE(diffCmd, []string{"v1", "v2"})
+		return diffCmd.RunE(diffCmd, []string{id1, id2})
 	})
 	h.AssertNoError(err)
 	h.AssertContains(output, "M a.txt")
@@ -469,15 +469,15 @@ func TestDiff_DashDashDirectory(t *testing.T) {
 	h.WriteFile("src/main.go", "v1 main")
 	h.WriteFile("src/lib/helper.go", "v1 helper")
 	h.WriteFile("docs/guide.md", "v1 guide")
-	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v1")
+	id1 := h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v1")
 
 	h.WriteFile("src/main.go", "v2 main")
 	h.WriteFile("src/lib/helper.go", "v2 helper")
 	h.WriteFile("docs/guide.md", "v2 guide")
-	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v2")
+	id2 := h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "docs/guide.md"}, "v2")
 
 	// drift diff v1 v2 -- src/
-	output, err := h.RunDiff("v1", "v2", "src/")
+	output, err := h.RunDiff(id1, id2, "src/")
 	h.AssertNoError(err)
 	h.AssertContains(output, "M src/main.go")
 	h.AssertContains(output, "M src/lib/helper.go")

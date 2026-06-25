@@ -2,221 +2,101 @@ package cli
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
-	"github.com/drift/drift/internal/core"
+	"github.com/drift/drift/internal/repo"
 	"github.com/spf13/cobra"
 )
 
-var (
-	logOneline bool
-	logAll     bool
-	logCount   int
-)
+// Operation log records user actions that modify repository state, enabling
+// an undo safety net. This is a friendly version of Git's reflog — instead
+// of exposing HEAD@{1} syntax, users see a readable history and can undo
+// the most recent operation.
+//
+// Storage: .drift/operations.log (append-only JSON lines)
+//
+// Each entry records:
+//   - Timestamp
+//   - Operation type (save, switch, branch-delete, branch-rename, restore)
+//   - Description (human-readable)
+//   - Before/after state of affected refs
+
+// logLimit is the default number of entries shown by `drift log`.
+// A value of 0 means "show all entries".
+var logLimit int
+
+// logPorcelain switches `drift log` to machine-readable output.
+var logPorcelain bool
 
 var logCmd = &cobra.Command{
-	Use:   "log [branch] [--all]",
-	Short: "Show commit history",
-	Long: `Show commit history for the current or specified branch.
+	Use:   "log",
+	Short: "Show recent operations (for undo reference)",
+	Long: `Show recent operations that modified repository state, newest first.
+Useful as a safety net before running undo.
 
-By default, shows the history of the current branch. Use --all to show
-commits across all branches (deduplicated, sorted by time, newest first).
-Use --oneline for a compact one-line-per-commit format.
+By default, shows the 20 most recent operations. Use -n to change the limit,
+or -n 0 to show all entries.
 
 Examples:
-  drift log              # full history of current branch
-  drift log feature      # history of feature branch
-  drift log --all        # history across all branches
-  drift log --oneline    # one line per commit
-  drift log -n 5         # last 5 commits
-  drift log --all --oneline  # compact view of all branches`,
-	Args: cobra.MaximumNArgs(1),
+  drift log              # show recent operations (default 20)
+  drift log -n 10        # show 10 most recent operations
+  drift log -n 0         # show all operations
+  drift log --porcelain  # machine-readable output`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		branch := ""
-		if len(args) == 1 {
-			branch = args[0]
-		}
-
-		if logAll {
-			return logAllBranches()
-		}
-
-		userSpecifiedBranch := branch != ""
-
-		if branch == "" {
-			branch, _ = sharedStore.GetRef("HEAD")
-			if branch == "" {
-				branch = "main"
-			}
-		}
-
-		// Validate explicitly-specified branch exists. The default branch
-		// (from HEAD) may not have a ref yet on a fresh project with no
-		// commits, so we don't validate it — ListBranchCommits will simply
-		// return empty in that case.
-		if userSpecifiedBranch {
-			if _, err := sharedStore.GetRef(branch); err != nil {
-				return fmt.Errorf("branch not found: %s", branch)
-			}
-		}
-
-		commits, err := sharedStore.ListBranchCommits(branch)
+		entries, err := sharedRepo.ReadOperations()
 		if err != nil {
-			return fmt.Errorf("failed to read branch history: %w", err)
+			return err
 		}
 
-		if len(commits) == 0 {
-			fmt.Printf("No commits on branch %s yet\n", branch)
+		if len(entries) == 0 {
+			fmt.Println("No operations recorded yet")
 			return nil
 		}
 
-		// ListBranchCommits returns newest-first already.
-		if logCount > 0 && logCount < len(commits) {
-			commits = commits[:logCount]
+		// limit == 0 means show all; otherwise cap at limit.
+		limit := logLimit
+		if limit == 0 {
+			limit = len(entries)
+		}
+		if len(entries) < limit {
+			limit = len(entries)
 		}
 
-		printCommits(commits, logOneline)
+		if logPorcelain {
+			printOperationsPorcelain(entries, limit)
+			return nil
+		}
+
+		fmt.Printf("Recent operations (newest first):\n\n")
+
+		for i := 0; i < limit; i++ {
+			e := entries[i]
+			fmt.Printf("  %d. %s  %s  %s\n", i+1, e.Timestamp.Format("2006-01-02 15:04:05"), e.Op, e.Desc)
+		}
+
+		shown := limit
+		if logLimit == 0 {
+			// All entries shown.
+		} else if len(entries) > shown {
+			fmt.Printf("\n(%d more older operations — not shown, use -n 0 to show all)\n", len(entries)-shown)
+		}
+
+		fmt.Println("\nTo undo the most recent operation: drift undo")
 		return nil
 	},
 }
 
-// logAllBranches shows commits across all branches, deduplicated and
-// sorted by timestamp (newest first). This replaces the former `list` command.
-func logAllBranches() error {
-	if !sharedStore.IsInitialized() {
-		return fmt.Errorf("not a drift project (run 'drift init')")
-	}
-
-	refs, err := sharedStore.ListRefs()
-	if err != nil {
-		return fmt.Errorf("failed to list refs: %w", err)
-	}
-
-	seen := make(map[string]bool)
-	var all []struct {
-		id      string
-		branch  string
-		ts      int64
-		message string
-	}
-
-	// Collect and sort branch names for deterministic iteration order, so
-	// that a commit reachable from multiple branches always gets the same
-	// branch label across runs.
-	branches := make([]string, 0, len(refs))
-	for branchName := range refs {
-		branches = append(branches, branchName)
-	}
-	sort.Strings(branches)
-	for _, branchName := range branches {
-		if branchName == "HEAD" || strings.HasPrefix(branchName, "names/") {
-			continue
-		}
-		commits, err := sharedStore.ListBranchCommits(branchName)
-		if err != nil {
-			continue
-		}
-		for _, c := range commits {
-			if seen[c.Hash] {
-				continue
-			}
-			seen[c.Hash] = true
-			all = append(all, struct {
-				id      string
-				branch  string
-				ts      int64
-				message string
-			}{
-				id:      c.ID,
-				branch:  c.Branch,
-				ts:      c.Timestamp.UnixMilli(),
-				message: c.Message,
-			})
-		}
-	}
-
-	if len(all) == 0 {
-		fmt.Println("No versions yet")
-		return nil
-	}
-
-	sort.Slice(all, func(i, j int) bool {
-		return all[i].ts > all[j].ts
-	})
-
-	if logCount > 0 && logCount < len(all) {
-		all = all[:logCount]
-	}
-
-	if logOneline {
-		for _, c := range all {
-			msg := c.message
-			if msg == "" {
-				msg = "(no message)"
-			}
-			if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
-				msg = msg[:idx]
-			}
-			if len(msg) > 60 {
-				msg = msg[:57] + "..."
-			}
-			fmt.Printf("%s [%s] %s\n", c.id, c.branch, msg)
-		}
-		return nil
-	}
-
-	fmt.Println("Version history:")
-	fmt.Println()
-	for _, c := range all {
-		msg := c.message
-		if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
-			msg = msg[:idx] + "..."
-		}
-		fmt.Printf("  %s  [%s]  %s\n", c.id, c.branch, msg)
-	}
-	return nil
-}
-
-// printCommits renders commits in either detailed or oneline format.
-func printCommits(commits []*core.Commit, oneline bool) {
-	if oneline {
-		for _, c := range commits {
-			msg := c.Message
-			if msg == "" {
-				msg = "(no message)"
-			}
-			if idx := strings.IndexByte(msg, '\n'); idx >= 0 {
-				msg = msg[:idx]
-			}
-			if len(msg) > 60 {
-				msg = msg[:57] + "..."
-			}
-			fmt.Printf("%s [%s] %s\n", c.ID, c.Branch, msg)
-		}
-		return
-	}
-
-	for i, c := range commits {
-		if i > 0 {
-			fmt.Println()
-		}
-		fmt.Printf("commit %s\n", c.Hash)
-		fmt.Printf("Version: %s\n", c.ID)
-		fmt.Printf("Branch:  %s\n", c.Branch)
-		fmt.Printf("Date:    %s\n", c.Timestamp.Format("2006-01-02 15:04:05"))
-		if c.Author.Name != "" {
-			fmt.Printf("Author:  %s <%s>\n", c.Author.Name, c.Author.Email)
-		}
-		if c.Message != "" {
-			fmt.Printf("\n    %s\n", c.Message)
-		}
+// printOperationsPorcelain outputs operations in a machine-readable format:
+// <index>\t<timestamp>\t<op>\t<desc>
+func printOperationsPorcelain(entries []repo.OperationEntry, limit int) {
+	for i := 0; i < limit; i++ {
+		e := entries[i]
+		fmt.Printf("%d\t%s\t%s\t%s\n", i+1, e.Timestamp.Format("2006-01-02 15:04:05"), e.Op, e.Desc)
 	}
 }
 
 func init() {
-	logCmd.Flags().BoolVar(&logOneline, "oneline", false, "Show one line per commit")
-	logCmd.Flags().BoolVar(&logAll, "all", false, "Show commits across all branches")
-	logCmd.Flags().IntVarP(&logCount, "number", "n", 0, "Limit number of commits")
+	logCmd.Flags().IntVarP(&logLimit, "number", "n", 20, "Number of entries to show (0 = all)")
+	logCmd.Flags().BoolVar(&logPorcelain, "porcelain", false, "Machine-readable output")
 	rootCmd.AddCommand(logCmd)
 }

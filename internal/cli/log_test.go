@@ -5,139 +5,74 @@ import (
 	"testing"
 )
 
-// TC-LOG-001: Basic log output with commits
-func TestLog_Basic(t *testing.T) {
+// TC-LOG-001: log shows recent operations with default limit
+func TestLog_DefaultLimit(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
-	h.WriteFile("note.txt", "first version")
-	h.AddAndSave([]string{"note.txt"}, "first commit")
+	// Create 3 saves → 3 operations.
+	for i := 1; i <= 3; i++ {
+		h.WriteFile("f.txt", "content"+string(rune('0'+i)))
+		h.AddAndSave([]string{"f.txt"}, "")
+	}
 
-	h.WriteFile("note.txt", "second version")
-	h.AddAndSave([]string{"note.txt"}, "second commit")
-
-	output, err := h.RunLog()
+	output, err := h.RunLog(20) // default
 	h.AssertNoError(err)
-	h.AssertContains(output, "Version: v2")
-	h.AssertContains(output, "Version: v1")
-	h.AssertContains(output, "first commit")
-	h.AssertContains(output, "second commit")
-	h.AssertContains(output, "Branch:  main")
+	h.AssertContains(output, "Recent operations")
+	// Should list 3 numbered entries.
+	if got := strings.Count(output, "save"); got < 3 {
+		t.Errorf("expected at least 3 'save' occurrences, got %d\noutput:\n%s", got, output)
+	}
 }
 
-// TC-LOG-002: Log oneline mode
-func TestLog_Oneline(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "first commit")
-
-	h.WriteFile("note.txt", "updated")
-	h.AddAndSave([]string{"note.txt"}, "second commit")
-
-	output, err := h.RunLogOneline()
-	h.AssertNoError(err)
-	h.AssertContains(output, "v2 [main] second commit")
-	h.AssertContains(output, "v1 [main] first commit")
-}
-
-// TC-LOG-003: Log with limit (-n)
-func TestLog_Limit(t *testing.T) {
+// TC-LOG-002: log -n limits the number of entries shown
+func TestLog_LimitN(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
 	for i := 1; i <= 5; i++ {
-		fname := "f" + string(rune('0'+i)) + ".txt"
-		h.WriteFile(fname, "content")
-		h.AddAndSave([]string{fname}, "")
+		h.WriteFile("f.txt", "content"+string(rune('0'+i)))
+		h.AddAndSave([]string{"f.txt"}, "")
 	}
 
-	output, err := h.RunLogLimit(3)
+	output, err := h.RunLog(2)
 	h.AssertNoError(err)
+	// Count numbered list entries "  N. " — should be exactly 2.
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	versionLines := 0
+	numbered := 0
 	for _, line := range lines {
-		if strings.Contains(line, "Version:") {
-			versionLines++
+		if strings.Contains(line, ". ") && (strings.Contains(line, "save") || strings.Contains(line, "switch")) {
+			numbered++
 		}
 	}
-	if versionLines != 3 {
-		t.Errorf("expected 3 version lines with -n 3, got %d", versionLines)
+	if numbered != 2 {
+		t.Errorf("expected 2 numbered entries with -n 2, got %d\noutput:\n%s", numbered, output)
 	}
+	h.AssertContains(output, "more older operations")
 }
 
-// TC-LOG-004: Log specific branch
-func TestLog_SpecificBranch(t *testing.T) {
+// TC-LOG-003: log -n 0 shows all entries
+func TestLog_ShowAll(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
-	h.WriteFile("main.txt", "main content")
-	h.AddAndSave([]string{"main.txt"}, "main commit")
+	for i := 1; i <= 25; i++ {
+		h.WriteFile("f.txt", "content"+string(rune('0'+i)))
+		h.AddAndSave([]string{"f.txt"}, "")
+	}
 
-	_, err := h.RunBranch("feature")
+	output, err := h.RunLog(0)
 	h.AssertNoError(err)
-	_, err = h.RunSwitch("feature")
-	h.AssertNoError(err)
-	h.WriteFile("feat.txt", "feature content")
-	h.AddAndSave([]string{"feat.txt"}, "feature commit")
-
-	output, err := h.RunLog("main")
-	h.AssertNoError(err)
-	h.AssertContains(output, "main commit")
-	h.AssertNotContains(output, "feature commit")
+	// With -n 0, no "more older operations" hint should appear.
+	h.AssertNotContains(output, "more older operations")
 }
 
-// TC-LOG-005: Log with no commits
-func TestLog_NoCommits(t *testing.T) {
+// TC-LOG-004: log with no operations
+func TestLog_Empty(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
-	output, err := h.RunLog()
+	output, err := h.RunLog(20)
 	h.AssertNoError(err)
-	h.AssertContains(output, "No commits on branch main yet")
-}
-
-// TC-LOG-006: Log oneline with no message
-func TestLog_OnelineNoMessage(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "")
-
-	output, err := h.RunLogOneline()
-	h.AssertNoError(err)
-	h.AssertContains(output, "v1 [main] (no message)")
-}
-
-// TC-LOG-007: Log oneline truncates long messages
-func TestLog_OnelineLongMessage(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	longMsg := strings.Repeat("x", 100)
-	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, longMsg)
-
-	output, err := h.RunLogOneline()
-	h.AssertNoError(err)
-	h.AssertContains(output, "...")
-}
-
-// TC-LOG-008: Log branch inherits parent commits
-func TestLog_BranchInheritsParent(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1 on main")
-
-	_, err := h.RunBranch("child")
-	h.AssertNoError(err)
-
-	// child branch inherits main's commit, so log shows it
-	output, err := h.RunLog("child")
-	h.AssertNoError(err)
-	h.AssertContains(output, "v1 on main")
+	h.AssertContains(output, "No operations recorded yet")
 }

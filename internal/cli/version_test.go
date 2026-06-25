@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -17,7 +15,8 @@ func TestSave_WithoutMessage(t *testing.T) {
 
 	output, err := h.RunSave("")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 
 	// Verify commit exists
 	if h.VersionCount() != 1 {
@@ -36,76 +35,8 @@ func TestSave_WithMessage(t *testing.T) {
 
 	output, err := h.RunSave("first chapter")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1: first chapter")
-}
-
-// TC-LOG-004: Filter by branch name (formerly TestList_FilterByBranch)
-func TestLog_FilterByBranch(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	// Create v1 on main
-	h.WriteFile("main.txt", "main content")
-	h.AddAndSave([]string{"main.txt"}, "v1")
-
-	// Create feature branch with v1
-	_, err := h.RunBranch("feature")
-	h.AssertNoError(err)
-	_, err = h.RunSwitch("feature")
-	h.AssertNoError(err)
-	h.WriteFile("feat.txt", "feature content")
-	h.AddAndSave([]string{"feat.txt"}, "v1")
-
-	// Log only main branch
-	output, err := h.RunLog("main")
-	h.AssertNoError(err)
-	h.AssertContains(output, "Version: v1")
-	h.AssertContains(output, "Branch:  main")
-	h.AssertNotContains(output, "feature")
-}
-
-// TC-LOG-005: Log nonexistent branch errors (formerly TestList_NonexistentBranch)
-func TestLog_NonexistentBranch(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
-
-	_, err := h.RunLog("nonexistent")
-	h.AssertError(err)
-}
-
-// TC-LOG-006: Deduplicate commits across branches with --all (formerly TestList_DeduplicateAcrossBranches)
-func TestLog_AllDeduplicateAcrossBranches(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	h.WriteFile("shared.txt", "shared")
-	h.AddAndSave([]string{"shared.txt"}, "v1 on main")
-
-	_, err := h.RunBranch("duplicate")
-	h.AssertNoError(err)
-	_, err = h.RunSwitch("duplicate")
-	h.AssertNoError(err)
-
-	// Switch back to main
-	_, err = h.RunSwitch("main")
-	h.AssertNoError(err)
-
-	// Log --all should show v1 only once
-	output, err := h.RunLogAll()
-	h.AssertNoError(err)
-	// Count occurrences of "v1 on main" - should appear exactly once
-	count := 0
-	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, "v1 on main") {
-			count++
-		}
-	}
-	if count > 1 {
-		t.Errorf("commit should appear once, appeared %d times", count)
-	}
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1+": first chapter")
 }
 
 // TC-SAVE-006: Prevent empty commit (same tree hash as parent)
@@ -169,7 +100,8 @@ func TestSave_SpecialCharsInMessage(t *testing.T) {
 	h.AssertNoError(err)
 	output, err := h.RunSave("line1\nline2\nline3")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v3")
+	id3 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id3)
 }
 
 // TC-SAVE-004: Version number auto-increment
@@ -208,7 +140,7 @@ func TestSave_StatusCleanAfterSave(t *testing.T) {
 }
 
 // TC-SAVE-010: save --all auto-stages changes before saving
-func TestSave_AllAutoStages(t *testing.T) {
+func TestSave_AllAutoStage(t *testing.T) {
 	h := NewTestHelper(t)
 	h.InitProject()
 
@@ -223,7 +155,8 @@ func TestSave_AllAutoStages(t *testing.T) {
 	// save --all should auto-stage both files and create v2
 	output, err := h.RunSaveAll("auto stage")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v2: auto stage")
+	id2 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id2+": auto stage")
 	// Both files should appear in the saved list.
 	h.AssertContains(output, "a.txt")
 	h.AssertContains(output, "b.txt")
@@ -249,63 +182,4 @@ func TestSave_AllNoChanges(t *testing.T) {
 	// No modifications — save --all should fail with nothing to save.
 	_, err := h.RunSaveAll("nothing")
 	h.AssertError(err)
-}
-
-// TC-LOG-007: Show version history with --all (formerly TestList_ShowHistory)
-func TestLog_AllShowHistory(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	// Create 3 versions
-	h.WriteFile("f1.txt", "v1")
-	h.AddAndSave([]string{"f1.txt"}, "v1")
-
-	h.WriteFile("f2.txt", "v2")
-	h.AddAndSave([]string{"f2.txt"}, "v2")
-
-	h.WriteFile("f3.txt", "v3")
-	h.AddAndSave([]string{"f3.txt"}, "v3")
-
-	output, err := h.RunLogAll()
-	h.AssertNoError(err)
-	h.AssertContains(output, "Version history:")
-	h.AssertContains(output, "v3")
-	h.AssertContains(output, "v2")
-	h.AssertContains(output, "v1")
-}
-
-// TC-LOG-008: No versions yet with --all (formerly TestList_NoVersions)
-func TestLog_AllNoVersions(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	output, err := h.RunLogAll()
-	h.AssertNoError(err)
-	h.AssertContains(output, "No versions yet")
-}
-
-// TC-LOG-009: Version without message with --all (formerly TestList_NoMessage)
-func TestLog_AllNoMessage(t *testing.T) {
-	h := NewTestHelper(t)
-	h.InitProject()
-
-	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "")
-
-	output, err := h.RunLogAll()
-	h.AssertNoError(err)
-	h.AssertContains(output, "v1")
-	// When message is empty, the line should end with the branch (no trailing message).
-	// Format: "  v1  [main]  <message>"
-	// Use regex to extract the message part after the branch.
-	re := regexp.MustCompile(`v\d+\s+\[.*?\]\s*(.*)`)
-	for _, line := range strings.Split(output, "\n") {
-		m := re.FindStringSubmatch(line)
-		if m != nil {
-			msg := strings.TrimSpace(m[1])
-			if msg != "" {
-				t.Errorf("expected empty message, got %q in line %q", msg, line)
-			}
-		}
-	}
 }

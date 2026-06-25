@@ -20,11 +20,11 @@ func TestErr_UninitializedSave(t *testing.T) {
 	h.AssertError(err)
 }
 
-// TC-ERR-003: Uninitialized log --all
-func TestErr_UninitializedLogAll(t *testing.T) {
+// TC-ERR-003: Uninitialized history --all
+func TestErr_UninitializedHistoryAll(t *testing.T) {
 	h := NewTestHelper(t)
 
-	_, err := h.RunLogAll()
+	_, err := h.RunHistoryAll()
 	h.AssertError(err)
 }
 
@@ -64,7 +64,8 @@ func TestEdge_EmptyFile(t *testing.T) {
 
 	output, err = h.RunSave("empty file")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 
 	// Verify blob exists
 	if h.VersionCount() != 1 {
@@ -85,7 +86,8 @@ func TestEdge_FilenameWithSpaces(t *testing.T) {
 
 	output, err = h.RunSave("spaces")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 }
 
 // TC-EDGE-003: Chinese filename
@@ -101,7 +103,8 @@ func TestEdge_ChineseFilename(t *testing.T) {
 
 	output, err = h.RunSave("chinese")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 }
 
 // TC-EDGE-004: Deep nested directory
@@ -117,7 +120,8 @@ func TestEdge_DeepNestedDirectory(t *testing.T) {
 
 	output, err = h.RunSave("deep nesting")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 }
 
 // TC-EDGE-005: Many files
@@ -136,7 +140,8 @@ func TestEdge_ManyFiles(t *testing.T) {
 
 	output, err = h.RunSave("100 files")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 }
 
 // TC-EDGE-006: Same content different filenames
@@ -154,7 +159,8 @@ func TestEdge_SameContentDifferentNames(t *testing.T) {
 
 	output, err := h.RunSave("same content")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Saved version v1")
+	id1 := h.ExtractSaveID(output)
+	h.AssertContains(output, "Saved version "+id1)
 
 	// Both files should be tracked
 	output, err = h.RunStatus()

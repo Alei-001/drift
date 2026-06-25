@@ -14,10 +14,10 @@ func TestExport_ToDirectory(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "hello world")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	outputDir := filepath.Join(h.Dir, "output")
-	output, err := h.RunExport("v1", "-o", outputDir)
+	output, err := h.RunExport(id1, "-o", outputDir)
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 1 file(s)")
 
@@ -36,10 +36,10 @@ func TestExport_ToZip(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	outputFile := filepath.Join(h.Dir, "output.zip")
-	output, err := h.RunExport("v1", "-o", outputFile, "-f", "zip")
+	output, err := h.RunExport(id1, "-o", outputFile, "-f", "zip")
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 1 file(s)")
 
@@ -55,10 +55,10 @@ func TestExport_ToTarGz(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	outputFile := filepath.Join(h.Dir, "output.tar.gz")
-	output, err := h.RunExport("v1", "-o", outputFile, "-f", "tar")
+	output, err := h.RunExport(id1, "-o", outputFile, "-f", "tar")
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 1 file(s)")
 
@@ -74,9 +74,9 @@ func TestExport_MissingOutput(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
-	_, err := h.RunExport("v1")
+	_, err := h.RunExport(id1)
 	h.AssertError(err)
 }
 
@@ -96,13 +96,13 @@ func TestExport_DirAlreadyExists(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Create output directory
 	outputDir := filepath.Join(h.Dir, "output")
 	os.MkdirAll(outputDir, 0755)
 
-	_, err := h.RunExport("v1", "-o", outputDir)
+	_, err := h.RunExport(id1, "-o", outputDir)
 	h.AssertError(err)
 }
 
@@ -112,13 +112,13 @@ func TestExport_ZipAlreadyExists(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Create the zip file first
 	zipPath := filepath.Join(h.Dir, "output.zip")
 	os.WriteFile(zipPath, []byte("dummy"), 0644)
 
-	_, err := h.RunExport("v1", "-o", zipPath, "-f", "zip")
+	_, err := h.RunExport(id1, "-o", zipPath, "-f", "zip")
 	h.AssertError(err)
 }
 
@@ -128,13 +128,13 @@ func TestExport_TarGzAlreadyExists(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Create the tar.gz file first
 	tarPath := filepath.Join(h.Dir, "output.tar.gz")
 	os.WriteFile(tarPath, []byte("dummy"), 0644)
 
-	_, err := h.RunExport("v1", "-o", tarPath, "-f", "tar")
+	_, err := h.RunExport(id1, "-o", tarPath, "-f", "tar")
 	h.AssertError(err)
 }
 
@@ -146,10 +146,10 @@ func TestExport_SingleFile(t *testing.T) {
 	h.WriteFile("src/main.go", "package main")
 	h.WriteFile("src/util.go", "package util")
 	h.WriteFile("README.md", "readme")
-	h.AddAndSave([]string{"src/main.go", "src/util.go", "README.md"}, "v1")
+	id1 := h.AddAndSave([]string{"src/main.go", "src/util.go", "README.md"}, "v1")
 
 	outputDir := filepath.Join(h.Dir, "output")
-	output, err := h.RunExport("v1", "-o", outputDir, "src/main.go")
+	output, err := h.RunExport(id1, "-o", outputDir, "src/main.go")
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 1 file(s)")
 
@@ -173,10 +173,10 @@ func TestExport_Directory(t *testing.T) {
 	h.WriteFile("src/main.go", "package main")
 	h.WriteFile("src/lib/helper.go", "package lib")
 	h.WriteFile("README.md", "readme")
-	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "README.md"}, "v1")
+	id1 := h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "README.md"}, "v1")
 
 	outputDir := filepath.Join(h.Dir, "output")
-	output, err := h.RunExport("v1", "-o", outputDir, "src/")
+	output, err := h.RunExport(id1, "-o", outputDir, "src/")
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 2 file(s)")
 
@@ -201,10 +201,10 @@ func TestExport_MultiplePaths(t *testing.T) {
 	h.WriteFile("src/util.go", "package util")
 	h.WriteFile("docs/guide.md", "guide")
 	h.WriteFile("README.md", "readme")
-	h.AddAndSave([]string{"src/main.go", "src/util.go", "docs/guide.md", "README.md"}, "v1")
+	id1 := h.AddAndSave([]string{"src/main.go", "src/util.go", "docs/guide.md", "README.md"}, "v1")
 
 	outputDir := filepath.Join(h.Dir, "output")
-	output, err := h.RunExport("v1", "-o", outputDir, "src/main.go", "docs/")
+	output, err := h.RunExport(id1, "-o", outputDir, "src/main.go", "docs/")
 	h.AssertNoError(err)
 	h.AssertContains(output, "Exported 2 file(s)")
 
@@ -228,10 +228,10 @@ func TestExport_PathNotFound(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "content")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	outputDir := filepath.Join(h.Dir, "output")
-	_, err := h.RunExport("v1", "-o", outputDir, "nonexistent.txt")
+	_, err := h.RunExport(id1, "-o", outputDir, "nonexistent.txt")
 	h.AssertError(err)
 }
 
@@ -242,7 +242,7 @@ func TestRestore_ToVersion(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("a.txt", "v1 content")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
 	// Create v2 with modified file and new file
 	h.WriteFile("a.txt", "v2 content")
@@ -250,9 +250,9 @@ func TestRestore_ToVersion(t *testing.T) {
 	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
 
 	// Restore to v1
-	output, err := h.RunRestore("v1")
+	output, err := h.RunRestore(id1)
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 
 	// Verify a.txt has v1 content
 	content := h.ReadFile("a.txt")
@@ -273,7 +273,7 @@ func TestRestore_StagedChangesNoForce(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("a.txt", "v1")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
 	// Stage a change
 	h.WriteFile("a.txt", "staged")
@@ -281,7 +281,7 @@ func TestRestore_StagedChangesNoForce(t *testing.T) {
 	h.AssertNoError(err)
 
 	// Restore should fail without --force
-	_, err = h.RunRestore("v1")
+	_, err = h.RunRestore(id1)
 	h.AssertError(err)
 }
 
@@ -292,7 +292,7 @@ func TestRestore_StagedChangesForce(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("a.txt", "v1")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
 	// Create v2
 	h.WriteFile("a.txt", "v2")
@@ -304,9 +304,9 @@ func TestRestore_StagedChangesForce(t *testing.T) {
 	h.AssertNoError(err)
 
 	// Restore should succeed with --force
-	output, err := h.RunRestore("v1", "--force")
+	output, err := h.RunRestore(id1, "--force")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 }
 
 // TC-RESTORE-005: Restore with autocrlf=true converts LF→CRLF on Windows
@@ -316,14 +316,14 @@ func TestRestore_AutoCRLF_LFtoCRLF(t *testing.T) {
 
 	// Create file with LF line endings (as stored internally)
 	h.WriteFile("note.txt", "line1\nline2\nline3\n")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// Enable autocrlf
 	h.Config.Core.AutoCRLF = "true"
 	h.SetupSharedState()
 
 	// Restore
-	_, err := h.RunRestore("v1", "--force")
+	_, err := h.RunRestore(id1, "--force")
 	h.AssertNoError(err)
 
 	data, err := os.ReadFile(filepath.Join(h.Dir, "note.txt"))
@@ -351,12 +351,12 @@ func TestRestore_AutoCRLF_Off_PreservesLF(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("note.txt", "line1\nline2\nline3\n")
-	h.AddAndSave([]string{"note.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"note.txt"}, "v1")
 
 	// autocrlf is off by default
 	h.SetupSharedState()
 
-	_, err := h.RunRestore("v1", "--force")
+	_, err := h.RunRestore(id1, "--force")
 	h.AssertNoError(err)
 
 	data, err := os.ReadFile(filepath.Join(h.Dir, "note.txt"))
@@ -386,11 +386,12 @@ func TestRestore_AutoCRLF_RoundTrip(t *testing.T) {
 	h.AssertNoError(err)
 
 	// Save
-	_, err = h.RunSave("v1")
+	saveOut, err := h.RunSave("v1")
 	h.AssertNoError(err)
+	id1 := h.ExtractSaveID(saveOut)
 
 	// Restore
-	_, err = h.RunRestore("v1", "--force")
+	_, err = h.RunRestore(id1, "--force")
 	h.AssertNoError(err)
 
 	data, err := os.ReadFile(filepath.Join(h.Dir, "note.txt"))
@@ -416,15 +417,15 @@ func TestRestore_PreserveUntracked(t *testing.T) {
 
 	// Create v1
 	h.WriteFile("a.txt", "v1")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
 	// Create untracked file
 	h.WriteFile("untracked.txt", "keep me")
 
 	// Restore v1 (should not delete untracked)
-	output, err := h.RunRestore("v1")
+	output, err := h.RunRestore(id1)
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 
 	// Verify untracked file preserved
 	if !h.FileExists("untracked.txt") {
@@ -444,7 +445,7 @@ func TestRestore_SingleFile(t *testing.T) {
 	// v1: a.txt and b.txt
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
 
 	// v2: modify both files
 	h.WriteFile("a.txt", "v2 a")
@@ -452,9 +453,9 @@ func TestRestore_SingleFile(t *testing.T) {
 	h.AddAndSave([]string{"a.txt", "b.txt"}, "v2")
 
 	// Partial restore: only restore a.txt to v1
-	output, err := h.RunRestore("v1", "a.txt")
+	output, err := h.RunRestore(id1, "a.txt")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 
 	// a.txt should be v1 content
 	if got := h.ReadFile("a.txt"); got != "v1 a" {
@@ -475,7 +476,7 @@ func TestRestore_Directory(t *testing.T) {
 	h.WriteFile("src/main.go", "v1 main")
 	h.WriteFile("src/lib/helper.go", "v1 helper")
 	h.WriteFile("README.md", "v1 readme")
-	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "README.md"}, "v1")
+	id1 := h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "README.md"}, "v1")
 
 	// v2: modify all files
 	h.WriteFile("src/main.go", "v2 main")
@@ -484,9 +485,9 @@ func TestRestore_Directory(t *testing.T) {
 	h.AddAndSave([]string{"src/main.go", "src/lib/helper.go", "README.md"}, "v2")
 
 	// Partial restore: only restore src/ to v1
-	output, err := h.RunRestore("v1", "src/")
+	output, err := h.RunRestore(id1, "src/")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 
 	// src/ files should be v1 content
 	if got := h.ReadFile("src/main.go"); got != "v1 main" {
@@ -508,7 +509,7 @@ func TestRestore_PartialDelete(t *testing.T) {
 
 	// v1: src/main.go
 	h.WriteFile("src/main.go", "v1 main")
-	h.AddAndSave([]string{"src/main.go"}, "v1")
+	id1 := h.AddAndSave([]string{"src/main.go"}, "v1")
 
 	// v2: add src/util.go
 	h.WriteFile("src/util.go", "v2 util")
@@ -516,9 +517,9 @@ func TestRestore_PartialDelete(t *testing.T) {
 
 	// Partial restore: restore src/ to v1
 	// src/util.go should be deleted (not in v1)
-	output, err := h.RunRestore("v1", "src/")
+	output, err := h.RunRestore(id1, "src/")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 	h.AssertContains(output, "1 deleted")
 
 	// src/main.go should be v1 content
@@ -539,7 +540,7 @@ func TestRestore_PartialPreservesOutside(t *testing.T) {
 	// v1: a.txt, b.txt
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
 
 	// v2: modify a.txt, delete b.txt, add c.txt
 	h.WriteFile("a.txt", "v2 a")
@@ -547,7 +548,7 @@ func TestRestore_PartialPreservesOutside(t *testing.T) {
 	h.AddAndSave([]string{"a.txt", "c.txt"}, "v2")
 
 	// Partial restore: only restore a.txt to v1
-	_, err := h.RunRestore("v1", "a.txt")
+	_, err := h.RunRestore(id1, "a.txt")
 	h.AssertNoError(err)
 
 	// a.txt should be v1 content
@@ -569,9 +570,9 @@ func TestRestore_PartialPathNotFound(t *testing.T) {
 	h.InitProject()
 
 	h.WriteFile("a.txt", "v1 a")
-	h.AddAndSave([]string{"a.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt"}, "v1")
 
-	_, err := h.RunRestore("v1", "nonexistent.txt")
+	_, err := h.RunRestore(id1, "nonexistent.txt")
 	h.AssertError(err)
 }
 
@@ -584,7 +585,7 @@ func TestRestore_MultiplePaths(t *testing.T) {
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
 	h.WriteFile("c.txt", "v1 c")
-	h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v1")
 
 	// v2: modify all
 	h.WriteFile("a.txt", "v2 a")
@@ -593,9 +594,9 @@ func TestRestore_MultiplePaths(t *testing.T) {
 	h.AddAndSave([]string{"a.txt", "b.txt", "c.txt"}, "v2")
 
 	// Partial restore: restore a.txt and c.txt to v1
-	output, err := h.RunRestore("v1", "a.txt", "c.txt")
+	output, err := h.RunRestore(id1, "a.txt", "c.txt")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 	h.AssertContains(output, "2 modified")
 
 	// a.txt and c.txt should be v1 content
@@ -619,7 +620,7 @@ func TestRestore_PartialDirtyCheckScoped(t *testing.T) {
 	// v1: a.txt, b.txt
 	h.WriteFile("a.txt", "v1 a")
 	h.WriteFile("b.txt", "v1 b")
-	h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
+	id1 := h.AddAndSave([]string{"a.txt", "b.txt"}, "v1")
 
 	// v2: modify both
 	h.WriteFile("a.txt", "v2 a")
@@ -633,9 +634,9 @@ func TestRestore_PartialDirtyCheckScoped(t *testing.T) {
 
 	// Partial restore of a.txt should succeed without --force
 	// because b.txt's staged changes are outside the filter.
-	output, err := h.RunRestore("v1", "a.txt")
+	output, err := h.RunRestore(id1, "a.txt")
 	h.AssertNoError(err)
-	h.AssertContains(output, "Restored to v1")
+	h.AssertContains(output, "Restored to "+id1)
 
 	// a.txt should be v1 content
 	if got := h.ReadFile("a.txt"); got != "v1 a" {

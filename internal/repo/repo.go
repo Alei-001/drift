@@ -17,10 +17,11 @@ import (
 // Repository is the central business-logic type, combining store, worktree,
 // and config. CLI commands and future GUI code both delegate to it.
 type Repository struct {
-	Store  *storage.Store
-	WT     *worktree.Worktree
-	Config *config.Config
-	Dir    string
+	Store     *storage.Store
+	WT        *worktree.Worktree
+	Config    *config.Config
+	Dir       string
+	GlobalUser config.UserConfig // default author from global config
 }
 
 // New creates a Repository from the given store, config, and working directory.
@@ -34,6 +35,22 @@ func New(store *storage.Store, cfg *config.Config, dir string) *Repository {
 		WT:     worktree.New(store, dir, autoCRLF),
 		Config: cfg,
 		Dir:    dir,
+	}
+}
+
+// Author resolves the commit author: project-level config takes precedence,
+// falling back to the global user config. Returns empty strings if neither
+// is set.
+func (r *Repository) Author() core.Signature {
+	if r.Config != nil && r.Config.User.Name != "" {
+		return core.Signature{
+			Name:  r.Config.User.Name,
+			Email: r.Config.User.Email,
+		}
+	}
+	return core.Signature{
+		Name:  r.GlobalUser.Name,
+		Email: r.GlobalUser.Email,
 	}
 }
 
@@ -73,8 +90,8 @@ func (r *Repository) FindCommitByHash(hash string) (*core.Commit, error) {
 }
 
 // ResolveCommit resolves a version specifier to a commit.
-// Supported formats: name alias, branch name, version ID (e.g. "v1"),
-// branch/version (e.g. "main/v1").
+// Supported formats: name alias, branch name, commit ID (abbreviated hash),
+// hash prefix, branch/ID (e.g. "main/a1b2c3d4").
 func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 	// Check version name alias first.
 	if hash := r.ResolveName(version); hash != "" {
@@ -97,7 +114,7 @@ func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 			return nil, err
 		}
 		for _, c := range commits {
-			if c.ID == versionID && c.Branch == branchName {
+			if c.Branch == branchName && matchCommitID(c, versionID) {
 				return c, nil
 			}
 		}
@@ -113,7 +130,7 @@ func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 		return nil, fmt.Errorf("failed to resolve %q as branch: %w", version, err)
 	}
 
-	// Try version ID in current branch, then any branch.
+	// Try commit ID / hash prefix in current branch, then any branch.
 	currentBranch := r.CurrentBranch()
 
 	currentCommits, err := r.Store.ListBranchCommits(currentBranch)
@@ -121,7 +138,7 @@ func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 		return nil, fmt.Errorf("failed to list commits for branch %s: %w", currentBranch, err)
 	}
 	for _, c := range currentCommits {
-		if c.ID == version {
+		if matchCommitID(c, version) {
 			return c, nil
 		}
 	}
@@ -137,14 +154,18 @@ func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 		if branchName == "HEAD" || branchName == currentBranch {
 			continue
 		}
+		// Skip version name aliases — they are not branches.
+		if strings.HasPrefix(branchName, "names/") {
+			continue
+		}
 		commits, err := r.Store.ListBranchCommits(branchName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to list commits for branch %s: %w", branchName, err)
 		}
 		for _, c := range commits {
-			if c.ID == version {
+			if matchCommitID(c, version) {
 				if found != nil {
-					return nil, fmt.Errorf("ambiguous version %s: exists in both %s and %s branches. Use branch/version format (e.g., %s/%s)",
+					return nil, fmt.Errorf("ambiguous version %s: exists in both %s and %s branches. Use branch/ID format (e.g., %s/%s)",
 						version, foundBranch, c.Branch, foundBranch, version)
 				}
 				found = c
@@ -158,6 +179,21 @@ func (r *Repository) ResolveCommit(version string) (*core.Commit, error) {
 	}
 
 	return nil, fmt.Errorf("version not found: %s", version)
+}
+
+// matchCommitID checks whether a commit matches a version specifier.
+// Matches by exact ID, ID prefix (abbreviated hash), or full hash prefix.
+func matchCommitID(c *core.Commit, version string) bool {
+	if c.ID == version {
+		return true
+	}
+	if strings.HasPrefix(c.ID, version) {
+		return true
+	}
+	if strings.HasPrefix(c.Hash, version) {
+		return true
+	}
+	return false
 }
 
 // HasPendingStagedChanges checks whether the index has entries that differ

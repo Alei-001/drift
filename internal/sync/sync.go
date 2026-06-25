@@ -21,6 +21,10 @@ import (
 // GlobalConfig stores drift-wide settings that apply across all projects.
 // It lives at ~/.drift/global.json so it survives project cloning.
 type GlobalConfig struct {
+	// User holds the default author identity for all projects. Individual
+	// projects can override this via their project-level config.
+	User GlobalUserConfig `json:"user,omitempty"`
+
 	// Protocol specifies the remote storage protocol.
 	// Valid values: "local", "webdav", "ftp", "sftp", "smb".
 	Protocol string `json:"protocol,omitempty"`
@@ -57,6 +61,13 @@ type GlobalConfig struct {
 	// KeyPath is the path to a private key file for SSH authentication
 	// (SFTP protocol only). If empty, password authentication is used.
 	KeyPath string `json:"key_path,omitempty"`
+}
+
+// GlobalUserConfig holds the default author identity stored in the global
+// config (~/.drift/global.json). Project-level config takes precedence.
+type GlobalUserConfig struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // globalConfigPathOverride allows tests to redirect the global config to a

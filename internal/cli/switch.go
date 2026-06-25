@@ -11,7 +11,7 @@ var switchCmd = &cobra.Command{
 	Use:   "switch <branch>",
 	Short: "Switch to another branch",
 	Long: `Switch to another branch and restore the working tree.
-Pending changes are automatically saved and can be recovered with 'drift restore-wip'.
+Pending changes are automatically saved and can be recovered with 'drift wip restore'.
 Use --force to discard changes without saving.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,7 +37,7 @@ Use --force to discard changes without saving.`,
 		}
 
 		if result.WIPSaved {
-			fmt.Printf("Saved pending changes for %s (use 'drift restore-wip' to recover)\n", currentBranch)
+			fmt.Printf("Saved pending changes for %s (use 'drift wip restore' to recover)\n", currentBranch)
 		}
 		if result.Created {
 			fmt.Printf("Created branch: %s\n", branch)

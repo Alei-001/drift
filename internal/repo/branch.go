@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/drift/drift/internal/storage"
 )
 
-// ListBranches returns all branch names (excluding HEAD), sorted alphabetically.
+// ListBranches returns all branch names (excluding HEAD and names/* aliases),
+// sorted alphabetically.
 func (r *Repository) ListBranches() ([]string, error) {
 	refs, err := r.Store.ListRefs()
 	if err != nil {
@@ -18,6 +20,10 @@ func (r *Repository) ListBranches() ([]string, error) {
 	var names []string
 	for name := range refs {
 		if name == "HEAD" {
+			continue
+		}
+		// Skip version name aliases (stored under the "names/" namespace).
+		if strings.HasPrefix(name, "names/") {
 			continue
 		}
 		names = append(names, name)

@@ -10,9 +10,15 @@ type Signature struct {
 	Email string
 }
 
+// CommitIDLen is the number of hex characters used for the user-facing
+// commit ID (an abbreviated form of the full hash, similar to Git's
+// short hash). 8 hex chars = 4 bytes = ~4 billion possibilities, which
+// is more than enough to avoid collisions in a single project.
+const CommitIDLen = 8
+
 type Commit struct {
 	Hash      string
-	ID        string
+	ID        string // abbreviated hash (first CommitIDLen hex chars)
 	Message   string
 	Timestamp time.Time
 	Parent    string
@@ -21,9 +27,11 @@ type Commit struct {
 	Author    Signature
 }
 
-func NewCommit(id, message, parent, branch, treeHash string, author Signature) *Commit {
+// NewCommit creates a commit with an abbreviated-hash ID derived from
+// the commit's content hash. The ID is the first CommitIDLen hex
+// characters of Hash, similar to Git's short hash.
+func NewCommit(message, parent, branch, treeHash string, author Signature) *Commit {
 	c := &Commit{
-		ID:        id,
 		Message:   message,
 		Timestamp: time.Now(),
 		Parent:    parent,
@@ -32,6 +40,7 @@ func NewCommit(id, message, parent, branch, treeHash string, author Signature) *
 		Author:    author,
 	}
 	c.Hash = c.calculateHash()
+	c.ID = c.Hash[:CommitIDLen]
 	return c
 }
 
@@ -42,13 +51,11 @@ func (c *Commit) isRoot() bool {
 }
 
 func (c *Commit) calculateHash() string {
-	// Issue 29: use UnixMilli (matches the stored precision) instead of
-	// RFC3339 (second-level). RFC3339 would collide for two commits in the
-	// same second with otherwise identical fields.
-	// Use \x00 as a separator between fields to prevent ambiguity (e.g.
-	// ID="a",Message="b" vs ID="ab",Message="" producing the same hash).
+	// The ID is derived from the hash, so it is NOT included in the
+	// hash computation (that would be circular).
+	// Use \x00 as a separator between fields to prevent ambiguity.
 	sep := "\x00"
-	data := c.ID + sep + c.Message + sep + strconv.FormatInt(c.Timestamp.UnixMilli(), 10) + sep + c.Parent + sep + c.Branch + sep + c.TreeHash + sep + c.Author.Name + sep + c.Author.Email
+	data := c.Message + sep + strconv.FormatInt(c.Timestamp.UnixMilli(), 10) + sep + c.Parent + sep + c.Branch + sep + c.TreeHash + sep + c.Author.Name + sep + c.Author.Email
 	return CalculateHash([]byte(data))
 }
 

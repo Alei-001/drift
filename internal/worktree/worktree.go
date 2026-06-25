@@ -282,3 +282,58 @@ func (w *Worktree) LoadParentTreeHashes() (map[string]string, error) {
 	}
 	return m, nil
 }
+
+// CleanUntracked removes untracked files from the working tree.
+// Returns the list of removed file paths.
+// If dryRun is true, returns the list without deleting.
+// If includeDirs is true, also removes empty directories after file deletion.
+func (w *Worktree) CleanUntracked(includeDirs bool, dryRun bool) ([]string, error) {
+	var idx core.Index
+	if err := w.Store.LoadIndex(&idx); err != nil {
+		return nil, fmt.Errorf("failed to load index: %w", err)
+	}
+
+	// Build a set of tracked paths (index + last commit).
+	tracked := make(map[string]bool)
+	for _, e := range idx.Entries {
+		tracked[e.Path] = true
+	}
+	parentHashes, err := w.LoadParentTreeHashes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load parent tree hashes: %w", err)
+	}
+	for p := range parentHashes {
+		tracked[p] = true
+	}
+
+	// Walk the working dir and find untracked files.
+	var untracked []string
+	err = core.WalkWorkingDirWithIgnore(w.Root, w.Root, func(path string, info os.FileInfo) error {
+		if !tracked[path] {
+			untracked = append(untracked, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if dryRun {
+		return untracked, nil
+	}
+
+	// Delete untracked files.
+	for _, p := range untracked {
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(p))
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to remove %s: %w", p, err)
+		}
+	}
+
+	// Optionally remove empty directories left behind by the deletions.
+	if includeDirs {
+		w.CleanEmptyDirs(untracked)
+	}
+
+	return untracked, nil
+}

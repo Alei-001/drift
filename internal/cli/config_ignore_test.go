@@ -152,8 +152,8 @@ func TestConfig_List(t *testing.T) {
 
 	output, err := h.RunConfig("--list")
 	h.AssertNoError(err)
-	h.AssertContains(output, "user.name=Bob")
-	h.AssertContains(output, "user.email=bob@example.com")
+	h.AssertContains(output, "user.name (project)=Bob")
+	h.AssertContains(output, "user.email (project)=bob@example.com")
 	h.AssertContains(output, "core.default_branch=")
 }
 

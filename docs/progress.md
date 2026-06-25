@@ -44,7 +44,7 @@
 | Status 类型 | `internal/core/status.go` |
 | 目录遍历 | `internal/core/walker.go` |
 | 变更检测 + 状态计算 | `internal/core/change.go` |
-| `drift add` / `status` / `reset` | `internal/cli/add.go, status.go, reset.go` |
+| `drift add` / `status` / `unstage` | `internal/cli/add.go, status.go, unstage.go` |
 
 ---
 

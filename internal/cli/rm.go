@@ -13,6 +13,7 @@ import (
 var (
 	rmCached    bool
 	rmRecursive bool
+	rmForce     bool
 )
 
 var rmCmd = &cobra.Command{
@@ -57,13 +58,35 @@ Examples:
 			tracked[p] = true
 		}
 
-		var removed int
+		// Partition paths into tracked (to remove) and untracked (to skip).
+		var toRemove []string
 		var skipped []string
 		for _, p := range paths {
 			if !tracked[p] {
 				skipped = append(skipped, p)
 				continue
 			}
+			toRemove = append(toRemove, p)
+		}
+
+		if len(toRemove) == 0 {
+			if len(skipped) > 0 {
+				return fmt.Errorf("pathspec '%s' did not match any tracked files", strings.Join(skipped, "', '"))
+			}
+			return fmt.Errorf("no tracked files matched")
+		}
+
+		// Confirm before deleting files from the working tree.
+		// --cached only modifies the index, so no confirmation is needed.
+		if !rmCached {
+			if !confirmAction(rmForce, fmt.Sprintf("Delete %d file(s)?", len(toRemove)), toRemove) {
+				fmt.Println("Aborted")
+				return nil
+			}
+		}
+
+		var removed int
+		for _, p := range toRemove {
 			// Remove from index.
 			idx.Remove(p)
 
@@ -78,20 +101,13 @@ Examples:
 			fmt.Printf("Removed: %s\n", p)
 		}
 
-		if removed == 0 {
-			if len(skipped) > 0 {
-				return fmt.Errorf("pathspec '%s' did not match any tracked files", strings.Join(skipped, "', '"))
-			}
-			return fmt.Errorf("no tracked files matched")
-		}
-
 		if err := sharedStore.SaveIndex(&idx); err != nil {
 			return fmt.Errorf("failed to save index: %w", err)
 		}
 
 		// Clean up empty directories left behind by removals.
 		if !rmCached {
-			sharedRepo.WT.CleanEmptyDirs(paths)
+			sharedRepo.WT.CleanEmptyDirs(toRemove)
 		}
 
 		fmt.Printf("Removed %d file(s)\n", removed)
@@ -102,6 +118,7 @@ Examples:
 func init() {
 	rmCmd.Flags().BoolVar(&rmCached, "cached", false, "Remove from index only, keep the working tree file")
 	rmCmd.Flags().BoolVarP(&rmRecursive, "recursive", "r", false, "Allow recursive removal of directories")
+	rmCmd.Flags().BoolVarP(&rmForce, "force", "f", false, "Skip confirmation prompt")
 	rootCmd.AddCommand(rmCmd)
 }
 
