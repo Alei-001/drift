@@ -1,0 +1,256 @@
+package app
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/drift/drift/internal/config"
+	driftsync "github.com/drift/drift/internal/sync"
+)
+
+type SyncStatus struct {
+	Enabled    bool
+	RemoteName string
+	LastSync   string
+}
+
+type SyncRemoteOptions struct {
+	Host              string
+	Port              int
+	Path              string
+	Username          string
+	Password          string
+	TLS               bool
+	InsecureSkipVerify bool
+	Share             string
+	KeyPath           string
+}
+
+func (a *App) SyncEnable() error {
+	if !a.IsInitialized() {
+		return fmt.Errorf("not a drift repository")
+	}
+
+	gcfg, err := driftsync.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	if gcfg.Protocol == "" {
+		return fmt.Errorf("no remote configured (run 'drift sync remote --protocol <...>' first)")
+	}
+
+	remoteName := filepath.Base(a.dir)
+
+	if a.config.Sync.ProjectID == "" {
+		a.config.Sync.ProjectID = driftsync.NewProjectID()
+	}
+	a.config.Sync.Enabled = true
+	a.config.Sync.RemoteName = remoteName
+
+	if err := config.SaveConfig(a.store.DriftDir(), a.config); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	if gcfg.Protocol == "local" {
+		remoteDir := filepath.Join(gcfg.Path, remoteName)
+		if err := os.MkdirAll(remoteDir, 0755); err != nil {
+			return fmt.Errorf("failed to create remote project dir: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (a *App) SyncDisable() error {
+	if !a.IsInitialized() {
+		return fmt.Errorf("not a drift repository")
+	}
+
+	a.config.Sync.Enabled = false
+	if err := config.SaveConfig(a.store.DriftDir(), a.config); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	return nil
+}
+
+func (a *App) SyncNow() error {
+	if !a.IsInitialized() {
+		return fmt.Errorf("not a drift repository")
+	}
+
+	if !a.config.Sync.Enabled {
+		return fmt.Errorf("sync is not enabled (run 'drift sync enable')")
+	}
+
+	gcfg, err := driftsync.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	if gcfg.Protocol == "" {
+		return fmt.Errorf("no remote configured")
+	}
+
+	remoteName := a.config.Sync.RemoteName
+
+	if gcfg.Protocol == "local" {
+		remoteDir := filepath.Join(gcfg.Path, remoteName)
+		if err := os.MkdirAll(remoteDir, 0755); err != nil {
+			return fmt.Errorf("failed to access remote: %w", err)
+		}
+	}
+
+	transport, err := driftsync.ProjectTransportForConfig(gcfg, remoteName)
+	if err != nil {
+		return fmt.Errorf("failed to connect to remote: %w", err)
+	}
+	defer transport.Close()
+
+	engine := driftsync.NewEngine(transport, a.config.Sync.ProjectID)
+	if _, err := engine.Sync(a.dir); err != nil {
+		return err
+	}
+
+	a.config.Sync.LastSync = time.Now().Format(time.RFC3339)
+	if err := config.SaveConfig(a.store.DriftDir(), a.config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (a *App) SyncStatus() (*SyncStatus, error) {
+	if !a.IsInitialized() {
+		return nil, fmt.Errorf("not a drift repository")
+	}
+
+	return &SyncStatus{
+		Enabled:    a.config.Sync.Enabled,
+		RemoteName: a.config.Sync.RemoteName,
+		LastSync:   a.config.Sync.LastSync,
+	}, nil
+}
+
+func (a *App) SyncEnabled() bool {
+	return a.IsInitialized() && a.config.Sync.Enabled
+}
+
+func (a *App) SyncRemoteSet(protocol string, opts SyncRemoteOptions) error {
+	gcfg := &driftsync.GlobalConfig{
+		Protocol:           protocol,
+		Host:               opts.Host,
+		Port:               opts.Port,
+		Path:               opts.Path,
+		Username:           opts.Username,
+		Password:           opts.Password,
+		TLS:                opts.TLS,
+		InsecureSkipVerify: opts.InsecureSkipVerify,
+		Share:              opts.Share,
+		KeyPath:            opts.KeyPath,
+	}
+
+	if protocol == "local" {
+		abs, err := filepath.Abs(opts.Path)
+		if err != nil {
+			return fmt.Errorf("invalid path: %w", err)
+		}
+		info, err := os.Stat(abs)
+		if err != nil {
+			return fmt.Errorf("cannot access %q: %w", abs, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%q is not a directory", abs)
+		}
+		gcfg.Path = abs
+	}
+
+	return driftsync.SaveGlobalConfig(gcfg)
+}
+
+func (a *App) Clone(remoteName, destDir string) error {
+	gcfg, err := driftsync.LoadGlobalConfig()
+	if err != nil {
+		return err
+	}
+	if gcfg.Protocol == "" {
+		return fmt.Errorf("no remote configured (run 'drift sync remote --protocol <...>' first)")
+	}
+
+	if !filepath.IsAbs(destDir) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		destDir = filepath.Join(cwd, destDir)
+	}
+
+	if info, err := os.Stat(destDir); err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("destination %q exists and is not a directory", destDir)
+		}
+		entries, err := os.ReadDir(destDir)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("destination %q is not empty", destDir)
+		}
+	}
+
+	if gcfg.Protocol == "local" {
+		transport := driftsync.NewLocalTransport(gcfg.Path)
+		defer transport.Close()
+		exists, err := transport.ProjectExists(remoteName)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("project %q not found on remote %s", remoteName, gcfg.Path)
+		}
+		if err := transport.Clone(remoteName, destDir); err != nil {
+			return fmt.Errorf("clone failed: %w", err)
+		}
+	} else {
+		transport, err := driftsync.ProjectTransportForConfig(gcfg, remoteName)
+		if err != nil {
+			return fmt.Errorf("failed to connect to remote: %w", err)
+		}
+		defer transport.Close()
+
+		files, err := transport.List("")
+		if err != nil {
+			return fmt.Errorf("failed to list remote files: %w", err)
+		}
+		if len(files) == 0 {
+			return fmt.Errorf("project %q not found or empty on remote", remoteName)
+		}
+
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return err
+		}
+
+		for _, remotePath := range files {
+			cleaned := filepath.Clean(filepath.FromSlash(remotePath))
+			if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
+				return fmt.Errorf("invalid remote path: %s", remotePath)
+			}
+			localPath := filepath.Join(destDir, filepath.FromSlash(remotePath))
+			if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+				return err
+			}
+			f, err := os.Create(localPath)
+			if err != nil {
+				return err
+			}
+			if err := transport.Get(remotePath, f); err != nil {
+				f.Close()
+				return fmt.Errorf("failed to download %s: %w", remotePath, err)
+			}
+			f.Close()
+		}
+	}
+
+	return nil
+}
