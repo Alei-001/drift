@@ -38,3 +38,7 @@ Thumbs.db
 # docs
 docs/flowchart
 docs/issues
+docs/refactoring/
+
+# Refactoring archive (old code preserved during transition)
+.wastebasket/
