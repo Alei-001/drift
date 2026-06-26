@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -155,6 +157,9 @@ func RemovePath(fullPath string) error {
 // CleanEmptyDirs removes empty directories along the parent chains of the
 // given deleted paths (using forward-slash paths relative to root).
 func (w *Worktree) CleanEmptyDirs(deletedPaths []string) {
+	sort.Slice(deletedPaths, func(i, j int) bool {
+		return strings.Count(deletedPaths[i], "/") > strings.Count(deletedPaths[j], "/")
+	})
 	seen := make(map[string]bool)
 	for _, p := range deletedPaths {
 		dir := filepath.Dir(p)
@@ -172,6 +177,7 @@ func (w *Worktree) CleanEmptyDirs(deletedPaths []string) {
 			if err := os.Remove(fullDir); err != nil {
 				break
 			}
+			delete(seen, filepath.Dir(dir))
 			dir = filepath.Dir(dir)
 		}
 	}
