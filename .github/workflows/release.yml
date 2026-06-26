@@ -26,6 +26,8 @@ jobs:
       - name: Build drift.exe
         shell: pwsh
         run: |
+          go install github.com/akavel/rsrc@latest
+          rsrc -ico assets/icon.ico -arch amd64 -o cmd/drift/rsrc_windows_amd64.syso
           go build `
             -ldflags "-X github.com/drift/drift/internal/cli.version=$env:DRIFT_VERSION -s -w" `
             -o dist/drift.exe `

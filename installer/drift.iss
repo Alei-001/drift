@@ -25,6 +25,7 @@ AppPublisher={#DriftPublisher}
 AppPublisherURL={#DriftURL}
 AppSupportURL={#DriftURL}
 AppUpdatesURL={#DriftURL}
+SetupIconFile=..\assets\icon.ico
 DefaultDirName={autopf}\Drift
 DefaultGroupName=Drift
 DisableProgramGroupPage=yes
