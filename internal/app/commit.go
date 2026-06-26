@@ -80,7 +80,10 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	parentHash := ""
 	if branchCommitCount > 0 {
 		parentHash = branchCommits[0].Hash
-		if branchCommits[0].TreeHash == tree.Hash && !opts.Amend {
+		if branchCommits[0].TreeHash == tree.Hash {
+			if opts.Amend {
+				return nil, fmt.Errorf("nothing to amend (stage changes first with 'drift add')")
+			}
 			return nil, fmt.Errorf("nothing changed since last version (use 'drift add' after modifying files)")
 		}
 	}

@@ -27,7 +27,7 @@
 | `rm` | 删除文件 | ✅ |
 | `mv` | 移动/重命名文件 | ✅ |
 | `tag` | 版本标签 | ✅ |
-| `history` | 操作历史 | ✅ |
+| `reflog` | 操作历史 | ✅ |
 | `undo` | 撤销操作 | ✅ |
 | `wip` | 工作进度管理 | ✅ |
 | `sync` | 远程同步（NAS/WebDAV） | ✅ |
@@ -175,11 +175,9 @@ drift save --all              # 等同于 drift add . + drift save
 
 ```bash
 drift log                    # 当前分支完整历史
-drift log <分支名>            # 指定分支历史
 drift log --all              # 所有分支历史（去重，按时间倒序）
 drift log --oneline          # 单行模式
-drift log -n 5               # 只显示最近 5 条
-drift log main -n 10         # main 分支最近 10 条
+drift log -n 5               # 显示最近 5 条
 drift log --all --oneline    # 所有分支单行模式
 ```
 
@@ -187,10 +185,10 @@ drift log --all --oneline    # 所有分支单行模式
 
 | 参数 | 说明 |
 |------|------|
-| `<分支名>` | 可选，指定要查看的分支（不存在时报错） |
 | `--all` | 显示所有分支的提交（按 hash 去重，按时间倒序） |
 | `--oneline` | 单行模式，简洁显示 |
-| `-n` / `--number` | 限制显示的提交数量 |
+| `-n` / `--number` | 限制显示的提交数量（0 = 全部） |
+| `--porcelain` | 机器可读格式 |
 
 **输出示例（完整模式，单分支）：**
 
@@ -572,14 +570,16 @@ drift tag --delete 初稿             # 删除标签
 
 ## 操作历史命令
 
-### `drift history` ✅
+### `drift reflog` ✅
 
 查看操作历史记录。
 
 ```bash
-drift history                 # 默认显示最近 20 条
-drift history -n 10           # 只显示最近 10 条
-drift history -n 0            # 显示全部操作记录
+drift reflog                  # 默认显示最近 20 条
+drift reflog -n 10            # 只显示最近 10 条
+drift reflog -n 0             # 显示全部操作记录
+drift reflog -v               # 详细模式（显示 ref 变更详情）
+drift reflog --porcelain      # 机器可读格式
 ```
 
 **参数：**
@@ -587,6 +587,8 @@ drift history -n 0            # 显示全部操作记录
 | 参数 | 说明 |
 |------|------|
 | `-n` / `--number` | 显示的条目数量，默认 20；`0` 表示显示全部 |
+| `-v` / `--verbose` | 详细模式，显示 ref 变更详情 |
+| `--porcelain` | 机器可读格式 |
 
 **输出示例：**
 

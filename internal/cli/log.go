@@ -4,62 +4,93 @@ import (
 	"fmt"
 
 	apppkg "github.com/drift/drift/internal/app"
+	"github.com/drift/drift/internal/core"
 	"github.com/spf13/cobra"
 )
 
-// NewLogCmd creates the log subcommand.
+// NewLogCmd creates the log subcommand (commit history).
 func NewLogCmd(application *apppkg.App) *cobra.Command {
 	var (
-		number    int
-		porcelain bool
-		verbose   bool
+		allBranches bool
+		oneline     bool
+		number      int
+		porcelain   bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "log",
-		Short: "Show operation log",
+		Short: "Show commit history",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			operations, err := application.Log(number)
+			commits, err := application.History(apppkg.HistoryOptions{
+				All:   allBranches,
+				Limit: number,
+			})
 			if err != nil {
 				return err
 			}
 
+			tagsByHash := application.TagsByHash()
+
 			if porcelain {
-				formatOperationsPorcelain(operations)
+				formatCommitsPorcelain(commits, tagsByHash)
 			} else {
-				formatOperations(operations, verbose)
+				formatCommits(commits, tagsByHash, oneline)
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().IntVarP(&number, "number", "n", 20, "Limit number of operations (0 = all)")
+	cmd.Flags().BoolVar(&allBranches, "all", false, "Show all branches")
+	cmd.Flags().BoolVar(&oneline, "oneline", false, "Show one line per commit")
+	cmd.Flags().IntVarP(&number, "number", "n", 0, "Limit number of commits (0 = all)")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
-	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output (show ref details)")
 
 	return cmd
 }
 
-// formatOperations displays operations in human-readable format.
-func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
-	for _, op := range operations {
-		fmt.Printf("%s  %-6s  %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, op.Desc)
-		if verbose && len(op.RefChanges) > 0 {
-			for _, change := range op.RefChanges {
-				fmt.Printf("  %s: %s -> %s\n", change.Ref, change.Before, change.After)
+// formatCommits displays commits in human-readable format.
+func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneline bool) {
+	for _, c := range commits {
+		tags := tagsByHash[c.Hash]
+		var tagStr string
+		if len(tags) > 0 {
+			tagStr = fmt.Sprintf(" (%s)", tags[0])
+		}
+
+		id := c.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+
+		if oneline {
+			fmt.Printf("%s%s %s\n", id, tagStr, c.Message)
+		} else {
+			fmt.Printf("commit %s%s\n", c.ID, tagStr)
+			if c.Author.Email != "" {
+				fmt.Printf("Author: %s <%s>\n", c.Author.Name, c.Author.Email)
+			} else {
+				fmt.Printf("Author: %s\n", c.Author.Name)
 			}
+			fmt.Printf("Date: %s\n", c.Timestamp.Format("Mon Jan 2 15:04:05 2006 -0700"))
+			fmt.Printf("Message: %s\n", c.Message)
 		}
 	}
 }
 
-// formatOperationsPorcelain displays operations in machine-readable format.
-func formatOperationsPorcelain(operations []apppkg.OperationEntry) {
-	for _, op := range operations {
-		fmt.Printf("timestamp %s\n", op.Timestamp.Format("2006-01-02T15:04:05Z07:00"))
-		fmt.Printf("op %s\n", op.Op)
-		fmt.Printf("desc %s\n", op.Desc)
-		for _, change := range op.RefChanges {
-			fmt.Printf("ref %s %s %s\n", change.Ref, change.Before, change.After)
+// formatCommitsPorcelain displays commits in machine-readable format.
+func formatCommitsPorcelain(commits []*core.Commit, tagsByHash map[string][]string) {
+	for _, c := range commits {
+		tags := tagsByHash[c.Hash]
+		fmt.Printf("commit %s\n", c.ID)
+		if c.Author.Email != "" {
+			fmt.Printf("author %s <%s>\n", c.Author.Name, c.Author.Email)
+		} else {
+			fmt.Printf("author %s\n", c.Author.Name)
+		}
+		fmt.Printf("date %s\n", c.Timestamp.Format("Mon Jan 2 15:04:05 2006 -0700"))
+		fmt.Printf("message %s\n", c.Message)
+		for _, tag := range tags {
+			fmt.Printf("tag %s\n", tag)
 		}
 		fmt.Println()
 	}
