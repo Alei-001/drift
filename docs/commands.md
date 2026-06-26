@@ -555,7 +555,6 @@ drift diff a1b2c3d4 e5f6a7b8 -p --output diff.txt   # 保存差异到文件
 drift tag <版本> <标签名>       # 为版本设置标签
 drift tag                       # 查看所有标签（无参）
 drift tag list                  # 查看所有标签（显式）
-drift tag --list                # 查看所有标签（--list 标志）
 drift tag --delete <标签名>     # 删除标签
 ```
 

@@ -10,8 +10,7 @@ import (
 // NewTagCmd creates the tag subcommand.
 func NewTagCmd(application *apppkg.App) *cobra.Command {
 	var (
-		listTags   bool
-		deleteTag  string
+		deleteTag string
 	)
 
 	cmd := &cobra.Command{
@@ -27,8 +26,8 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 				return nil
 			}
 
-			// List tags: --list, drift tag (no args), or drift tag list
-			if listTags || len(args) == 0 || (len(args) == 1 && args[0] == "list") {
+			// List tags: drift tag (no args), or drift tag list
+			if len(args) == 0 || (len(args) == 1 && args[0] == "list") {
 				entries, err := application.TagList()
 				if err != nil {
 					return err
@@ -64,7 +63,6 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&listTags, "list", false, "List all tags")
 	cmd.Flags().StringVar(&deleteTag, "delete", "", "Delete a tag")
 
 	return cmd
