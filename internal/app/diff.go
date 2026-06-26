@@ -127,21 +127,12 @@ func (a *App) diffVersions(reader *core.TreeReader, v1, v2 string, filePaths []s
 		return nil, err
 	}
 
-	blobs1, err := reader.ListBlobs(tree1, "")
-	if err != nil {
-		return nil, err
-	}
-	blobs2, err := reader.ListBlobs(tree2, "")
+	changes, err := reader.LazyDiffTrees(tree1, tree2)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(filePaths) > 0 {
-		blobs1 = worktree.FilterBlobs(blobs1, filePaths)
-		blobs2 = worktree.FilterBlobs(blobs2, filePaths)
-	}
-
-	entries, err := a.collectVersionDiffs(blobs1, blobs2)
+	entries, err := a.collectVersionDiffsFromChanges(changes, filePaths)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +146,11 @@ func (a *App) diffVersions(reader *core.TreeReader, v1, v2 string, filePaths []s
 
 func (a *App) collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []string) ([]DiffEntry, error) {
 	var entries []DiffEntry
+
+	// Load index for mtime fast-path: if a file's mtime matches the index entry,
+	// and the hash matches, we can skip re-reading the file entirely.
+	var idx core.Index
+	_ = a.store.LoadIndex(&idx)
 
 	trackedPaths := make(map[string]bool, len(targetBlobs))
 	for _, blob := range targetBlobs {
@@ -177,6 +173,15 @@ func (a *App) collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []str
 				})
 			}
 			continue
+		}
+
+		// Mtime fast-path: if the index has this file with matching mtime,
+		// modification time hasn't changed since we last staged it. Combined
+		// with hash check, this lets us skip re-reading the file.
+		if ie, idxErr := idx.Entry(blob.Path); idxErr == nil {
+			if ie.ModifiedAt.Equal(info.ModTime()) && ie.Hash == blob.Hash {
+				continue // unchanged
+			}
 		}
 
 		// Symlink: compare target string, not file content.
@@ -254,10 +259,6 @@ func (a *App) collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []str
 
 	// Walk working dir for untracked (added) files. Always run, but apply
 	// path filters when present so filtered diffs don't miss new files.
-	var idx core.Index
-	// Non-fatal: index may not exist in a fresh repo; empty index means all
-	// files are untracked, which is correct.
-	_ = a.store.LoadIndex(&idx)
 
 	walkErr := core.WalkWorkingDir(a.dir, func(path string, info os.FileInfo) error {
 		if trackedPaths[path] || idx.Has(path) {
@@ -291,63 +292,61 @@ func (a *App) collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []str
 	return entries, nil
 }
 
-func (a *App) collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) ([]DiffEntry, error) {
+// collectVersionDiffsFromChanges converts DiffChange entries from LazyDiffTrees
+// into DiffEntry results with full content diff. When filePaths is non-empty,
+// only changes matching those paths are included.
+func (a *App) collectVersionDiffsFromChanges(changes []core.DiffChange, filePaths []string) ([]DiffEntry, error) {
 	var entries []DiffEntry
 
-	map1 := make(map[string]core.BlobEntry)
-	for _, b := range blobs1 {
-		map1[b.Path] = b
-	}
-	map2 := make(map[string]core.BlobEntry)
-	for _, b := range blobs2 {
-		map2[b.Path] = b
-	}
+	for _, ch := range changes {
+		if len(filePaths) > 0 && !worktree.PathMatchesAny(ch.Path, filePaths) {
+			continue
+		}
 
-	for path, b1 := range map1 {
-		if b2, exists := map2[path]; exists {
-			if b1.Hash == b2.Hash {
+		switch {
+		case ch.Old != nil && ch.New != nil:
+			// Modified.
+			if ch.Old.Hash == ch.New.Hash {
 				continue
 			}
-			data1, err := a.store.GetBlob(b1.Hash)
+			data1, err := a.store.GetBlob(ch.Old.Hash)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b1.Hash, path, err)
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", ch.Old.Hash, ch.Path, err)
 			}
-			data2, err := a.store.GetBlob(b2.Hash)
+			data2, err := a.store.GetBlob(ch.New.Hash)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b2.Hash, path, err)
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", ch.New.Hash, ch.Path, err)
 			}
 			isBin := isBinary(data1) || isBinary(data2)
 			entries = append(entries, DiffEntry{
-				Path:     path,
+				Path:     ch.Path,
 				Status:   "modified",
 				IsBinary: isBin,
 				OldSize:  int64(len(data1)),
 				NewSize:  int64(len(data2)),
 				Edits:    computeEdits(data1, data2, isBin),
 			})
-		} else {
-			data1, err := a.store.GetBlob(b1.Hash)
+		case ch.Old != nil:
+			// Deleted.
+			data1, err := a.store.GetBlob(ch.Old.Hash)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b1.Hash, path, err)
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", ch.Old.Hash, ch.Path, err)
 			}
 			entries = append(entries, DiffEntry{
-				Path:     path,
+				Path:     ch.Path,
 				Status:   "deleted",
 				IsBinary: isBinary(data1),
 				OldSize:  int64(len(data1)),
 				NewSize:  0,
 			})
-		}
-	}
-
-	for path, b2 := range map2 {
-		if _, exists := map1[path]; !exists {
-			data2, err := a.store.GetBlob(b2.Hash)
+		case ch.New != nil:
+			// Added.
+			data2, err := a.store.GetBlob(ch.New.Hash)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b2.Hash, path, err)
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", ch.New.Hash, ch.Path, err)
 			}
 			entries = append(entries, DiffEntry{
-				Path:     path,
+				Path:     ch.Path,
 				Status:   "added",
 				IsBinary: isBinary(data2),
 				OldSize:  0,

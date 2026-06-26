@@ -55,15 +55,6 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		}
 	}
 
-	builder := core.NewTreeBuilder(func(t *core.Tree) error {
-		return a.store.PutTree(t)
-	})
-
-	tree, err := builder.BuildFromIndex(&idx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build tree: %w", err)
-	}
-
 	branch := a.CurrentBranch()
 	if _, err := a.store.GetRef("HEAD"); err != nil {
 		if err := a.store.SaveRef("HEAD", branch); err != nil {
@@ -76,6 +67,25 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		return nil, fmt.Errorf("failed to list branch commits: %w", err)
 	}
 	branchCommitCount := len(branchCommits)
+
+	builder := core.NewTreeBuilder(func(t *core.Tree) error {
+		return a.store.PutTree(t)
+	})
+
+	var tree *core.Tree
+	if branchCommitCount > 0 && branchCommits[0].TreeHash != "" {
+		// Reuse unchanged subtrees from the parent commit's tree.
+		parentTree, parentErr := a.store.GetTree(branchCommits[0].TreeHash)
+		if parentErr == nil {
+			tree, err = builder.BuildFromIndexWithBase(&idx, parentTree, a.store)
+		}
+	}
+	if tree == nil {
+		tree, err = builder.BuildFromIndex(&idx)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to build tree: %w", err)
+	}
 
 	parentHash := ""
 	if branchCommitCount > 0 {
@@ -103,7 +113,7 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		}
 	}
 
-	stagedPaths := a.computeChangedPaths(&idx, branchCommits)
+	stagedPaths := a.computeChangedPaths(tree, branchCommits)
 	author := a.Author()
 
 	if opts.Amend {
@@ -207,66 +217,65 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	}, nil
 }
 
-func (a *App) computeChangedPaths(idx *core.Index, branchCommits []*core.Commit) []string {
+// computeChangedPaths returns the paths that differ between the new tree
+// (built from the index) and the parent commit's tree. Uses LazyDiffTrees to
+// skip unchanged subtrees — much faster than flattening both trees.
+func (a *App) computeChangedPaths(newTree *core.Tree, branchCommits []*core.Commit) []string {
+	// New branch: all index entries are new.
 	if len(branchCommits) == 0 {
-		paths := make([]string, len(idx.Entries))
-		for i, e := range idx.Entries {
-			paths[i] = e.Path
+		reader := core.NewTreeReader(a.store)
+		blobs, err := reader.ListBlobs(newTree, "")
+		if err != nil {
+			return nil
+		}
+		paths := make([]string, len(blobs))
+		for i, b := range blobs {
+			paths[i] = b.Path
 		}
 		return paths
 	}
 
 	parent := branchCommits[0]
 	if parent.TreeHash == "" {
-		paths := make([]string, len(idx.Entries))
-		for i, e := range idx.Entries {
-			paths[i] = e.Path
+		reader := core.NewTreeReader(a.store)
+		blobs, err := reader.ListBlobs(newTree, "")
+		if err != nil {
+			return nil
+		}
+		paths := make([]string, len(blobs))
+		for i, b := range blobs {
+			paths[i] = b.Path
 		}
 		return paths
 	}
 
-	tree, err := a.store.GetTree(parent.TreeHash)
+	parentTree, err := a.store.GetTree(parent.TreeHash)
 	if err != nil {
-		paths := make([]string, len(idx.Entries))
-		for i, e := range idx.Entries {
-			paths[i] = e.Path
+		// Fall back: list new tree blobs.
+		reader := core.NewTreeReader(a.store)
+		blobs, _ := reader.ListBlobs(newTree, "")
+		paths := make([]string, len(blobs))
+		for i, b := range blobs {
+			paths[i] = b.Path
 		}
 		return paths
 	}
 
 	reader := core.NewTreeReader(a.store)
-	parentBlobs, err := reader.ListBlobs(tree, "")
+	changes, err := reader.LazyDiffTrees(parentTree, newTree)
 	if err != nil {
-		paths := make([]string, len(idx.Entries))
-		for i, e := range idx.Entries {
-			paths[i] = e.Path
+		// Fall back: list new tree blobs.
+		blobs, _ := reader.ListBlobs(newTree, "")
+		paths := make([]string, len(blobs))
+		for i, b := range blobs {
+			paths[i] = b.Path
 		}
 		return paths
 	}
 
-	parentFiles := make(map[string]string, len(parentBlobs))
-	for _, b := range parentBlobs {
-		parentFiles[b.Path] = b.Hash
-	}
-
-	changedSet := make(map[string]bool)
-
-	for _, e := range idx.Entries {
-		parentHash, inParent := parentFiles[e.Path]
-		if !inParent || parentHash != e.Hash {
-			changedSet[e.Path] = true
-		}
-	}
-
-	for path := range parentFiles {
-		if !idx.Has(path) {
-			changedSet[path] = true
-		}
-	}
-
-	changed := make([]string, 0, len(changedSet))
-	for path := range changedSet {
-		changed = append(changed, path)
+	changed := make([]string, 0, len(changes))
+	for _, ch := range changes {
+		changed = append(changed, ch.Path)
 	}
 	sort.Strings(changed)
 	return changed
