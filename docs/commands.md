@@ -738,7 +738,7 @@ drift config --global --unset <key>  # 清除全局配置值
 | `core.default_branch` | 项目 | 默认分支名称 | `main` |
 | `core.autocrlf` | 项目 | CRLF 换行符归一化策略 | `""`（不做转换） |
 | `sync.enabled` | 项目 | 是否启用自动同步 | `false` |
-| `remote.protocol` | 全局 | 远程协议（local/webdav/ftp/sftp/smb） | 空 |
+| `remote.protocol` | 全局 | 远程协议（webdav/ftp/sftp/smb） | 空 |
 | `remote.host` | 全局 | 远程主机地址 | 空 |
 | `remote.port` | 全局 | 远程主机端口 | 空 |
 | `remote.path` | 全局 | 远程根路径 | 空 |
@@ -809,15 +809,12 @@ drift config --unset sync.enabled       # 关闭同步
 
 ### `drift config remote` ✅
 
-配置远程根路径，支持五种协议：本地路径（NAS 挂载、网盘同步文件夹）、WebDAV（Nextcloud、ownCloud、群晖 NAS、坚果云等）、FTP/FTPS、SFTP（SSH 文件传输）、SMB/CIFS（Windows 共享、NAS）。
+配置远程根路径，支持四种协议：WebDAV（Nextcloud、ownCloud、群晖 NAS、坚果云等）、FTP/FTPS、SFTP（SSH 文件传输）、SMB/CIFS（Windows 共享、NAS）。
 
 支持两种配置方式：**显式协议模式**（推荐，字段统一清晰）和**简写自动检测模式**。
 
 ```bash
 # ===== 显式协议模式（推荐）=====
-
-# 本地路径（NAS 挂载、网盘文件夹）
-drift config remote --protocol local --path /mnt/nas
 
 # WebDAV 服务器
 drift config remote --protocol webdav --host cloud.example.com --path /dav \
@@ -837,10 +834,8 @@ drift config remote --protocol smb --host nas.local --share photos --user alice
 
 # ===== 简写自动检测模式 =====
 
-# 本地路径
-drift config remote /mnt/nas
-
 # WebDAV URL
+
 drift config remote https://cloud.example.com/dav --user alice --pass secret
 
 # ===== 管理远程配置 =====
@@ -853,10 +848,10 @@ drift config remote --unset   # 移除远程配置
 
 | 参数 | 说明 |
 |------|------|
-| `--protocol` | 协议类型：`local` / `webdav` / `ftp` / `sftp` / `smb` |
-| `--host` | 远程服务器主机名或 IP（网络协议必填） |
+| `--protocol` | 协议类型：`webdav` / `ftp` / `sftp` / `smb` |
+| `--host` | 远程服务器主机名或 IP（必填） |
 | `--port` | 远程服务器端口（0 = 协议默认值） |
-| `--path` | 远程基础路径（网络协议）或本地文件系统路径（local 协议，必填） |
+| `--path` | 远程基础路径（必填） |
 | `--user` | 认证用户名（可选，未提供则交互式输入） |
 | `--pass` | 认证密码（可选，未提供则交互式输入） |
 | `--tls` | 启用 TLS（FTPS、HTTPS） |
@@ -870,16 +865,13 @@ drift config remote --unset   # 移除远程配置
 
 | 协议 | 默认端口 | TLS 支持 |
 |------|---------|---------|
-| `local` | — | — |
 | `webdav` | 80 (http) / 443 (https) | `--tls` |
 | `ftp` | 21 | `--tls`（FTPS） |
 | `sftp` | 22 | 内置 SSH 加密 |
 | `smb` | 445 | — |
 
 **行为：**
-- 远程根路径保存在全局配置 `~/.drift/global.json`，所有项目共享
-- 本地路径模式：验证目录存在，远程项目以子目录形式存储（可直接浏览文件）
-- 网络协议模式：项目以子目录形式存储在远程服务器上
+- 项目以子目录形式存储在远程服务器上
 - 凭据通过参数或交互式输入提供；SFTP 支持密钥认证（`--key-path`）
 - SFTP 使用 TOFU（Trust On First Use）主机密钥验证，记录在 `~/.drift/known_hosts`
 - WebDAV/FTP 的 `--insecure` 标志用于自签证书场景
@@ -922,7 +914,7 @@ drift sync status
 
 ```
 Project:  my-novel
-Remote:   /mnt/nas/my-novel
+Remote:   webdav://cloud.example.com/my-novel
 Protocol: local
 Enabled:  yes
 Last sync: 2026-06-24T10:30:00Z
@@ -944,7 +936,7 @@ drift sync now
 **输出示例：**
 
 ```
-Syncing to /mnt/nas/my-novel...
+Syncing to webdav://cloud.example.com/my-novel...
   Pushed 2 file(s):
     章节/第三章.txt
     .drift/refs/main
@@ -966,7 +958,7 @@ drift clone <项目名> <目标目录>    # 克隆到指定目录
 
 ```bash
 # 首次配置远程根路径（全局，一次性）
-drift config remote /mnt/nas
+drift config remote --protocol webdav --host cloud.example.com --path /dav --tls --user alice
 
 # 在另一台设备上克隆项目
 drift clone my-novel
@@ -986,7 +978,6 @@ drift clone my-novel my-book
 | 组件 | 说明 |
 |------|------|
 | **Transport 接口** | 抽象传输层，统一 `Get`/`Put`/`Stat`/`Delete`/`List`/`Close` 接口 |
-| **LocalTransport** | 本地文件系统传输（NAS 挂载、网盘文件夹） |
 | **WebDAVTransport** | WebDAV 协议传输（Nextcloud、ownCloud、群晖、坚果云等） |
 | **FTPTransport** | FTP/FTPS 协议传输 |
 | **SFTPTransport** | SFTP 协议传输（SSH 文件传输，支持密码/密钥认证） |

@@ -49,7 +49,7 @@ func (a *App) SyncEnable() error {
 		return err
 	}
 	if gcfg.Protocol == "" {
-		return fmt.Errorf("no remote configured (run 'drift sync remote --protocol <...>' first)")
+		return fmt.Errorf("no remote configured (run 'drift config remote --protocol <...>' first)")
 	}
 
 	remoteName := filepath.Base(a.dir)
@@ -62,13 +62,6 @@ func (a *App) SyncEnable() error {
 
 	if err := config.SaveConfig(a.store.DriftDir(), a.config); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
-	}
-
-	if gcfg.Protocol == "local" {
-		remoteDir := filepath.Join(gcfg.Path, remoteName)
-		if err := os.MkdirAll(remoteDir, 0755); err != nil {
-			return fmt.Errorf("failed to create remote project dir: %w", err)
-		}
 	}
 
 	return nil
@@ -112,13 +105,6 @@ func (a *App) SyncNow() (*SyncStats, error) {
 	}
 
 	remoteName := a.config.Sync.RemoteName
-
-	if gcfg.Protocol == "local" {
-		remoteDir := filepath.Join(gcfg.Path, remoteName)
-		if err := os.MkdirAll(remoteDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to access remote: %w", err)
-		}
-	}
 
 	transport, err := driftsync.ProjectTransportForConfig(gcfg, remoteName)
 	if err != nil {
@@ -184,21 +170,6 @@ func (a *App) SyncRemoteSet(protocol string, opts SyncRemoteOptions) error {
 		KeyPath:            opts.KeyPath,
 	}
 
-	if protocol == "local" {
-		abs, err := filepath.Abs(opts.Path)
-		if err != nil {
-			return fmt.Errorf("invalid path: %w", err)
-		}
-		info, err := os.Stat(abs)
-		if err != nil {
-			return fmt.Errorf("cannot access %q: %w", abs, err)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("%q is not a directory", abs)
-		}
-		gcfg.Path = abs
-	}
-
 	return config.SaveGlobalConfig(gcfg)
 }
 
@@ -258,7 +229,7 @@ func (a *App) Clone(remoteName, destDir string) (int, error) {
 		return 0, err
 	}
 	if gcfg.Protocol == "" {
-		return 0, fmt.Errorf("no remote configured (run 'drift sync remote --protocol <...>' first)")
+		return 0, fmt.Errorf("no remote configured (run 'drift config remote --protocol <...>' first)")
 	}
 
 	if !filepath.IsAbs(destDir) {
@@ -280,30 +251,6 @@ func (a *App) Clone(remoteName, destDir string) (int, error) {
 		if len(entries) > 0 {
 			return 0, fmt.Errorf("destination %q is not empty", destDir)
 		}
-	}
-
-	if gcfg.Protocol == "local" {
-		transport := driftsync.NewLocalTransport(gcfg.Path)
-		defer transport.Close()
-		exists, err := transport.ProjectExists(remoteName)
-		if err != nil {
-			return 0, err
-		}
-		if !exists {
-			return 0, fmt.Errorf("project %q not found on remote %s", remoteName, gcfg.Path)
-		}
-		if err := transport.Clone(remoteName, destDir); err != nil {
-			return 0, fmt.Errorf("clone failed: %w", err)
-		}
-		// Count files in the cloned directory.
-		count := 0
-		filepath.Walk(destDir, func(_ string, info os.FileInfo, _ error) error {
-			if info != nil && !info.IsDir() {
-				count++
-			}
-			return nil
-		})
-		return count, nil
 	}
 
 	transport, err := driftsync.ProjectTransportForConfig(gcfg, remoteName)

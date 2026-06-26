@@ -224,21 +224,15 @@ func setRemoteWithProtocol(application *apppkg.App, protocol string, args []stri
 			opts.Share = args[1]
 		}
 
-	case "local":
-		if len(args) == 0 {
-			return fmt.Errorf("path required for local protocol")
-		}
-		opts.Path = args[0]
-
 	default:
 		return fmt.Errorf("unsupported protocol: %s", protocol)
 	}
 
-	if opts.Username == "" && protocol != "local" {
+	if opts.Username == "" {
 		opts.Username = promptInput("Username")
 	}
 
-	if opts.Password == "" && protocol != "local" {
+	if opts.Password == "" {
 		opts.Password = promptPassword("Password")
 	}
 
@@ -258,7 +252,7 @@ func setRemoteFromURL(application *apppkg.App, rawURL string) error {
 	case "sftp":
 		protocol = "sftp"
 	default:
-		return setRemoteWithProtocol(application, "local", []string{rawURL})
+		return fmt.Errorf("unsupported URL scheme: %s", u.Scheme)
 	}
 
 	return setRemoteWithProtocol(application, protocol, []string{rawURL})

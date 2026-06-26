@@ -416,63 +416,6 @@ func TestEngine_EmptyProject(t *testing.T) {
 	}
 }
 
-// --- LocalTransport ProjectTransport tests ---
-
-func TestLocalProjectTransport_PutGet(t *testing.T) {
-	remoteRoot := t.TempDir()
-	lt := NewLocalTransport(remoteRoot)
-	transport := lt.ProjectTransport("myproject")
-
-	// Put a file.
-	content := "hello world"
-	if err := transport.Put("test.txt", strings.NewReader(content)); err != nil {
-		t.Fatal(err)
-	}
-
-	// Get it back.
-	var buf bytes.Buffer
-	if err := transport.Get("test.txt", &buf); err != nil {
-		t.Fatal(err)
-	}
-	if buf.String() != content {
-		t.Errorf("expected %q, got %q", content, buf.String())
-	}
-}
-
-func TestLocalProjectTransport_List(t *testing.T) {
-	remoteRoot := t.TempDir()
-	lt := NewLocalTransport(remoteRoot)
-	transport := lt.ProjectTransport("myproject")
-
-	// Put some files.
-	transport.Put("a.txt", strings.NewReader("a"))
-	transport.Put("sub/b.txt", strings.NewReader("b"))
-
-	files, err := transport.List("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) != 2 {
-		t.Errorf("expected 2 files, got %d: %v", len(files), files)
-	}
-}
-
-func TestLocalProjectTransport_Delete(t *testing.T) {
-	remoteRoot := t.TempDir()
-	lt := NewLocalTransport(remoteRoot)
-	transport := lt.ProjectTransport("myproject")
-
-	transport.Put("a.txt", strings.NewReader("a"))
-	transport.Delete("a.txt")
-
-	files, _ := transport.List("")
-	for _, f := range files {
-		if f == "a.txt" {
-			t.Error("a.txt still exists after delete")
-		}
-	}
-}
-
 // --- Helper functions ---
 
 func writeLocalFile(t *testing.T, dir, relPath, content string) {
