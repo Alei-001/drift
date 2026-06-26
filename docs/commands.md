@@ -463,16 +463,12 @@ drift diff main/a1b2c3d4 feature/a1b2c3d4  # 跨分支精确比较（摘要）
 **摘要输出示例：**
 
 ```
-Changed files between a1b2c3d4 and e5f6a7b8:
-
-  M 章节/第一章.txt    +15 -3   (text)
-  M 章节/第二章.txt    +8 -2    (text)
-  M 素材/封面.psd      1.2MB -> 1.5MB  (binary)
-  D 笔记/旧笔记.txt    1024 bytes  (text)
-  A 笔记/新笔记.txt    2048 bytes  (text)
-
-Summary: 5 files changed (3 text, 1 binary), 23 insertions(+), 5 deletions(-)
+Changed 2 file(s):
+  M 章节/第一章.txt
+  A 笔记/新笔记.txt
 ```
+
+如果无变化则显示 `No changes`。
 
 **查看详细差异：**
 
@@ -484,23 +480,22 @@ drift diff a1b2c3d4 e5f6a7b8 -p    # 两个版本对比（详细）
 **详细输出示例（文本文件）：**
 
 ```
---- a1b2c3d4/章节/第一章.txt
-+++ e5f6a7b8/章节/第一章.txt
-@@ -1,5 +1,8 @@
+--- 章节/第一章.txt
++++ 章节/第一章.txt
  第一章 开始
- 
+
 -这是一个故事的开始。
 +这是一个关于冒险的故事。
 +
 +主角是一个年轻的旅行者。
- 
+
  天气晴朗。
 ```
 
 **二进制文件输出：**
 
 ```
-Binary file 素材/封面.psd changed (1234567 -> 1567890 bytes)
+Binary files differ: 素材/封面.psd
 ```
 
 **指定文件：**
