@@ -438,7 +438,7 @@ drift switch <名称> -c          # --create 简写
 - **暂存区和工作区有改动时自动保存到 WIP**（不再拒绝切换）
 - `--force` 忽略所有未保存改动直接切换
 - `--create`/`-c`：分支不存在时从当前分支创建，已存在时报错
-- 切换后可执行 `drift wip` 查看或恢复保存的工作进度
+- 切换后可执行 `drift wip list` 查看或 `drift wip restore` 恢复保存的工作进度
 
 > **设计原则**：分支是独立版本线，不做 merge。作家用分支写不同剧情线，设计师用分支试不同配色方案。
 
@@ -673,38 +673,33 @@ drift undo -n 3               # 撤销最近 3 次操作
 
 ## 工作进度管理
 
-### `drift wip` ✅
+### `drift wip` 
 
-查看已保存的工作进度（Work-In-Progress）。
-
-```bash
-drift wip                     # 查看所有分支的 WIP
-```
-
-**输出示例：**
-
-```
-  main       3 file(s)
-  feature    1 file(s)
-```
-
-**说明：**
-- 切换分支时，如果有未保存的改动，会自动保存到 WIP
-- WIP 以 `.drift/wip/<分支名>.json` 存储
-- 不会自动恢复，需要手动执行 `drift restore-wip`
-
-### `drift restore-wip` ✅
-
-恢复之前保存的工作进度。
+管理未保存的工作进度（Work-In-Progress）。切换分支时有未保存的改动会自动存为 WIP。
 
 ```bash
-drift restore-wip             # 恢复当前分支的 WIP
-drift restore-wip <分支名>     # 恢复指定分支的 WIP
+drift wip list [<分支名>]        # 列出 WIP（无参列出所有分支）
+drift wip save                  # 手动保存当前工作区到 WIP
+drift wip restore [<分支名>]     # 恢复 WIP 到工作区（默认当前分支）
+drift wip drop [<分支名>]        # 丢弃 WIP（会二次确认）
+```
+
+**示例：**
+
+```bash
+drift wip list                  # 列出所有有 WIP 的分支
+drift wip list main             # 列出 main 分支的 WIP 文件详情
+drift wip save                  # 手动保存当前改动
+drift wip restore               # 恢复当前分支的 WIP
+drift wip restore feature       # 恢复 feature 分支的 WIP
+drift wip drop                  # 丢弃当前分支的 WIP
 ```
 
 **行为：**
-- 将 WIP 中的文件恢复到工作区和暂存区
+- 切换分支时，若有未保存的改动会自动保存 WIP（无需手动 `drift wip save`）
+- WIP 存储为 `.drift/wip/<分支名>.json`
 - 恢复后自动删除 WIP 文件
+- `drop` 会要求二次确认
 
 ---
 
