@@ -23,15 +23,13 @@ type localStore interface {
 type Engine struct {
 	transport Transport
 	store     localStore
-	dir       string // local project directory
 }
 
 // NewEngine creates a sync engine for the given transport and local store.
-func NewEngine(transport Transport, store localStore, dir string) *Engine {
+func NewEngine(transport Transport, store localStore) *Engine {
 	return &Engine{
 		transport: transport,
 		store:     store,
-		dir:       dir,
 	}
 }
 

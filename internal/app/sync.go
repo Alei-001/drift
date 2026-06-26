@@ -108,7 +108,7 @@ func (a *App) Push(branch string) (*PushStats, error) {
 	}
 	defer transport.Close()
 
-	engine := driftsync.NewEngine(transport, a.store, a.dir)
+	engine := driftsync.NewEngine(transport, a.store)
 	result, err := engine.Push(branch)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func (a *App) Pull(branch string) (*PullStats, error) {
 	}
 	defer transport.Close()
 
-	engine := driftsync.NewEngine(transport, a.store, a.dir)
+	engine := driftsync.NewEngine(transport, a.store)
 	result, err := engine.Pull(branch)
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ func (a *App) Clone(remoteName, destDir string) (int, error) {
 		return 0, fmt.Errorf("init store: %w", err)
 	}
 
-	engine := driftsync.NewEngine(transport, destStore, destDir)
+	engine := driftsync.NewEngine(transport, destStore)
 	if err := engine.Clone(); err != nil {
 		return 0, fmt.Errorf("clone failed: %w", err)
 	}
@@ -344,6 +344,21 @@ func (a *App) Clone(remoteName, destDir string) (int, error) {
 	blobs, err := reader.ListBlobs(tree, "")
 	if err != nil {
 		return 0, err
+	}
+
+	// Restore all files from the commit tree into the working directory.
+	for _, b := range blobs {
+		data, err := destStore.GetBlob(b.Hash)
+		if err != nil {
+			return 0, fmt.Errorf("read blob %s: %w", b.Path, err)
+		}
+		targetPath := filepath.Join(destDir, filepath.FromSlash(b.Path))
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return 0, err
+		}
+		if err := os.WriteFile(targetPath, data, os.FileMode(b.Mode)); err != nil {
+			return 0, err
+		}
 	}
 
 	return len(blobs), nil
