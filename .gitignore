@@ -1,6 +1,9 @@
 # CodeGraph index
 .codegraph/
 
+# Drift VCS directory (analogous to .git/)
+.drift/
+
 # Build artifacts
 dist/
 *.exe

@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
 	driftsync "github.com/drift/drift/internal/sync"
+	"github.com/drift/drift/internal/worktree"
 )
 
 type SyncStatus struct {
@@ -135,6 +137,29 @@ func (a *App) Pull(branch string) (*PullStats, error) {
 		branch = a.CurrentBranch()
 	}
 
+	// Check for local changes before pulling. If dirty, save WIP first.
+	var idx core.Index
+	if err := a.store.LoadIndex(&idx); err != nil {
+		return nil, err
+	}
+	currentCommit, _ := a.currentCommit()
+	dirty, err := a.wt.HasModifications(currentCommit, &idx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("check modifications: %w", err)
+	}
+	if dirty {
+		if err := a.wt.StageWorktreeChanges(&idx); err != nil {
+			return nil, fmt.Errorf("capture worktree changes: %w", err)
+		}
+		if err := a.wt.SaveWIP(branch, &idx); err != nil {
+			return nil, fmt.Errorf("save wip before pull: %w", err)
+		}
+		if err := a.store.SaveIndex(&core.Index{}); err != nil {
+			_ = worktree.DeleteWIP(a.store, branch)
+			return nil, fmt.Errorf("clear index: %w", err)
+		}
+	}
+
 	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		return nil, err
@@ -151,8 +176,86 @@ func (a *App) Pull(branch string) (*PullStats, error) {
 	if err != nil {
 		return nil, err
 	}
+	if result.Pulled == 0 {
+		return &PullStats{Branch: branch, Pulled: 0}, nil
+	}
 
-	return &PullStats{Branch: result.Branch, Pulled: result.Pulled}, nil
+	// Restore working tree from the newly pulled commit.
+	remoteHash, err := a.store.GetRef(branch)
+	if err != nil {
+		return nil, fmt.Errorf("get local ref: %w", err)
+	}
+	commit, err := a.store.GetCommit(remoteHash)
+	if err != nil {
+		return nil, fmt.Errorf("get pulled commit: %w", err)
+	}
+	tree, err := a.store.GetTree(commit.TreeHash)
+	if err != nil {
+		return nil, fmt.Errorf("get tree: %w", err)
+	}
+
+	reader := core.NewTreeReader(a.store)
+	blobs, err := reader.ListBlobs(tree, "")
+	if err != nil {
+		return nil, err
+	}
+
+	targetPaths := make(map[string]bool)
+	for _, b := range blobs {
+		targetPaths[b.Path] = true
+	}
+
+	newIdx := &core.Index{}
+	for _, b := range blobs {
+		entry, err := a.wt.WriteBlob(b)
+		if err != nil {
+			return nil, err
+		}
+		if err := newIdx.Add(entry); err != nil {
+			return nil, fmt.Errorf("add %s to index: %w", entry.Path, err)
+		}
+	}
+
+	// Clean up files not in the pulled tree.
+	var deletedPaths []string
+	walkErr := core.WalkWorkingDir(a.dir, func(path string, info os.FileInfo) error {
+		if targetPaths[path] {
+			return nil
+		}
+		if err := core.ValidateTreePath(path); err != nil {
+			return nil
+		}
+		fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		deletedPaths = append(deletedPaths, path)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("clean worktree: %w", walkErr)
+	}
+
+	a.wt.CleanEmptyDirs(deletedPaths)
+
+	if err := a.store.SaveIndex(newIdx); err != nil {
+		return nil, fmt.Errorf("save index: %w", err)
+	}
+
+	// Restore WIP on top of pulled tree.
+	if wip, _ := worktree.LoadWIP(a.store, branch); wip != nil && len(wip.Entries) > 0 {
+		if _, err := a.RestoreWIP(branch); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to restore WIP: %v\n", err)
+		}
+	}
+
+	// Update sync status.
+	a.config.Sync.LastSync = time.Now().Format(time.RFC3339)
+	if err := config.SaveConfig(a.store.DriftDir(), a.config); err != nil {
+		return nil, fmt.Errorf("save sync status: %w", err)
+	}
+
+	return &PullStats{Branch: branch, Pulled: result.Pulled}, nil
 }
 
 type SyncStats struct {
@@ -359,6 +462,22 @@ func (a *App) Clone(remoteName, destDir string) (int, error) {
 		if err := os.WriteFile(targetPath, data, os.FileMode(b.Mode)); err != nil {
 			return 0, err
 		}
+	}
+
+	// Build and save the index so drift status works immediately.
+	idx := &core.Index{}
+	for _, b := range blobs {
+		entry := core.IndexEntry{
+			Path: b.Path,
+			Hash: b.Hash,
+			Mode: b.Mode,
+		}
+		if err := idx.Add(entry); err != nil {
+			return 0, fmt.Errorf("add %s to index: %w", entry.Path, err)
+		}
+	}
+	if err := destStore.SaveIndex(idx); err != nil {
+		return 0, fmt.Errorf("save index: %w", err)
 	}
 
 	return len(blobs), nil

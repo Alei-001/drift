@@ -46,7 +46,7 @@ func ReachableObjects(store CommitTreeStore, startHash, stopHash string) (map[st
 		if err != nil {
 			return nil, err
 		}
-		if err := collectTreeObjects(store, tree, result); err != nil {
+		if err := collectTreeObjects(store, tree, c.TreeHash, result); err != nil {
 			return nil, err
 		}
 
@@ -60,8 +60,10 @@ func ReachableObjects(store CommitTreeStore, startHash, stopHash string) (map[st
 }
 
 // collectTreeObjects recursively collects all tree and blob hashes from a tree.
-func collectTreeObjects(store CommitTreeStore, tree *Tree, result map[string]ObjectType) error {
-	result[tree.Hash] = TreeObject
+// hash is the known SHA-256 hash of this tree (tree.Hash is not set after
+// Unmarshal because the DREE format doesn't store self-hashes).
+func collectTreeObjects(store CommitTreeStore, tree *Tree, hash string, result map[string]ObjectType) error {
+	result[hash] = TreeObject
 
 	for _, entry := range tree.Entries {
 		switch entry.Type {
@@ -72,7 +74,7 @@ func collectTreeObjects(store CommitTreeStore, tree *Tree, result map[string]Obj
 			if err != nil {
 				return err
 			}
-			if err := collectTreeObjects(store, subTree, result); err != nil {
+			if err := collectTreeObjects(store, subTree, entry.Hash, result); err != nil {
 				return err
 			}
 		}

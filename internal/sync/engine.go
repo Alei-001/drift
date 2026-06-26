@@ -36,19 +36,19 @@ func NewEngine(transport Transport, store localStore) *Engine {
 // PushResult reports the outcome of a Push operation.
 type PushResult struct {
 	Branch string
-	Pushed int // number of new objects uploaded
+	Pushed int
 }
 
 // FetchResult reports the outcome of a Fetch operation.
 type FetchResult struct {
 	Branch  string
-	Fetched int // number of new objects downloaded
+	Fetched int
 }
 
 // PullResult reports the outcome of a Pull operation.
 type PullResult struct {
 	Branch string
-	Pulled int // number of new objects downloaded
+	Pulled int
 }
 
 // trackingRef returns the local tracking ref name for a branch.
@@ -73,7 +73,6 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 
 	trackingHash, _ := e.store.GetRef(trackingRef(refName))
 
-	// Read the remote ref.
 	remoteHash, err := e.transport.GetRef(refName)
 	if err != nil {
 		return nil, fmt.Errorf("read remote ref heads/%s: %w", branch, err)
@@ -87,6 +86,7 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 	}
 
 	// Collect objects reachable from localHash but not from trackingHash.
+	// All commits are local, so ReachableObjects can walk safely.
 	objs, err := core.ReachableObjects(e.store, localHash, trackingHash)
 	if err != nil {
 		return nil, fmt.Errorf("collect reachable objects: %w", err)
@@ -102,8 +102,6 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 		if exists {
 			continue
 		}
-
-		// Read the raw compressed object from the local store.
 		localPath := filepath.Join(e.store.DriftDir(), key)
 		f, err := os.Open(localPath)
 		if err != nil {
@@ -117,12 +115,10 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 		pushed++
 	}
 
-	// Update remote ref.
 	if err := e.transport.PutRef(refName, localHash); err != nil {
 		return nil, fmt.Errorf("update remote ref: %w", err)
 	}
 
-	// Update local tracking ref.
 	if err := e.store.SaveRef(trackingRef(refName), localHash); err != nil {
 		return nil, fmt.Errorf("save tracking ref: %w", err)
 	}
@@ -148,33 +144,13 @@ func (e *Engine) Fetch(branch string) (*FetchResult, error) {
 		return &FetchResult{Branch: branch, Fetched: 0}, nil
 	}
 
-	// Collect objects reachable from remoteHash but not from trackingHash.
-	objs, err := core.ReachableObjects(e.store, remoteHash, trackingHash)
+	// Download objects by iterating the commit chain from remoteHash back
+	// to trackingHash, downloading each commit's tree and blobs.
+	fetched, err := e.fetchChain(remoteHash, trackingHash)
 	if err != nil {
-		return nil, fmt.Errorf("collect reachable objects: %w", err)
+		return nil, err
 	}
 
-	var fetched int
-	for hash, typ := range objs {
-		if e.store.HasObject(hash) {
-			continue
-		}
-
-		key := objectPath(hash, typ.String())
-		rc, err := e.transport.Get(key)
-		if err != nil {
-			return nil, fmt.Errorf("get %s: %w", key, err)
-		}
-
-		if err := e.saveObject(hash, key, rc); err != nil {
-			rc.Close()
-			return nil, err
-		}
-		rc.Close()
-		fetched++
-	}
-
-	// Update tracking ref.
 	if err := e.store.SaveRef(trackingRef(refName), remoteHash); err != nil {
 		return nil, fmt.Errorf("save tracking ref: %w", err)
 	}
@@ -194,7 +170,6 @@ func (e *Engine) Pull(branch string) (*PullResult, error) {
 		return &PullResult{Branch: branch, Pulled: 0}, nil
 	}
 
-	// Fast-forward the local branch.
 	remoteHash, _ := e.transport.GetRef(refName)
 	if err := e.store.SaveRef(branch, remoteHash); err != nil {
 		return nil, fmt.Errorf("update local ref %s: %w", branch, err)
@@ -203,9 +178,7 @@ func (e *Engine) Pull(branch string) (*PullResult, error) {
 	return &PullResult{Branch: branch, Pulled: result.Fetched}, nil
 }
 
-// Clone downloads all objects and refs from the remote, equivalent to a
-// full Fetch for every branch plus checkout. The working directory is NOT
-// populated by this method — that is handled by the app layer.
+// Clone downloads all objects and refs from the remote.
 func (e *Engine) Clone() error {
 	refs, err := e.transport.ListRefs()
 	if err != nil {
@@ -226,35 +199,103 @@ func (e *Engine) Clone() error {
 
 // fetchRef downloads all objects reachable from a single remote ref.
 func (e *Engine) fetchRef(name, remoteHash string) error {
-	objs, err := core.ReachableObjects(e.store, remoteHash, "")
-	if err != nil {
+	if _, err := e.fetchChain(remoteHash, ""); err != nil {
 		return fmt.Errorf("walk %s: %w", name, err)
 	}
-
-	for hash, typ := range objs {
-		if e.store.HasObject(hash) {
-			continue
-		}
-
-		key := objectPath(hash, typ.String())
-		rc, err := e.transport.Get(key)
-		if err != nil {
-			return fmt.Errorf("get %s: %w", key, err)
-		}
-
-		if err := e.saveObject(hash, key, rc); err != nil {
-			rc.Close()
-			return err
-		}
-		rc.Close()
-	}
-
-	// Write the tracking ref locally.
 	if err := e.store.SaveRef(trackingRef(name), remoteHash); err != nil {
 		return fmt.Errorf("save tracking ref %s: %w", name, err)
 	}
-
 	return nil
+}
+
+// fetchChain downloads objects by walking the commit chain from startHash
+// backward to stopHash (exclusive). It downloads each commit, its tree, and
+// all reachable blobs, then follows the parent chain.
+func (e *Engine) fetchChain(startHash, stopHash string) (int, error) {
+	var fetched int
+	hash := startHash
+
+	for hash != "" && hash != stopHash {
+		// Download the commit if not present.
+		if !e.store.HasObject(hash) {
+			if err := e.saveRemoteObject(hash, "commit"); err != nil {
+				return fetched, fmt.Errorf("download commit %s: %w", hash[:8], err)
+			}
+			fetched++
+		}
+
+		c, err := e.store.GetCommit(hash)
+		if err != nil {
+			return fetched, fmt.Errorf("get commit %s: %w", hash[:8], err)
+		}
+
+		// Download the tree if not present.
+		if !e.store.HasObject(c.TreeHash) {
+			if err := e.saveRemoteObject(c.TreeHash, "tree"); err != nil {
+				return fetched, fmt.Errorf("download tree %s: %w", c.TreeHash[:8], err)
+			}
+			fetched++
+		}
+
+		// Walk the tree and download all blobs and subtrees.
+		tree, err := e.store.GetTree(c.TreeHash)
+		if err != nil {
+			return fetched, fmt.Errorf("get tree %s: %w", c.TreeHash[:8], err)
+		}
+		n, err := e.fetchTree(tree)
+		if err != nil {
+			return fetched, err
+		}
+		fetched += n
+
+		hash = c.Parent
+	}
+
+	return fetched, nil
+}
+
+// fetchTree recursively downloads all blobs and subtrees from a tree.
+func (e *Engine) fetchTree(tree *core.Tree) (int, error) {
+	var fetched int
+	for _, entry := range tree.Entries {
+		switch entry.Type {
+		case core.BlobObject:
+			if !e.store.HasObject(entry.Hash) {
+				if err := e.saveRemoteObject(entry.Hash, "blob"); err != nil {
+					return fetched, fmt.Errorf("download blob %s: %w", entry.Hash[:8], err)
+				}
+				fetched++
+			}
+		case core.TreeObject:
+			if !e.store.HasObject(entry.Hash) {
+				if err := e.saveRemoteObject(entry.Hash, "tree"); err != nil {
+					return fetched, fmt.Errorf("download tree %s: %w", entry.Hash[:8], err)
+				}
+				fetched++
+			}
+			subTree, err := e.store.GetTree(entry.Hash)
+			if err != nil {
+				return fetched, fmt.Errorf("get subtree %s: %w", entry.Hash[:8], err)
+			}
+			n, err := e.fetchTree(subTree)
+			if err != nil {
+				return fetched, err
+			}
+			fetched += n
+		}
+	}
+	return fetched, nil
+}
+
+// saveRemoteObject downloads an object from the remote and saves it locally.
+func (e *Engine) saveRemoteObject(hash, typ string) error {
+	key := objectPath(hash, typ)
+	rc, err := e.transport.Get(key)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	return e.saveObject(hash, key, rc)
 }
 
 // saveObject writes raw compressed bytes to the local .drift directory.
