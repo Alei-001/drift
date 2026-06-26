@@ -381,11 +381,11 @@ drift mv 旧章节/ 新章节/
 
 # 移动后查看状态并提交
 drift mv 章节/第一章.txt 章节/序章.txt
-drift status          # 会显示 R（重命名）
+drift status          # 旧路径显示 D（删除），新路径显示 M（修改）或 A（新增）
 drift save -m "重命名第一章为序章"
 ```
 
-> **提示**：`drift mv` 等价于先复制到新位置再从旧位置删除，但会保留文件历史关联。移动后建议执行 `drift save` 提交改动。
+> **提示**：`drift mv` 同时移动磁盘文件和更新暂存区，移动后执行 `drift status` 会看到旧路径为 `D`（删除）、新路径为 `M`（修改）或 `A`（新增）。确认后执行 `drift save` 提交改动。
 
 ---
 
