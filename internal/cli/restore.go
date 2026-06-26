@@ -24,7 +24,11 @@ func NewRestoreCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Restored %s\n", result.Version)
+			total := result.Added + result.Modified + result.Deleted
+			if total == 0 {
+				fmt.Println("Nothing to restore")
+				return nil
+			}
 			if result.Added > 0 {
 				fmt.Printf("  Added %d file(s)\n", result.Added)
 			}
@@ -34,12 +38,7 @@ func NewRestoreCmd(application *apppkg.App) *cobra.Command {
 			if result.Deleted > 0 {
 				fmt.Printf("  Deleted %d file(s)\n", result.Deleted)
 			}
-			total := result.Added + result.Modified + result.Deleted
-			if total > 0 {
-				fmt.Printf("Restored %d file(s)\n", total)
-			} else {
-				fmt.Println("Nothing to restore")
-			}
+			fmt.Printf("Restored %d file(s) from %s\n", total, result.Version)
 
 			return nil
 		},

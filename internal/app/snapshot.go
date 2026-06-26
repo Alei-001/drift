@@ -82,10 +82,19 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 		if err != nil {
 			return nil, fmt.Errorf("failed to normalize filters: %w", err)
 		}
-		targetBlobs = worktree.FilterBlobs(targetBlobs, normalized)
-		if len(targetBlobs) == 0 {
-			return nil, fmt.Errorf("no matching files found in %s for given paths", version)
+		for i, filter := range normalized {
+			matched := false
+			for _, b := range targetBlobs {
+				if worktree.PathMatchesAny(b.Path, []string{filter}) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return nil, fmt.Errorf("'%s' did not match any files in version %s", filters[i], version)
+			}
 		}
+		targetBlobs = worktree.FilterBlobs(targetBlobs, normalized)
 	}
 
 	targetPaths := make(map[string]bool)
@@ -95,13 +104,18 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 
 	prevBlobs := make(map[string]string)
 	currentBranch := a.CurrentBranch()
-	// Best-effort: for added/modified/deleted statistics.
+	// prevBlobs maps the current branch's latest commit tree (path → hash).
+	// Used for deletion of files not in the restore target and for
+	// added/modified/deleted statistics. Empty when restoring to the
+	// current commit (deletion falls back to oldIdx entries).
 	if currentHash, err := a.store.GetRef(currentBranch); err == nil {
 		if currentHash != commit.Hash && currentHash != "" {
 			if currentCommit, err := a.findCommitByHash(currentHash); err == nil {
 				if t, err := a.store.GetTree(currentCommit.TreeHash); err == nil {
-					// Best-effort: for added/modified/deleted statistics.
-					prevBlobsList, _ := reader.ListBlobs(t, "")
+					prevBlobsList, err := reader.ListBlobs(t, "")
+					if err != nil {
+						return nil, fmt.Errorf("failed to list blobs from current branch tree: %w", err)
+					}
 					for _, b := range prevBlobsList {
 						prevBlobs[b.Path] = b.Hash
 					}
