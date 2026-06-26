@@ -34,23 +34,12 @@ type UserConfig struct {
 	Email string `json:"email,omitempty"`
 }
 
-var globalConfigPathOverride string
-
 func globalConfigPath() (string, error) {
-	if globalConfigPathOverride != "" {
-		return globalConfigPathOverride, nil
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	return filepath.Join(home, ".drift", "global.json"), nil
-}
-
-// SetGlobalConfigPathForTest overrides the global config path. Pass an empty
-// string to restore the default. Intended for testing only.
-func SetGlobalConfigPathForTest(path string) {
-	globalConfigPathOverride = path
 }
 
 // LoadGlobalConfig reads the global config, returning an empty config if
