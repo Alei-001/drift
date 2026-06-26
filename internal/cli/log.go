@@ -18,12 +18,17 @@ func NewLogCmd(application *apppkg.App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "log",
+		Use:   "log [<branch>]",
 		Short: "Show commit history",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			branch := ""
+			if len(args) > 0 {
+				branch = args[0]
+			}
 			commits, err := application.History(apppkg.HistoryOptions{
-				All:   allBranches,
-				Limit: number,
+				Branch: branch,
+				All:    allBranches,
+				Limit:  number,
 			})
 			if err != nil {
 				return err

@@ -175,9 +175,11 @@ drift save --all              # 等同于 drift add . + drift save
 
 ```bash
 drift log                    # 当前分支完整历史
+drift log <分支名>            # 指定分支历史
 drift log --all              # 所有分支历史（去重，按时间倒序）
 drift log --oneline          # 单行模式
 drift log -n 5               # 显示最近 5 条
+drift log main -n 10         # main 分支最近 10 条
 drift log --all --oneline    # 所有分支单行模式
 ```
 
@@ -185,6 +187,7 @@ drift log --all --oneline    # 所有分支单行模式
 
 | 参数 | 说明 |
 |------|------|
+| `<分支名>` | 可选，指定要查看的分支（不存在时报错） |
 | `--all` | 显示所有分支的提交（按 hash 去重，按时间倒序） |
 | `--oneline` | 单行模式，简洁显示 |
 | `-n` / `--number` | 限制显示的提交数量（0 = 全部） |
