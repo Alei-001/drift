@@ -102,9 +102,12 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	root.AddCommand(NewMvCmd(application))
 	root.AddCommand(NewWIPCmd(application))
 	root.AddCommand(NewCleanCmd(application))
-	root.AddCommand(NewCloneCmd(application))
+	// Sync and Clone are disabled in v1.0.0 pending integration testing
+	// with real remote servers. The sync engine and transports remain in the
+	// codebase and are covered by unit tests.
+	// root.AddCommand(NewCloneCmd(application))
 	root.AddCommand(NewConfigCmd(application))
-	root.AddCommand(NewSyncCmd(application))
+	// root.AddCommand(NewSyncCmd(application))
 
 	return root
 }
