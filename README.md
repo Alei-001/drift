@@ -40,7 +40,7 @@ No staging area jargon. No merge conflicts. No Git concepts to learn.
 
 **Build from source:**
 ```bash
-go build -ldflags "-X github.com/drift/drift/internal/cli.version=0.1.0" -o drift ./cmd/drift/
+go build -ldflags "-X github.com/drift/drift/internal/cli.version=0.1.0" -o dist/drift.exe ./cmd/drift/
 ```
 
 Verify the install:
@@ -93,20 +93,23 @@ drift restore v1 素材/封面.psd   # restore only one file from v1
 | Command | Description |
 |---------|-------------|
 | `init` | Initialize a new Drift project |
-| `add` | Add files to the staging area (supports globs, multiple paths) |
+| `add` | Add files to the staging area |
 | `status` | Show working tree status |
 | `save` | Save staged changes as a new version (`-a` auto-stages, `--amend` edits last version, `--tag` sets a tag) |
-| `log` | View commit history (`--all` across branches) |
-| `restore` | Restore the workspace or specific files to a version |
+| `log` | View commit history (`--all` across branches, `--oneline` for compact view) |
+| `reflog` | View operation history (undo/redo log) |
+| `restore` | Restore workspace or specific files to a version |
 | `export` | Export a version as dir / zip / tar.gz |
 | `diff` | Show differences between versions (`-p` for patch, `-f`/`--` for file filtering) |
-| `branch` | Create / list / delete / rename branches |
+| `branch` | List / create / delete / rename branches |
 | `switch` | Switch branches (auto-saves WIP, `--create` to create on the fly) |
-| `tag` | Manage version tags |
-| `wip` / `restore-wip` | List / restore auto-saved work-in-progress |
+| `tag` | List / add / delete version tags |
+| `undo` | Undo recent operations |
+| `unstage` | Remove files from staging area (no args clears all) |
+| `clean` | Remove untracked files |
 | `rm` / `mv` | Delete / move tracked files |
 | `config` | View and set configuration (`user.name`, `core.autocrlf`, etc.) |
-| `history` / `undo` | View / undo recent operations |
+| `wip` | Manage work-in-progress (`list` / `save` / `restore` / `drop`) |
 | `version` | Show drift version |
 
 Full reference: [docs/commands.md](docs/commands.md)
@@ -125,10 +128,13 @@ Full reference: [docs/commands.md](docs/commands.md)
 drift/
 ├── cmd/drift/          # CLI entry point
 ├── internal/
-│   ├── core/           # Object model (Blob / Tree / Commit / Index), hashing, codecs, diff
+│   ├── core/           # Object model (Blob / Tree / Commit / Index), hashing, codecs, DAG walker, diff
 │   ├── storage/        # Content-addressable store, atomic writes, file locking
-│   ├── cli/            # All cobra commands
-│   └── config/         # JSON config read/write
+│   ├── app/            # Business logic (save, restore, switch, diff, export, sync)
+│   ├── cli/            # All cobra commands (presentation layer)
+│   ├── config/         # Project-level and global JSON config read/write
+│   ├── sync/           # Remote sync engine (DAG-based push/pull) and transports (WebDAV/FTP/SFTP/SMB)
+│   └── worktree/       # Working tree operations (staging, WIP, clean)
 ├── installer/          # Inno Setup script for Windows installer
 ├── .github/workflows/  # CI/CD: release workflow (tag-triggered)
 └── docs/               # Design docs (Chinese)
@@ -146,15 +152,16 @@ drift/
 
 ## Releasing
 
-Releases are fully automated via GitHub Actions. Push a version tag and the workflow will:
+Releases are automated via GitHub Actions. Push a version tag and the workflow will:
 
-1. Build binaries for Windows (amd64), macOS (amd64 + arm64), and Linux (amd64 + arm64)
-2. Compile a Windows `setup.exe` with Inno Setup (graphical installer, PATH management, uninstaller)
-3. Publish all artifacts to a GitHub Release
+1. Build `drift.exe` for Windows (amd64)
+2. Embed the application icon via `rsrc`
+3. Compile a Windows `drift-setup-x.y.z.exe` with Inno Setup
+4. Publish all artifacts to a GitHub Release with notes extracted from the changelog
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 ## Acknowledgments

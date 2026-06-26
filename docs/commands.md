@@ -884,7 +884,9 @@ drift config remote --unset   # 移除远程配置
 
 管理同步操作。远程地址通过 `drift config remote` 配置，以下子命令控制启停和触发同步。
 
-支持五种传输协议：本地路径（NAS 挂载、网盘同步文件夹）、WebDAV、FTP/FTPS、SFTP、SMB/CIFS。
+支持四种传输协议：WebDAV、FTP/FTPS、SFTP、SMB/CIFS。
+
+> **注意：** v1.0.0 中同步和克隆命令暂时不可用，待远程服务器集成测试后启用。远程配置可以先行设置。
 
 #### `drift sync enable` — 为当前项目启用同步
 
@@ -895,7 +897,6 @@ drift sync enable
 **行为：**
 - 使用当前目录名作为远程项目名
 - 生成项目唯一 ID（UUID），存在 `.drift/config.json`
-- 本地远程模式会自动创建远程项目目录
 - 启用后，`drift save` 会自动触发同步
 
 #### `drift sync disable` — 禁用同步
@@ -948,6 +949,8 @@ Sync complete
 ### `drift clone` ✅
 
 从远程克隆项目到本地。
+
+> **注意：** v1.0.0 中此命令暂时不可用。
 
 ```bash
 drift clone <项目名>              # 克隆到 ./<项目名>
