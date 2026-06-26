@@ -18,8 +18,17 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 		Use:   "tag [<version>] [<label>]",
 		Short: "Manage tags for commits",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// List tags
-			if listTags {
+			// Delete tag
+			if deleteTag != "" {
+				if err := application.TagDelete(deleteTag); err != nil {
+					return err
+				}
+				fmt.Printf("Deleted tag %s\n", deleteTag)
+				return nil
+			}
+
+			// List tags: --list, drift tag (no args), or drift tag list
+			if listTags || len(args) == 0 || (len(args) == 1 && args[0] == "list") {
 				entries, err := application.TagList()
 				if err != nil {
 					return err
@@ -40,15 +49,6 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 				return nil
 			}
 
-			// Delete tag
-			if deleteTag != "" {
-				if err := application.TagDelete(deleteTag); err != nil {
-					return err
-				}
-				fmt.Printf("Deleted tag %s\n", deleteTag)
-				return nil
-			}
-
 			// Add tag
 			if len(args) == 2 {
 				version := args[0]
@@ -60,7 +60,7 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 				return nil
 			}
 
-			return fmt.Errorf("usage: drift tag <version> <label> or drift tag --list")
+			return fmt.Errorf("usage: drift tag <version> <label> or drift tag [list]")
 		},
 	}
 

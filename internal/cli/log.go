@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	apppkg "github.com/drift/drift/internal/app"
 	"github.com/drift/drift/internal/core"
@@ -73,10 +74,7 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 				id = id[:8]
 			}
 			tags := tagsByHash[c.Hash]
-			var tag string
-			if len(tags) > 0 {
-				tag = tags[0]
-			}
+			tag := strings.Join(tags, ", ")
 			msg := c.Message
 			if len(msg) > msgWidth {
 				msg = msg[:msgWidth-3] + "..."
@@ -90,7 +88,7 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 		tags := tagsByHash[c.Hash]
 		fmt.Printf("commit %s\n", c.ID)
 		if len(tags) > 0 {
-			fmt.Printf("Tags:    %s\n", tags[0])
+			fmt.Printf("Tags:    %s\n", strings.Join(tags, ", "))
 		}
 		if c.Author.Email != "" {
 			fmt.Printf("Author:  %s <%s>\n", c.Author.Name, c.Author.Email)

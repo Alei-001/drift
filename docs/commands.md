@@ -553,7 +553,9 @@ drift diff a1b2c3d4 e5f6a7b8 -p --output diff.txt   # 保存差异到文件
 
 ```bash
 drift tag <版本> <标签名>       # 为版本设置标签
-drift tag --list                # 查看所有标签
+drift tag                       # 查看所有标签（无参）
+drift tag list                  # 查看所有标签（显式）
+drift tag --list                # 查看所有标签（--list 标志）
 drift tag --delete <标签名>     # 删除标签
 ```
 
@@ -563,7 +565,8 @@ drift tag --delete <标签名>     # 删除标签
 drift tag a1b2c3d4 v1                # 为版本 a1b2c3d4 设置标签 "v1"
 drift tag e5f6a7b8 final             # 为版本 e5f6a7b8 设置标签 "final"
 drift tag a1b2 v1                    # 支持缩写前缀（等价于上一条）
-drift tag --list                     # 查看所有标签
+drift tag                            # 查看所有标签
+drift tag list                       # 同上
 drift tag --delete v1                # 删除标签
 ```
 
@@ -571,8 +574,8 @@ drift tag --delete v1                # 删除标签
 	- 标签为版本提供一个易记的名称
 	- 标签可在所有需要版本号的命令中使用（diff、export、restore 等）
 	- 标签以 `refs/tags/<标签>.ref` 存储在 `.drift/` 中
-	- 同一版本可拥有多个标签
-	- 标签显示在 `drift log` 输出中（如 `a1b2c3d4 (v1) [main] ...`）
+	- 同一版本可拥有多个标签（`drift log` 以逗号分隔显示）
+	- 标签不能指向不同版本；修改标签需先 `--delete` 再重新添加
 
 ---
 
