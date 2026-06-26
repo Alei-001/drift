@@ -106,6 +106,9 @@ func (a *App) BranchDelete(name string) error {
 	}); err != nil {
 		return err
 	}
+
+	a.autoGC()
+
 	return nil
 }
 

@@ -166,6 +166,83 @@ func (s *Store) OpenObject(hash string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("%w: object %s", ErrObjectNotFound, hash[:8])
 }
 
+// ObjectEntry describes a stored object discovered by ListObjectEntries.
+type ObjectEntry struct {
+	Hash string
+	Type core.ObjectType
+	Size int64
+}
+
+// ListObjectEntries scans all three object directories and returns every
+// stored object. Used by GC to find candidates for pruning.
+func (s *Store) ListObjectEntries() ([]ObjectEntry, error) {
+	var entries []ObjectEntry
+
+	for _, dir := range []string{blobsDir, treesDir, commitsDir} {
+		fullDir := filepath.Join(s.DriftDir(), dir)
+		subs, err := os.ReadDir(fullDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		for _, sub := range subs {
+			if !sub.IsDir() || len(sub.Name()) != 2 {
+				continue
+			}
+			subPath := filepath.Join(fullDir, sub.Name())
+			files, err := os.ReadDir(subPath)
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range files {
+				if f.IsDir() {
+					continue
+				}
+				name := f.Name()
+				var hash string
+				var objType core.ObjectType
+				switch {
+				case strings.HasSuffix(name, ".dre"):
+					hash = sub.Name() + name[:len(name)-4]
+					objType = core.TreeObject
+				case strings.HasSuffix(name, ".dcm"):
+					hash = sub.Name() + name[:len(name)-4]
+					objType = core.CommitObject
+				default:
+					hash = sub.Name() + name
+					objType = core.BlobObject
+				}
+				info, err := f.Info()
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, ObjectEntry{
+					Hash: hash,
+					Type: objType,
+					Size: info.Size(),
+				})
+			}
+		}
+	}
+	return entries, nil
+}
+
+// DeleteObject removes the object with the given hash from disk.
+// It tries all three object paths and returns nil if the object
+// was found and deleted, or ErrObjectNotFound if it doesn't exist.
+func (s *Store) DeleteObject(hash string) error {
+	for _, p := range []string{s.blobPath(hash), s.treePath(hash), s.commitPath(hash)} {
+		if err := os.Remove(p); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return ErrObjectNotFound
+}
+
 func (s *Store) PutBlob(data []byte) (string, error) {
 	unlock, err := s.lock()
 	if err != nil {

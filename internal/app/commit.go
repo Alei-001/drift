@@ -167,6 +167,8 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 			fmt.Fprintf(os.Stderr, "Warning: sync failed: %v\n", err)
 		}
 
+		a.autoGC()
+
 		return &SaveResult{
 			ID:          commit.ID,
 			Message:     message,
@@ -208,6 +210,8 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	if err := a.AutoSync(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: sync failed: %v\n", err)
 	}
+
+	a.autoGC()
 
 	return &SaveResult{
 		ID:          commit.ID,

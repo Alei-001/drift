@@ -114,7 +114,13 @@ func getLocalConfigValue(cfg *config.Config, key string) (string, error) {
 	case "core.default_branch":
 		return cfg.Core.DefaultBranch, nil
 	case "sync.enabled":
-		return strconv.FormatBool(cfg.Sync.Enabled), nil
+			return strconv.FormatBool(cfg.Sync.Enabled), nil
+		case "gc.auto":
+			v := cfg.Core.GCAuto
+			if v == 0 {
+				v = 1000
+			}
+			return strconv.Itoa(v), nil
 	default:
 		return "", fmt.Errorf("unknown config key: %s", key)
 	}
@@ -131,11 +137,17 @@ func setLocalConfigValue(cfg *config.Config, key, value string) error {
 	case "core.default_branch":
 		cfg.Core.DefaultBranch = value
 	case "sync.enabled":
-		v, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid boolean value for sync.enabled: %s", value)
-		}
-		cfg.Sync.Enabled = v
+			v, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("invalid boolean value for sync.enabled: %s", value)
+			}
+			cfg.Sync.Enabled = v
+		case "gc.auto":
+			v, err := strconv.Atoi(value)
+			if err != nil || v < 0 {
+				return fmt.Errorf("invalid integer value for gc.auto: %s", value)
+			}
+			cfg.Core.GCAuto = v
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -153,7 +165,9 @@ func unsetLocalConfigValue(cfg *config.Config, key string) error {
 	case "core.default_branch":
 		cfg.Core.DefaultBranch = ""
 	case "sync.enabled":
-		cfg.Sync.Enabled = false
+			cfg.Sync.Enabled = false
+		case "gc.auto":
+			cfg.Core.GCAuto = 0
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -162,12 +176,13 @@ func unsetLocalConfigValue(cfg *config.Config, key string) error {
 
 func listLocalConfig(cfg *config.Config) []ConfigEntry {
 	return []ConfigEntry{
-		{Key: "core.autocrlf", Value: cfg.Core.AutoCRLF},
-		{Key: "core.default_branch", Value: cfg.Core.DefaultBranch},
-		{Key: "sync.enabled", Value: strconv.FormatBool(cfg.Sync.Enabled)},
-		{Key: "user.name", Value: cfg.User.Name},
-		{Key: "user.email", Value: cfg.User.Email},
-	}
+			{Key: "core.autocrlf", Value: cfg.Core.AutoCRLF},
+			{Key: "core.default_branch", Value: cfg.Core.DefaultBranch},
+			{Key: "gc.auto", Value: strconv.Itoa(func() int { v := cfg.Core.GCAuto; if v == 0 { return 1000 }; return v }())},
+			{Key: "sync.enabled", Value: strconv.FormatBool(cfg.Sync.Enabled)},
+			{Key: "user.name", Value: cfg.User.Name},
+			{Key: "user.email", Value: cfg.User.Email},
+		}
 }
 
 func portStr(p int) string {

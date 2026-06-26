@@ -82,3 +82,30 @@ func collectTreeObjects(store CommitTreeStore, tree *Tree, hash string, result m
 
 	return nil
 }
+
+// CollectReachable walks the commit DAG from every starting hash in
+// startHashes and returns the union of all reachable object hashes
+// with their types. Missing commits (e.g. from a corrupted reflog entry)
+// are silently skipped so GC can still proceed on good data.
+func CollectReachable(store CommitTreeStore, startHashes []string) map[string]ObjectType {
+	result := make(map[string]ObjectType)
+
+	for _, hash := range startHashes {
+		if hash == "" {
+			continue
+		}
+		// Best-effort: skip commits that can't be found.
+		if _, err := store.GetCommit(hash); err != nil {
+			continue
+		}
+		objs, err := ReachableObjects(store, hash, "")
+		if err != nil {
+			continue
+		}
+		for k, v := range objs {
+			result[k] = v
+		}
+	}
+
+	return result
+}

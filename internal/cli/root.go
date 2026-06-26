@@ -108,6 +108,7 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	// root.AddCommand(NewCloneCmd(application))
 	root.AddCommand(NewConfigCmd(application))
 	// root.AddCommand(NewSyncCmd(application))
+	root.AddCommand(NewGCCmd(application))
 
 	return root
 }
