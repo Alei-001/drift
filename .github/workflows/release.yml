@@ -59,13 +59,27 @@ jobs:
             dist/drift.exe
             dist/drift-setup-*.exe
 
+      - name: Extract release notes from changelog
+        shell: pwsh
+        run: |
+          $changelog = Get-Content docs/CHANGELOG.md -Raw
+          # Extract from "## v$env:DRIFT_VERSION" to the end of the file.
+          $pattern = "## v$($env:DRIFT_VERSION) .*"
+          if ($changelog -match "(?s)($pattern.*)`$") {
+            $notes = $matches[1]
+          } else {
+            $notes = "Drift v$env:DRIFT_VERSION"
+          }
+          $notes | Out-File -FilePath release-notes.md -Encoding UTF8
+          Write-Host "Release notes: $($notes.Length) chars"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Drift v${{ env.DRIFT_VERSION }}
+          body_path: release-notes.md
           files: |
             dist/drift.exe
             dist/drift-setup-*.exe
-          generate_release_notes: true
           draft: false
           prerelease: false
