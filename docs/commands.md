@@ -748,7 +748,38 @@ drift config --global --unset <key>  # 清除全局配置值
 | `remote.share` | 全局 | SMB 共享名（SMB 协议专用） | 空 |
 | `remote.key_path` | 全局 | SSH 私钥路径（SFTP 协议专用） | 空 |
 
-> **注意**：`remote.*` 配置项通常通过 `drift sync remote` 命令设置，直接用 `drift config` 设置时会提示使用 `drift sync remote`。
+> **注意**：`remote.*` 配置项推荐通过 `drift sync remote` 命令设置，但也可以直接用 `drift config --global` 操作。
+
+**输出示例：**
+
+```bash
+# 列出项目配置（分组格式，含全部可配项和默认值）
+$ drift config
+[core]
+  autocrlf       = 
+  default_branch = main
+[sync]
+  enabled        = false
+[user]
+  name           = 
+  email          = 
+
+# 列出全局配置
+$ drift config --global
+[remote]
+  protocol              = local
+  host                  = 
+  port                  = 
+  path                  = /nas/projects
+  username              = 
+  tls                   = false
+  insecure_skip_verify  = false
+  share                 = 
+  key_path              = 
+[user]
+  name                  = alei
+  email                 = alei
+```
 
 **示例：**
 

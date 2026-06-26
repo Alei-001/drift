@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	apppkg "github.com/drift/drift/internal/app"
 	"github.com/spf13/cobra"
@@ -59,14 +60,7 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
-			if len(entries) == 0 {
-				fmt.Println("No config set")
-				return nil
-			}
-
-			for _, e := range entries {
-				fmt.Printf("%s = %s\n", e.Key, e.Value)
-			}
+			formatConfigList(entries)
 			return nil
 		},
 	}
@@ -75,4 +69,32 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 	cmd.Flags().StringVar(&unset, "unset", "", "Unset a config option")
 
 	return cmd
+}
+
+func formatConfigList(entries []apppkg.ConfigEntry) {
+	sectionOrder := []string{"core", "sync", "user", "remote"}
+	bySection := make(map[string][]apppkg.ConfigEntry)
+	for _, e := range entries {
+		sec, _, _ := strings.Cut(e.Key, ".")
+		bySection[sec] = append(bySection[sec], e)
+	}
+
+	for _, sec := range sectionOrder {
+		group, ok := bySection[sec]
+		if !ok {
+			continue
+		}
+		keyWidth := 0
+		for _, e := range group {
+			_, name, _ := strings.Cut(e.Key, ".")
+			if len(name) > keyWidth {
+				keyWidth = len(name)
+			}
+		}
+		fmt.Printf("[%s]\n", sec)
+		for _, e := range group {
+			_, name, _ := strings.Cut(e.Key, ".")
+			fmt.Printf("  %-*s = %s\n", keyWidth, name, e.Value)
+		}
+	}
 }

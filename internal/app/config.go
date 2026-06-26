@@ -162,21 +162,36 @@ func unsetLocalConfigValue(cfg *config.Config, key string) error {
 }
 
 func listLocalConfig(cfg *config.Config) []ConfigEntry {
-	var entries []ConfigEntry
-	if cfg.User.Name != "" {
-		entries = append(entries, ConfigEntry{Key: "user.name", Value: cfg.User.Name})
+	return []ConfigEntry{
+		{Key: "core.autocrlf", Value: cfg.Core.AutoCRLF},
+		{Key: "core.default_branch", Value: cfg.Core.DefaultBranch},
+		{Key: "sync.enabled", Value: strconv.FormatBool(cfg.Sync.Enabled)},
+		{Key: "user.name", Value: cfg.User.Name},
+		{Key: "user.email", Value: cfg.User.Email},
 	}
-	if cfg.User.Email != "" {
-		entries = append(entries, ConfigEntry{Key: "user.email", Value: cfg.User.Email})
+}
+
+func portStr(p int) string {
+	if p == 0 {
+		return ""
 	}
-	if cfg.Core.AutoCRLF != "" {
-		entries = append(entries, ConfigEntry{Key: "core.autocrlf", Value: cfg.Core.AutoCRLF})
+	return strconv.Itoa(p)
+}
+
+func listGlobalConfig(gcfg *driftsync.GlobalConfig) []ConfigEntry {
+	return []ConfigEntry{
+		{Key: "remote.protocol", Value: gcfg.Protocol},
+		{Key: "remote.host", Value: gcfg.Host},
+		{Key: "remote.port", Value: portStr(gcfg.Port)},
+		{Key: "remote.path", Value: gcfg.Path},
+		{Key: "remote.username", Value: gcfg.Username},
+		{Key: "remote.tls", Value: strconv.FormatBool(gcfg.TLS)},
+		{Key: "remote.insecure_skip_verify", Value: strconv.FormatBool(gcfg.InsecureSkipVerify)},
+		{Key: "remote.share", Value: gcfg.Share},
+		{Key: "remote.key_path", Value: gcfg.KeyPath},
+		{Key: "user.name", Value: gcfg.User.Name},
+		{Key: "user.email", Value: gcfg.User.Email},
 	}
-	if cfg.Core.DefaultBranch != "" {
-		entries = append(entries, ConfigEntry{Key: "core.default_branch", Value: cfg.Core.DefaultBranch})
-	}
-	entries = append(entries, ConfigEntry{Key: "sync.enabled", Value: strconv.FormatBool(cfg.Sync.Enabled)})
-	return entries
 }
 
 func getGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) (string, error) {
@@ -281,43 +296,5 @@ func unsetGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) error {
 		return fmt.Errorf("unknown global config key: %s", key)
 	}
 	return nil
-}
-
-func listGlobalConfig(gcfg *driftsync.GlobalConfig) []ConfigEntry {
-	var entries []ConfigEntry
-	if gcfg.User.Name != "" {
-		entries = append(entries, ConfigEntry{Key: "user.name", Value: gcfg.User.Name})
-	}
-	if gcfg.User.Email != "" {
-		entries = append(entries, ConfigEntry{Key: "user.email", Value: gcfg.User.Email})
-	}
-	if gcfg.Protocol != "" {
-		entries = append(entries, ConfigEntry{Key: "remote.protocol", Value: gcfg.Protocol})
-	}
-	if gcfg.Host != "" {
-		entries = append(entries, ConfigEntry{Key: "remote.host", Value: gcfg.Host})
-	}
-	if gcfg.Port != 0 {
-		entries = append(entries, ConfigEntry{Key: "remote.port", Value: strconv.Itoa(gcfg.Port)})
-	}
-	if gcfg.Path != "" {
-		entries = append(entries, ConfigEntry{Key: "remote.path", Value: gcfg.Path})
-	}
-	if gcfg.Username != "" {
-		entries = append(entries, ConfigEntry{Key: "remote.username", Value: gcfg.Username})
-	}
-	if gcfg.TLS {
-		entries = append(entries, ConfigEntry{Key: "remote.tls", Value: "true"})
-	}
-	if gcfg.InsecureSkipVerify {
-		entries = append(entries, ConfigEntry{Key: "remote.insecure_skip_verify", Value: "true"})
-	}
-	if gcfg.Share != "" {
-		entries = append(entries, ConfigEntry{Key: "remote.share", Value: gcfg.Share})
-	}
-	if gcfg.KeyPath != "" {
-		entries = append(entries, ConfigEntry{Key: "remote.key_path", Value: gcfg.KeyPath})
-	}
-	return entries
 }
 
