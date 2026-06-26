@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	apppkg "github.com/drift/drift/internal/app"
 	"github.com/spf13/cobra"
 )
+
+var emailRegex = regexp.MustCompile(`^[\w.!#$%&'*+/=?^_` + "`" + `{|}~-]+@[\w.-]+\.[a-zA-Z]{2,}$`)
 
 // NewInitCmd creates the init subcommand.
 func NewInitCmd(application *apppkg.App) *cobra.Command {
@@ -37,22 +40,24 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Warning: could not read global config: %v\n", err)
 			}
 
-			name, email := promptUserInfoNew(defaultName, defaultEmail)
+			if defaultName != "" && defaultEmail != "" {
+				fmt.Printf("Using global user config: %s <%s>\n", defaultName, defaultEmail)
+			} else {
+				name, email := promptUserInfoNew(defaultName, defaultEmail)
 
-			// Save user info to global config so all projects inherit it.
-			// Only update if the user provided new values.
-			if name != "" {
-				if err := application.ConfigSet(apppkg.GlobalScope, "user.name", name); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+				if name != "" {
+					if err := application.ConfigSet(apppkg.GlobalScope, "user.name", name); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+					}
 				}
-			}
-			if email != "" {
-				if err := application.ConfigSet(apppkg.GlobalScope, "user.email", email); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+				if email != "" {
+					if err := application.ConfigSet(apppkg.GlobalScope, "user.email", email); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+					}
 				}
-			}
-			if name != "" || email != "" {
-				fmt.Println("Saved your name and email globally for all projects.")
+				if name != "" || email != "" {
+					fmt.Println("Saved your name and email globally for all projects.")
+				}
 			}
 
 			fmt.Println("\nNext steps:")
@@ -97,6 +102,23 @@ func promptUserInfoNew(defaultName, defaultEmail string) (name, email string) {
 	}
 	input, _ = reader.ReadString('\n')
 	input = strings.TrimSpace(input)
+
+	if input != "" {
+		for !emailRegex.MatchString(input) {
+			fmt.Println("Invalid email format, please try again.")
+			if defaultEmail != "" {
+				fmt.Printf("Your email [%s]: ", defaultEmail)
+			} else {
+				fmt.Print("Your email: ")
+			}
+			input, _ = reader.ReadString('\n')
+			input = strings.TrimSpace(input)
+			if input == "" {
+				break
+			}
+		}
+	}
+
 	if input != "" {
 		email = input
 	} else {
