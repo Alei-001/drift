@@ -42,8 +42,23 @@ func NewReflogCmd(application *apppkg.App) *cobra.Command {
 
 // formatOperations displays operations in human-readable format.
 func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
+	descWidth := 20
 	for _, op := range operations {
-		fmt.Printf("%s  %-6s  %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, op.Desc)
+		if len(op.Desc) > descWidth {
+			descWidth = len(op.Desc)
+		}
+	}
+	if descWidth > 60 {
+		descWidth = 60
+	}
+
+	fmt.Printf("%-19s  %-6s  %-*s\n", "DATE", "OP", descWidth, "DESCRIPTION")
+	for _, op := range operations {
+		desc := op.Desc
+		if len(desc) > descWidth {
+			desc = desc[:descWidth-3] + "..."
+		}
+		fmt.Printf("%-19s  %-6s  %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, desc)
 		if verbose && len(op.RefChanges) > 0 {
 			for _, change := range op.RefChanges {
 				fmt.Printf("  %s: %s -> %s\n", change.Ref, change.Before, change.After)
