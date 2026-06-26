@@ -6,10 +6,8 @@ import (
 )
 
 type TreeBuilder struct {
-	trees    map[string]*Tree
-	store    func(*Tree) error
-	baseTree *Tree       // old tree from parent commit (for subtree reuse)
-	reader   StoreReader // used to load subtrees from baseTree
+	trees map[string]*Tree
+	store func(*Tree) error
 }
 
 func NewTreeBuilder(storeFn func(*Tree) error) *TreeBuilder {
@@ -28,7 +26,7 @@ func (b *TreeBuilder) BuildFromIndex(idx *Index) (*Tree, error) {
 		b.addEntry(&idx.Entries[i])
 	}
 
-	return b.buildTree("")
+	return b.buildTree("", nil, nil)
 }
 
 // BuildFromIndexWithBase builds a new tree from the index, reusing unchanged
@@ -38,17 +36,12 @@ func (b *TreeBuilder) BuildFromIndex(idx *Index) (*Tree, error) {
 func (b *TreeBuilder) BuildFromIndexWithBase(idx *Index, baseTree *Tree, reader StoreReader) (*Tree, error) {
 	b.trees = make(map[string]*Tree)
 	b.trees[""] = &Tree{}
-	b.baseTree = baseTree
-	b.reader = reader
 
 	for i := range idx.Entries {
 		b.addEntry(&idx.Entries[i])
 	}
 
-	result, err := b.buildTree("")
-	b.baseTree = nil
-	b.reader = nil
-	return result, err
+	return b.buildTree("", baseTree, reader)
 }
 
 func (b *TreeBuilder) addEntry(entry *IndexEntry) {
@@ -96,7 +89,7 @@ func (b *TreeBuilder) getOrCreateTree(treePath string) *Tree {
 	return t
 }
 
-func (b *TreeBuilder) buildTree(treePath string) (*Tree, error) {
+func (b *TreeBuilder) buildTree(treePath string, baseTree *Tree, reader StoreReader) (*Tree, error) {
 	t := b.trees[treePath]
 	if t == nil {
 		return &Tree{}, nil
@@ -105,7 +98,7 @@ func (b *TreeBuilder) buildTree(treePath string) (*Tree, error) {
 	for i := range t.Entries {
 		if t.Entries[i].Type == TreeObject {
 			subPath := path.Join(treePath, t.Entries[i].Name)
-			subTree, err := b.buildTree(subPath)
+			subTree, err := b.buildTree(subPath, baseTree, reader)
 			if err != nil {
 				return nil, err
 			}
@@ -115,8 +108,8 @@ func (b *TreeBuilder) buildTree(treePath string) (*Tree, error) {
 
 	// Try to reuse the old subtree when it has identical entries, avoiding
 	// Marshal + CalculateHash + PutTree for unchanged directories.
-	if b.baseTree != nil && b.reader != nil {
-		if oldSub, err := b.findBaseSubtree(treePath); err == nil && oldSub != nil {
+	if baseTree != nil && reader != nil {
+		if oldSub, err := findBaseSubtree(baseTree, reader, treePath); err == nil && oldSub != nil {
 			if treeEntriesEqual(t.Entries, oldSub.Entries) {
 				result := &Tree{Hash: oldSub.Hash, Entries: t.Entries}
 				if b.store != nil {
@@ -145,17 +138,17 @@ func (b *TreeBuilder) buildTree(treePath string) (*Tree, error) {
 
 // findBaseSubtree walks baseTree to find the subtree at the given path.
 // Returns nil if the path doesn't exist in the base tree.
-func (b *TreeBuilder) findBaseSubtree(treePath string) (*Tree, error) {
+func findBaseSubtree(baseTree *Tree, reader StoreReader, treePath string) (*Tree, error) {
 	if treePath == "" {
-		return b.baseTree, nil
+		return baseTree, nil
 	}
-	cur := b.baseTree
+	cur := baseTree
 	parts := strings.Split(treePath, "/")
 	for _, part := range parts {
 		found := false
 		for i := range cur.Entries {
 			if cur.Entries[i].Name == part && cur.Entries[i].Type == TreeObject {
-				sub, err := b.reader.GetTree(cur.Entries[i].Hash)
+				sub, err := reader.GetTree(cur.Entries[i].Hash)
 				if err != nil {
 					return nil, err
 				}
