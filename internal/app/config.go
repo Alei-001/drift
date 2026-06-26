@@ -200,8 +200,12 @@ func getGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) (string, err
 		return gcfg.Username, nil
 	case "remote.tls":
 		return strconv.FormatBool(gcfg.TLS), nil
+	case "remote.insecure_skip_verify":
+		return strconv.FormatBool(gcfg.InsecureSkipVerify), nil
 	case "remote.share":
 		return gcfg.Share, nil
+	case "remote.key_path":
+		return gcfg.KeyPath, nil
 	default:
 		return "", fmt.Errorf("unknown global config key: %s", key)
 	}
@@ -213,6 +217,36 @@ func setGlobalConfigValue(gcfg *driftsync.GlobalConfig, key, value string) error
 		gcfg.User.Name = value
 	case "user.email":
 		gcfg.User.Email = value
+	case "remote.protocol":
+		gcfg.Protocol = value
+	case "remote.host":
+		gcfg.Host = value
+	case "remote.port":
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid integer value for %s: %s", key, value)
+		}
+		gcfg.Port = v
+	case "remote.path":
+		gcfg.Path = value
+	case "remote.username":
+		gcfg.Username = value
+	case "remote.tls":
+		v, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean value for %s: %s", key, value)
+		}
+		gcfg.TLS = v
+	case "remote.insecure_skip_verify":
+		v, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean value for %s: %s", key, value)
+		}
+		gcfg.InsecureSkipVerify = v
+	case "remote.share":
+		gcfg.Share = value
+	case "remote.key_path":
+		gcfg.KeyPath = value
 	default:
 		return fmt.Errorf("unknown global config key: %s", key)
 	}
@@ -225,6 +259,24 @@ func unsetGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) error {
 		gcfg.User.Name = ""
 	case "user.email":
 		gcfg.User.Email = ""
+	case "remote.protocol":
+		gcfg.Protocol = ""
+	case "remote.host":
+		gcfg.Host = ""
+	case "remote.port":
+		gcfg.Port = 0
+	case "remote.path":
+		gcfg.Path = ""
+	case "remote.username":
+		gcfg.Username = ""
+	case "remote.tls":
+		gcfg.TLS = false
+	case "remote.insecure_skip_verify":
+		gcfg.InsecureSkipVerify = false
+	case "remote.share":
+		gcfg.Share = ""
+	case "remote.key_path":
+		gcfg.KeyPath = ""
 	default:
 		return fmt.Errorf("unknown global config key: %s", key)
 	}
@@ -239,7 +291,6 @@ func listGlobalConfig(gcfg *driftsync.GlobalConfig) []ConfigEntry {
 	if gcfg.User.Email != "" {
 		entries = append(entries, ConfigEntry{Key: "user.email", Value: gcfg.User.Email})
 	}
-	// Add remote.* keys
 	if gcfg.Protocol != "" {
 		entries = append(entries, ConfigEntry{Key: "remote.protocol", Value: gcfg.Protocol})
 	}
@@ -258,8 +309,14 @@ func listGlobalConfig(gcfg *driftsync.GlobalConfig) []ConfigEntry {
 	if gcfg.TLS {
 		entries = append(entries, ConfigEntry{Key: "remote.tls", Value: "true"})
 	}
+	if gcfg.InsecureSkipVerify {
+		entries = append(entries, ConfigEntry{Key: "remote.insecure_skip_verify", Value: "true"})
+	}
 	if gcfg.Share != "" {
 		entries = append(entries, ConfigEntry{Key: "remote.share", Value: gcfg.Share})
+	}
+	if gcfg.KeyPath != "" {
+		entries = append(entries, ConfigEntry{Key: "remote.key_path", Value: gcfg.KeyPath})
 	}
 	return entries
 }

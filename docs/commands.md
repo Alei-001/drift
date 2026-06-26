@@ -710,12 +710,13 @@ drift wip drop                  # 丢弃当前分支的 WIP
 查看或设置配置选项。支持项目级配置（`.drift/config.json`）和全局配置（`~/.drift/global.json`）。
 
 ```bash
-drift config <key>              # 查看配置值
-drift config <key> <value>      # 设置项目配置值
+drift config                       # 列出项目配置（无参）
+drift config list                  # 列出项目配置（显式）
+drift config --global              # 列出全局配置
+drift config <key>                 # 查看配置值
+drift config <key> <value>         # 设置项目配置值
 drift config --global <key> <value>  # 设置全局配置值
-drift config --list             # 列出所有配置（含全局、项目、同步、远程）
-drift config --global --list    # 仅列出全局配置
-drift config --unset <key>      # 清除项目配置值
+drift config --unset <key>         # 清除项目配置值
 drift config --global --unset <key>  # 清除全局配置值
 ```
 
@@ -737,13 +738,15 @@ drift config --global --unset <key>  # 清除全局配置值
 | `core.default_branch` | 项目 | 默认分支名称 | `main` |
 | `core.autocrlf` | 项目 | CRLF 换行符归一化策略 | `""`（不做转换） |
 | `sync.enabled` | 项目 | 是否启用自动同步 | `false` |
-| `sync.auto_after_save` | 项目 | 保存后是否自动触发同步 | `true` |
 | `remote.protocol` | 全局 | 远程协议（local/webdav/ftp/sftp/smb） | 空 |
 | `remote.host` | 全局 | 远程主机地址 | 空 |
 | `remote.port` | 全局 | 远程主机端口 | 空 |
 | `remote.path` | 全局 | 远程根路径 | 空 |
 | `remote.username` | 全局 | 远程登录用户名 | 空 |
 | `remote.tls` | 全局 | 是否启用 TLS | `false` |
+| `remote.insecure_skip_verify` | 全局 | 跳过 TLS 证书验证（自签名证书用） | `false` |
+| `remote.share` | 全局 | SMB 共享名（SMB 协议专用） | 空 |
+| `remote.key_path` | 全局 | SSH 私钥路径（SFTP 协议专用） | 空 |
 
 > **注意**：`remote.*` 配置项通常通过 `drift sync remote` 命令设置，直接用 `drift config` 设置时会提示使用 `drift sync remote`。
 
@@ -757,8 +760,8 @@ drift config user.name "项目专用名"     # 项目级覆盖全局
 drift config user.name                  # 查看当前用户名（项目优先，回退全局）
 
 # 列出配置
-drift config --list                     # 列出所有配置（全局+项目+同步+远程）
-drift config --global --list            # 仅列出全局配置
+drift config                            # 列出所有项目配置
+drift config --global                   # 列出所有全局配置
 
 # 清除配置
 drift config --unset user.email         # 清除项目级邮箱（回退到全局）

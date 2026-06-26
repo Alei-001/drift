@@ -10,9 +10,8 @@ import (
 // NewConfigCmd creates the config subcommand.
 func NewConfigCmd(application *apppkg.App) *cobra.Command {
 	var (
-		global  bool
-		list    bool
-		unset   string
+		global bool
+		unset  string
 	)
 
 	cmd := &cobra.Command{
@@ -24,19 +23,6 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 				scope = apppkg.GlobalScope
 			}
 
-			// List all config
-			if list {
-				entries, err := application.ConfigList(scope)
-				if err != nil {
-					return err
-				}
-
-				for _, e := range entries {
-					fmt.Printf("%s = %s\n", e.Key, e.Value)
-				}
-				return nil
-			}
-
 			// Unset config
 			if unset != "" {
 				if err := application.ConfigUnset(scope, unset); err != nil {
@@ -46,8 +32,8 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 				return nil
 			}
 
-			// Get config
-			if len(args) == 1 {
+			// Get config (single arg, not "list")
+			if len(args) == 1 && args[0] != "list" {
 				value, err := application.ConfigGet(scope, args[0])
 				if err != nil {
 					return err
@@ -57,7 +43,7 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			// Set config
-			if len(args) == 2 {
+			if len(args) >= 2 {
 				key := args[0]
 				value := args[1]
 				if err := application.ConfigSet(scope, key, value); err != nil {
@@ -67,12 +53,25 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 				return nil
 			}
 
-			return cmd.Help()
+			// List all config: drift config, drift config list, drift config --global
+			entries, err := application.ConfigList(scope)
+			if err != nil {
+				return err
+			}
+
+			if len(entries) == 0 {
+				fmt.Println("No config set")
+				return nil
+			}
+
+			for _, e := range entries {
+				fmt.Printf("%s = %s\n", e.Key, e.Value)
+			}
+			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&global, "global", false, "Use global config")
-	cmd.Flags().BoolVar(&list, "list", false, "List all config options")
 	cmd.Flags().StringVar(&unset, "unset", "", "Unset a config option")
 
 	return cmd
