@@ -41,31 +41,31 @@ func NewBranchCmd(application *apppkg.App) *cobra.Command {
 				return nil
 			}
 
-			// Create branch
-			if len(args) > 0 {
-				name := args[0]
-				if err := application.BranchCreate(name); err != nil {
+			// List branches (no args or explicit "list")
+			if len(args) == 0 || args[0] == "list" {
+				branches, err := application.BranchList()
+				if err != nil {
 					return err
 				}
-				fmt.Printf("Created branch %s\n", name)
+
+				currentBranch := application.CurrentBranch()
+				for _, b := range branches {
+					if b == currentBranch {
+						fmt.Printf("* %s\n", b)
+					} else {
+						fmt.Printf("  %s\n", b)
+					}
+				}
+
 				return nil
 			}
 
-			// List branches
-			branches, err := application.BranchList()
-			if err != nil {
+			// Create branch
+			name := args[0]
+			if err := application.BranchCreate(name); err != nil {
 				return err
 			}
-
-			currentBranch := application.CurrentBranch()
-			for _, b := range branches {
-				if b == currentBranch {
-					fmt.Printf("* %s\n", b)
-				} else {
-					fmt.Printf("  %s\n", b)
-				}
-			}
-
+			fmt.Printf("Created branch %s\n", name)
 			return nil
 		},
 	}
