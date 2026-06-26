@@ -24,9 +24,21 @@ func NewStatusCmd(application *apppkg.App) *cobra.Command {
 
 			if porcelain {
 				printStatusPorcelain(*status)
-			} else {
-				printStatus(*status)
+				return nil
 			}
+
+			branch := application.CurrentBranch()
+			var version, tag string
+			commits, err := application.History(apppkg.HistoryOptions{Branch: branch, Limit: 1})
+			if err == nil && len(commits) > 0 {
+				version = commits[0].ID
+				tagsByHash := application.TagsByHash()
+				if t, ok := tagsByHash[commits[0].Hash]; ok && len(t) > 0 {
+					tag = t[0]
+				}
+			}
+
+			printStatus(*status, branch, version, tag)
 			return nil
 		},
 	}
@@ -36,7 +48,15 @@ func NewStatusCmd(application *apppkg.App) *cobra.Command {
 	return cmd
 }
 
-func printStatus(s core.Status) {
+func printStatus(s core.Status, branch, version, tag string) {
+	if branch != "" && version != "" {
+		if tag != "" {
+			fmt.Printf("On branch %s, version %s (%s)\n\n", branch, version, tag)
+		} else {
+			fmt.Printf("On branch %s, version %s\n\n", branch, version)
+		}
+	}
+
 	if s.IsClean() {
 		fmt.Println("Nothing to commit, working tree clean")
 		return
