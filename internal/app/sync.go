@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/drift/drift/internal/config"
+	"github.com/drift/drift/internal/core"
+	"github.com/drift/drift/internal/storage"
 	driftsync "github.com/drift/drift/internal/sync"
 )
 
@@ -18,15 +18,15 @@ type SyncStatus struct {
 }
 
 type SyncRemoteOptions struct {
-	Host              string
-	Port              int
-	Path              string
-	Username          string
-	Password          string
-	TLS               bool
+	Host               string
+	Port               int
+	Path               string
+	Username           string
+	Password           string
+	TLS                bool
 	InsecureSkipVerify bool
-	Share             string
-	KeyPath           string
+	Share              string
+	KeyPath            string
 }
 
 type SyncRemoteInfo struct {
@@ -79,57 +79,95 @@ func (a *App) SyncDisable() error {
 	return nil
 }
 
-type SyncStats struct {
-	Pushed        int
-	Pulled        int
-	RemoteDeleted int
-	LocalDeleted  int
-	Conflicts     int
+type PushStats struct {
+	Branch string
+	Pushed int
 }
 
-func (a *App) SyncNow() (*SyncStats, error) {
+func (a *App) Push(branch string) (*PushStats, error) {
 	if !a.IsInitialized() {
 		return nil, fmt.Errorf("not a drift repository")
 	}
 
-	if !a.config.Sync.Enabled {
+	if !a.checkSyncEnabled() {
 		return nil, fmt.Errorf("sync is not enabled (run 'drift sync enable')")
+	}
+
+	if branch == "" {
+		branch = a.CurrentBranch()
 	}
 
 	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		return nil, err
 	}
-	if gcfg.Protocol == "" {
-		return nil, fmt.Errorf("no remote configured")
-	}
 
-	remoteName := a.config.Sync.RemoteName
-
-	transport, err := driftsync.ProjectTransportForConfig(gcfg, remoteName)
+	transport, err := driftsync.CreateTransport(gcfg, a.config.Sync.RemoteName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to remote: %w", err)
 	}
 	defer transport.Close()
 
-	engine := driftsync.NewEngine(transport, a.config.Sync.ProjectID)
-	result, err := engine.Sync(a.dir)
+	engine := driftsync.NewEngine(transport, a.store, a.dir)
+	result, err := engine.Push(branch)
 	if err != nil {
 		return nil, err
 	}
 
-	a.config.Sync.LastSync = time.Now().Format(time.RFC3339)
-	if err := config.SaveConfig(a.store.DriftDir(), a.config); err != nil {
+	return &PushStats{Branch: result.Branch, Pushed: result.Pushed}, nil
+}
+
+type PullStats struct {
+	Branch string
+	Pulled int
+}
+
+func (a *App) Pull(branch string) (*PullStats, error) {
+	if !a.IsInitialized() {
+		return nil, fmt.Errorf("not a drift repository")
+	}
+
+	if !a.checkSyncEnabled() {
+		return nil, fmt.Errorf("sync is not enabled (run 'drift sync enable')")
+	}
+
+	if branch == "" {
+		branch = a.CurrentBranch()
+	}
+
+	gcfg, err := config.LoadGlobalConfig()
+	if err != nil {
 		return nil, err
 	}
 
-	return &SyncStats{
-		Pushed:        len(result.Pushed),
-		Pulled:        len(result.Pulled),
-		RemoteDeleted: len(result.RemoteDeleted),
-		LocalDeleted:  len(result.LocalDeleted),
-		Conflicts:     len(result.Conflicts),
-	}, nil
+	transport, err := driftsync.CreateTransport(gcfg, a.config.Sync.RemoteName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to remote: %w", err)
+	}
+	defer transport.Close()
+
+	engine := driftsync.NewEngine(transport, a.store, a.dir)
+	result, err := engine.Pull(branch)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PullStats{Branch: result.Branch, Pulled: result.Pulled}, nil
+}
+
+func (a *App) SyncNow() (*PullStats, error) {
+	// Sync = push first, then pull.
+	branch := a.CurrentBranch()
+	if stats, err := a.Push(branch); err != nil {
+		return nil, fmt.Errorf("push: %w", err)
+	} else if stats.Pushed > 0 {
+		// Already pushed; continue to pull.
+	}
+	return a.Pull(branch)
+}
+
+func (a *App) checkSyncEnabled() bool {
+	return a.IsInitialized() && a.config.Sync.Enabled
 }
 
 func (a *App) SyncStatus() (*SyncStatus, error) {
@@ -211,8 +249,6 @@ func (a *App) SyncRemoteUnset() error {
 		return err
 	}
 
-	// Also disable sync in local config to avoid "no remote configured"
-	// errors on subsequent sync operations.
 	if a.IsInitialized() && a.config.Sync.Enabled {
 		a.config.Sync.Enabled = false
 		if err := config.SaveConfig(a.store.DriftDir(), a.config); err != nil {
@@ -252,46 +288,82 @@ func (a *App) Clone(remoteName, destDir string) (int, error) {
 			return 0, fmt.Errorf("destination %q is not empty", destDir)
 		}
 	}
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return 0, err
+	}
 
-	transport, err := driftsync.ProjectTransportForConfig(gcfg, remoteName)
+	transport, err := driftsync.CreateTransport(gcfg, remoteName)
 	if err != nil {
 		return 0, fmt.Errorf("failed to connect to remote: %w", err)
 	}
 	defer transport.Close()
 
-	files, err := transport.List("")
-	if err != nil {
-		return 0, fmt.Errorf("failed to list remote files: %w", err)
-	}
-	if len(files) == 0 {
-		return 0, fmt.Errorf("project %q not found or empty on remote", remoteName)
+	destStore := storage.NewStore(destDir)
+	if err := destStore.Init(); err != nil {
+		return 0, fmt.Errorf("init store: %w", err)
 	}
 
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	engine := driftsync.NewEngine(transport, destStore, destDir)
+	if err := engine.Clone(); err != nil {
+		return 0, fmt.Errorf("clone failed: %w", err)
+	}
+
+	// Find default branch from tracking refs.
+	mainHash := getRefByPrefix(destStore, "remotes/origin/heads/main")
+	if mainHash == "" {
+		mainHash = getRefByPrefix(destStore, "remotes/origin/main")
+	}
+	if mainHash == "" {
+		return 0, fmt.Errorf("no main branch found on remote")
+	}
+
+	if err := destStore.SaveRef("main", mainHash); err != nil {
+		return 0, fmt.Errorf("set main ref: %w", err)
+	}
+	if err := destStore.SaveRef("HEAD", "main"); err != nil {
+		return 0, fmt.Errorf("set HEAD: %w", err)
+	}
+
+	commit, err := destStore.GetCommit(mainHash)
+	if err != nil {
+		return 0, fmt.Errorf("get commit: %w", err)
+	}
+	tree, err := destStore.GetTree(commit.TreeHash)
+	if err != nil {
 		return 0, err
 	}
 
-	var downloaded int
-	for _, remotePath := range files {
-		cleaned := filepath.Clean(filepath.FromSlash(remotePath))
-		if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
-			return downloaded, fmt.Errorf("invalid remote path: %s", remotePath)
-		}
-		localPath := filepath.Join(destDir, filepath.FromSlash(remotePath))
-		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
-			return downloaded, err
-		}
-		f, err := os.Create(localPath)
-		if err != nil {
-			return downloaded, err
-		}
-		if err := transport.Get(remotePath, f); err != nil {
-			f.Close()
-			return downloaded, fmt.Errorf("failed to download %s: %w", remotePath, err)
-		}
-		f.Close()
-		downloaded++
+	reader := core.NewTreeReader(destStore)
+	blobs, err := reader.ListBlobs(tree, "")
+	if err != nil {
+		return 0, err
 	}
 
-	return downloaded, nil
+	return len(blobs), nil
+}
+
+func getRefByPrefix(store localStore, prefix string) string {
+	refs, err := store.ListRefs()
+	if err != nil {
+		return ""
+	}
+	for name, hash := range refs {
+		if stringHasPrefix(name, prefix) {
+			return hash
+		}
+	}
+	return ""
+}
+
+func stringHasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// localStore mirrors sync's localStore for compile-time compatibility.
+type localStore interface {
+	GetRef(name string) (string, error)
+	SaveRef(name string, hash string) error
+	ListRefs() (map[string]string, error)
+	GetCommit(hash string) (*core.Commit, error)
+	GetTree(hash string) (*core.Tree, error)
 }

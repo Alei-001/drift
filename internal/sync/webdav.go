@@ -1,9 +1,3 @@
-// webdav.go implements the WebDAV transport for remote synchronization.
-// This enables sync with WebDAV servers (Nextcloud, ownCloud, Synology NAS,
-// Nutstore, etc.) without requiring a local mount.
-//
-// Implementation uses the mature github.com/studio-b12/gowebdav library
-// instead of hand-rolled PROPFIND/PUT/GET XML handling.
 package sync
 
 import (
@@ -11,9 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path"
-	"sort"
 	"strings"
 	"time"
 
@@ -22,13 +14,12 @@ import (
 
 // WebDAVTransport implements the Transport interface over WebDAV.
 type WebDAVTransport struct {
-	client   *gowebdav.Client
-	basePath string // absolute base directory on the WebDAV server
+	client *gowebdav.Client
+	base   string // base URL for the project
 }
 
 // NewWebDAVTransport creates a transport for a WebDAV server.
-// baseURL should be the full URL to the directory that will contain
-// project subdirectories (e.g. https://cloud.example.com/remote.php/dav/files/user/drift).
+// baseURL is the full URL to the project directory on the server.
 func NewWebDAVTransport(baseURL, username, password string, insecureSkipVerify bool) *WebDAVTransport {
 	c := gowebdav.NewClient(baseURL, username, password)
 	c.SetTimeout(60 * time.Second)
@@ -37,83 +28,66 @@ func NewWebDAVTransport(baseURL, username, password string, insecureSkipVerify b
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		})
 	}
-	return &WebDAVTransport{
-		client:   c,
-		basePath: "/", // scope is already baked into baseURL by the caller
-	}
+	return &WebDAVTransport{client: c, base: strings.TrimRight(baseURL, "/")}
 }
 
-// absPath joins the remote-relative path with the base path.
-func (t *WebDAVTransport) absPath(remotePath string) string {
-	clean := strings.TrimPrefix(remotePath, "/")
-	if clean == "" {
-		return t.basePath
-	}
-	return path.Join(t.basePath, clean)
+func (t *WebDAVTransport) abs(key string) string {
+	return t.base + "/" + strings.TrimPrefix(key, "/")
 }
 
-// Get downloads a remote file and writes it to dst.
-func (t *WebDAVTransport) Get(remotePath string, dst io.Writer) error {
-	rc, err := t.client.ReadStream(t.absPath(remotePath))
+func (t *WebDAVTransport) Get(key string) (io.ReadCloser, error) {
+	rc, err := t.client.ReadStream(t.abs(key))
 	if err != nil {
 		if gowebdav.IsErrNotFound(err) {
-			return fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
-		}
-		return err
-	}
-	defer rc.Close()
-	_, err = io.Copy(dst, rc)
-	return err
-}
-
-// Put uploads src to the remote at remotePath.
-func (t *WebDAVTransport) Put(remotePath string, src io.Reader) error {
-	abs := t.absPath(remotePath)
-	// Ensure parent directory exists.
-	parent := path.Dir(abs)
-	if parent != "." && parent != "/" {
-		if err := t.client.MkdirAll(parent, 0755); err != nil {
-			return fmt.Errorf("webdav mkdir parent: %w", err)
-		}
-	}
-	return t.client.WriteStream(abs, src, 0644)
-}
-
-// Stat returns metadata about a remote file.
-func (t *WebDAVTransport) Stat(remotePath string) (*RemoteStat, error) {
-	info, err := t.client.Stat(t.absPath(remotePath))
-	if err != nil {
-		if gowebdav.IsErrNotFound(err) {
-			return nil, fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
+			return nil, fmt.Errorf("not found: %s", key)
 		}
 		return nil, err
 	}
-	return &RemoteStat{
-		Size:    info.Size(),
-		ModTime: info.ModTime(),
-	}, nil
+	return rc, nil
 }
 
-// List returns all files under the given prefix.
-func (t *WebDAVTransport) List(prefix string) ([]string, error) {
-	startPath := t.basePath
-	if prefix != "" {
-		startPath = path.Join(t.basePath, strings.TrimPrefix(prefix, "/"))
-	}
-	var files []string
-	if err := t.walkWebDAV(startPath, "", &files); err != nil {
-		if gowebdav.IsErrNotFound(err) {
-			return nil, nil
+func (t *WebDAVTransport) Put(key string, data io.Reader) error {
+	abs := t.abs(key)
+	dir := path.Dir(abs)
+	if dir != "." && dir != "/" {
+		if err := t.client.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("mkdir parent: %w", err)
 		}
-		return nil, err
 	}
-	sort.Strings(files)
-	return files, nil
+	return t.client.WriteStream(abs, data, 0644)
 }
 
-// walkWebDAV recursively lists files under absDir, recording paths relative
-// to the transport's basePath.
-func (t *WebDAVTransport) walkWebDAV(absDir, relDir string, files *[]string) error {
+func (t *WebDAVTransport) Exists(key string) (bool, error) {
+	_, err := t.client.Stat(t.abs(key))
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (t *WebDAVTransport) GetRef(name string) (string, error) {
+	return t.getTextFile(refKey(name))
+}
+
+func (t *WebDAVTransport) PutRef(name string, hash string) error {
+	return t.putTextFile(refKey(name), hash)
+}
+
+func (t *WebDAVTransport) ListRefs() (map[string]string, error) {
+	refs := make(map[string]string)
+	refsDir := t.abs("refs")
+	err := t.walkRefs(refsDir, "", refs)
+	if err != nil {
+		// No refs directory means no refs — that's fine for a new remote.
+		return refs, nil
+	}
+	return refs, nil
+}
+
+func (t *WebDAVTransport) walkRefs(absDir, relDir string, refs map[string]string) error {
 	entries, err := t.client.ReadDir(absDir)
 	if err != nil {
 		return err
@@ -125,33 +99,48 @@ func (t *WebDAVTransport) walkWebDAV(absDir, relDir string, files *[]string) err
 		}
 		relPath := path.Join(relDir, name)
 		if e.IsDir() {
-			if err := t.walkWebDAV(path.Join(absDir, name), relPath, files); err != nil {
+			if err := t.walkRefs(path.Join(absDir, name), relPath, refs); err != nil {
 				return err
 			}
-		} else {
-			*files = append(*files, relPath)
+		} else if refPath := relPath; strings.HasSuffix(refPath, ".ref") {
+			refName := strings.TrimSuffix(refPath, ".ref")
+			abs := path.Join(absDir, name)
+			rc, err := t.client.ReadStream(abs)
+			if err != nil {
+				continue
+			}
+			data, _ := io.ReadAll(rc)
+			rc.Close()
+			hash := strings.TrimSpace(string(data))
+			if hash != "" {
+				refs[refName] = hash
+			}
 		}
 	}
 	return nil
 }
 
-// Delete removes a file from the remote.
-func (t *WebDAVTransport) Delete(remotePath string) error {
-	err := t.client.Remove(t.absPath(remotePath))
-	if err != nil && gowebdav.IsErrNotFound(err) {
-		return nil // already gone
+func (t *WebDAVTransport) getTextFile(key string) (string, error) {
+	rc, err := t.client.ReadStream(t.abs(key))
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return "", nil
+		}
+		return "", err
 	}
-	return err
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
-// Mkdir creates a directory on the remote (MKCOL).
-func (t *WebDAVTransport) Mkdir(remotePath string) error {
-	return t.client.MkdirAll(t.absPath(remotePath), 0755)
+func (t *WebDAVTransport) putTextFile(key, content string) error {
+	return t.Put(key, strings.NewReader(content+"\n"))
 }
 
-// Close releases any resources held by the transport.
-// gowebdav's Client is stateless (HTTP-based), so this is a no-op.
 func (t *WebDAVTransport) Close() error { return nil }
 
-// Compile-time guard to ensure WebDAVTransport implements Transport.
+// Compile-time guard.
 var _ Transport = (*WebDAVTransport)(nil)

@@ -1,15 +1,11 @@
-// ftp.go implements the FTP transport for remote synchronization.
 package sync
 
 import (
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"path"
-	"sort"
 	"strings"
 	"time"
 
@@ -20,11 +16,11 @@ import (
 // FTPTransport implements the Transport interface over FTP/FTPS.
 type FTPTransport struct {
 	client   *ftp.ServerConn
-	basePath string // absolute base directory on the FTP server
+	basePath string
 }
 
 // NewFTPTransport connects to an FTP server and returns a transport scoped
-// to the project directory under the configured base path.
+// to the project directory.
 func NewFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*FTPTransport, error) {
 	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", EffectivePort(gcfg)))
 	opts := []ftp.DialOption{ftp.DialWithTimeout(30 * time.Second)}
@@ -45,12 +41,11 @@ func NewFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*FTPTranspor
 		return nil, fmt.Errorf("ftp login: %w", err)
 	}
 
-	// Build the base path: configured path + project name.
-	basePath := strings.Trim(gcfg.Path, "/")
-	if basePath == "" {
+	basePath := "/" + strings.Trim(gcfg.Path, "/")
+	if basePath == "/" {
 		basePath = "/" + remoteName
 	} else {
-		basePath = "/" + basePath + "/" + remoteName
+		basePath = basePath + "/" + remoteName
 	}
 
 	return &FTPTransport{
@@ -59,78 +54,68 @@ func NewFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*FTPTranspor
 	}, nil
 }
 
-// absPath joins the base path with a relative remote path.
-func (t *FTPTransport) absPath(remotePath string) string {
-	clean := strings.TrimPrefix(remotePath, "/")
-	return path.Join(t.basePath, clean)
+func (t *FTPTransport) absPath(key string) string {
+	return path.Join(t.basePath, strings.TrimPrefix(key, "/"))
 }
 
-func (t *FTPTransport) Get(remotePath string, dst io.Writer) error {
-	resp, err := t.client.Retr(t.absPath(remotePath))
+func (t *FTPTransport) Get(key string) (io.ReadCloser, error) {
+	resp, err := t.client.Retr(t.absPath(key))
 	if err != nil {
-		if isFTPNotFound(err) {
-			return fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
-		}
-		return err
+		return nil, fmt.Errorf("ftp get %s: %w", key, err)
 	}
-	defer resp.Close()
-	_, err = io.Copy(dst, resp)
-	return err
+	return resp, nil
 }
 
-func (t *FTPTransport) Put(remotePath string, src io.Reader) error {
-	// Ensure parent directories exist.
-	parent := path.Dir(remotePath)
+func (t *FTPTransport) Put(key string, data io.Reader) error {
+	abs := t.absPath(key)
+	parent := path.Dir(abs)
 	if parent != "." && parent != "/" {
 		if err := t.mkdirAll(parent); err != nil {
-			return fmt.Errorf("ftp mkdir parent: %w", err)
+			return fmt.Errorf("mkdir parent: %w", err)
 		}
 	}
-	return t.client.Stor(t.absPath(remotePath), src)
+	return t.client.Stor(abs, data)
 }
 
-func (t *FTPTransport) Stat(remotePath string) (*RemoteStat, error) {
-	// FTP doesn't have a direct stat; use LIST on the parent directory.
-	dir := path.Dir(remotePath)
-	name := path.Base(remotePath)
-	entries, err := t.client.List(t.absPath(dir))
+func (t *FTPTransport) Exists(key string) (bool, error) {
+	abs := t.absPath(key)
+	// Try SIZE as a quick existence check.
+	if size, err := t.client.FileSize(abs); err == nil && size >= 0 {
+		return true, nil
+	}
+	// Fallback: list parent directory.
+	dir := path.Dir(abs)
+	name := path.Base(abs)
+	entries, err := t.client.List(dir)
 	if err != nil {
-		if isFTPNotFound(err) {
-			return nil, fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
-		}
-		return nil, err
+		return false, nil
 	}
 	for _, e := range entries {
 		if e.Name == name {
-			return &RemoteStat{
-				Size:    int64(e.Size),
-				ModTime: e.Time,
-			}, nil
+			return true, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
+	return false, nil
 }
 
-func (t *FTPTransport) List(prefix string) ([]string, error) {
-	startPath := t.basePath
-	if prefix != "" {
-		startPath = path.Join(t.basePath, strings.TrimPrefix(prefix, "/"))
-	}
-	var files []string
-	err := t.walkFTP(startPath, "", &files)
-	if err != nil {
-		if isFTPNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	sort.Strings(files)
-	return files, nil
+func (t *FTPTransport) GetRef(name string) (string, error) {
+	return t.getTextFile(refKey(name))
 }
 
-// walkFTP recursively lists files under dirPath, appending relative paths
-// (relative to basePath) to files.
-func (t *FTPTransport) walkFTP(absDir, relDir string, files *[]string) error {
+func (t *FTPTransport) PutRef(name string, hash string) error {
+	return t.putTextFile(refKey(name), hash)
+}
+
+func (t *FTPTransport) ListRefs() (map[string]string, error) {
+	refs := make(map[string]string)
+	refsDir := t.absPath("refs")
+	if err := t.walkRefs(refsDir, "", refs); err != nil {
+		return refs, nil
+	}
+	return refs, nil
+}
+
+func (t *FTPTransport) walkRefs(absDir, relDir string, refs map[string]string) error {
 	entries, err := t.client.List(absDir)
 	if err != nil {
 		return err
@@ -141,39 +126,34 @@ func (t *FTPTransport) walkFTP(absDir, relDir string, files *[]string) error {
 		}
 		relPath := path.Join(relDir, e.Name)
 		if e.Type == ftp.EntryTypeFolder {
-			if err := t.walkFTP(path.Join(absDir, e.Name), relPath, files); err != nil {
+			if err := t.walkRefs(path.Join(absDir, e.Name), relPath, refs); err != nil {
 				return err
 			}
-		} else {
-			*files = append(*files, relPath)
+		} else if strings.HasSuffix(relPath, ".ref") {
+			refName := strings.TrimSuffix(relPath, ".ref")
+			resp, err := t.client.Retr(path.Join(absDir, e.Name))
+			if err != nil {
+				continue
+			}
+			data, _ := io.ReadAll(resp)
+			resp.Close()
+			hash := strings.TrimSpace(string(data))
+			if hash != "" {
+				refs[refName] = hash
+			}
 		}
 	}
 	return nil
 }
 
-func (t *FTPTransport) Delete(remotePath string) error {
-	err := t.client.Delete(t.absPath(remotePath))
-	if err != nil && isFTPNotFound(err) {
-		return nil // already gone
-	}
-	return err
-}
-
-func (t *FTPTransport) Mkdir(remotePath string) error {
-	return t.mkdirAll(remotePath)
-}
-
-// mkdirAll creates all directories in the path, similar to os.MkdirAll.
-func (t *FTPTransport) mkdirAll(remotePath string) error {
-	parts := strings.Split(strings.TrimPrefix(remotePath, "/"), "/")
+func (t *FTPTransport) mkdirAll(absDir string) error {
+	parts := strings.Split(strings.TrimPrefix(absDir, "/"), "/")
 	current := t.basePath
 	for _, part := range parts {
 		if part == "" {
 			continue
 		}
 		current = path.Join(current, part)
-		// MakeDir returns an error if the directory already exists on
-		// some servers; ignore that error.
 		if err := t.client.MakeDir(current); err != nil && !isFTPAlreadyExists(err) {
 			return err
 		}
@@ -181,34 +161,35 @@ func (t *FTPTransport) mkdirAll(remotePath string) error {
 	return nil
 }
 
+func (t *FTPTransport) getTextFile(key string) (string, error) {
+	resp, err := t.client.Retr(t.absPath(key))
+	if err != nil {
+		return "", nil // not found = empty
+	}
+	defer resp.Close()
+	data, err := io.ReadAll(resp)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func (t *FTPTransport) putTextFile(key, content string) error {
+	return t.Put(key, strings.NewReader(content+"\n"))
+}
+
 func (t *FTPTransport) Close() error {
 	return t.client.Quit()
 }
 
-// isFTPNotFound checks if an FTP error indicates "file not found".
-// FTP 550 can mean both "not found" and "permission denied", so we check
-// the message text to distinguish. This avoids treating permission errors
-// as "not found" which could cause silent data loss in Delete.
-func isFTPNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	// Only a 550 status with "no such file" or "not found" text is a
-	// genuine not-found; other 550 errors (e.g. permission denied) are not.
-	return strings.Contains(s, "550") &&
-		(strings.Contains(s, "no such file") || strings.Contains(s, "not found"))
-}
-
-// isFTPAlreadyExists checks if an FTP error indicates the directory already exists.
 func isFTPAlreadyExists(err error) bool {
 	if err == nil {
 		return false
 	}
 	s := strings.ToLower(err.Error())
-	// 521 is "Duplicate" (RFC 959), some servers use 550 with "exists" text.
 	return strings.Contains(s, "521") ||
 		strings.Contains(s, "already exists") ||
-		strings.Contains(s, "file exists") ||
-		errors.Is(err, os.ErrExist)
+		strings.Contains(s, "file exists")
 }
+
+var _ Transport = (*FTPTransport)(nil)

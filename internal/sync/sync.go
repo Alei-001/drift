@@ -1,9 +1,3 @@
-// Package sync provides remote synchronization for drift projects.
-//
-// The sync engine supports multiple transports (WebDAV, FTP, SFTP, SMB)
-// behind a common Transport interface. Synchronization is incremental
-// (content-hash based) and tracks deletions via a manifest file stored on
-// the remote. Auto-sync is triggered after 'drift save'.
 package sync
 
 import (
@@ -66,7 +60,7 @@ func EffectivePort(g *config.GlobalConfig) int {
 	return defaultPort(g.Protocol)
 }
 
-func webDAVBaseURL(g *config.GlobalConfig) string {
+func webDAVBaseURL(g *config.GlobalConfig, remoteName string) string {
 	scheme := "http"
 	if g.TLS {
 		scheme = "https"
@@ -74,17 +68,16 @@ func webDAVBaseURL(g *config.GlobalConfig) string {
 	basePath := strings.Trim(g.Path, "/")
 	port := EffectivePort(g)
 	if basePath != "" {
-		return fmt.Sprintf("%s://%s:%d/%s", scheme, g.Host, port, basePath)
+		return fmt.Sprintf("%s://%s:%d/%s/%s", scheme, g.Host, port, basePath, remoteName)
 	}
-	return fmt.Sprintf("%s://%s:%d", scheme, g.Host, port)
+	return fmt.Sprintf("%s://%s:%d/%s", scheme, g.Host, port, remoteName)
 }
 
-// ProjectTransportForConfig returns a Transport scoped to a project, based
-// on the global config. The caller must call Close() when done.
-func ProjectTransportForConfig(gcfg *config.GlobalConfig, remoteName string) (Transport, error) {
+// CreateTransport creates a transport for the given config and project name.
+func CreateTransport(gcfg *config.GlobalConfig, remoteName string) (Transport, error) {
 	switch GetRemoteType(gcfg) {
 	case RemoteWebDAV:
-		baseURL := webDAVBaseURL(gcfg) + "/" + remoteName
+		baseURL := webDAVBaseURL(gcfg, remoteName)
 		return NewWebDAVTransport(baseURL, gcfg.Username, gcfg.Password, gcfg.InsecureSkipVerify), nil
 	case RemoteFTP:
 		return NewFTPTransport(gcfg, remoteName)

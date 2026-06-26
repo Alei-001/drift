@@ -36,6 +36,7 @@ type StoreReader interface {
 	GetTree(hash string) (*Tree, error)
 	GetBlob(hash string) ([]byte, error)
 	GetBlobSize(hash string) (int64, error)
+	GetCommit(hash string) (*Commit, error)
 }
 
 func NewTreeReader(store StoreReader) *TreeReader {

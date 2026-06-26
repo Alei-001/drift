@@ -8,14 +8,16 @@ import (
 
 // memoryStore is a minimal StoreReader for testing tree walking.
 type memoryStore struct {
-	trees map[string]*Tree
-	blobs map[string][]byte
+	trees   map[string]*Tree
+	blobs   map[string][]byte
+	commits map[string]*Commit
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		trees: make(map[string]*Tree),
-		blobs: make(map[string][]byte),
+		trees:   make(map[string]*Tree),
+		blobs:   make(map[string][]byte),
+		commits: make(map[string]*Commit),
 	}
 }
 
@@ -43,6 +45,14 @@ func (m *memoryStore) GetBlobSize(hash string) (int64, error) {
 		return 0, errTestNotFound
 	}
 	return int64(len(b)), nil
+}
+
+func (m *memoryStore) GetCommit(hash string) (*Commit, error) {
+	c, ok := m.commits[hash]
+	if !ok {
+		return nil, errTestNotFound
+	}
+	return c, nil
 }
 
 // buildNestedStore builds a store containing:

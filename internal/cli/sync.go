@@ -14,10 +14,65 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 		Short: "Synchronize with remote repositories",
 	}
 
+	pushCmd := &cobra.Command{
+		Use:   "push [<branch>]",
+		Short: "Push objects to the remote",
+		RunE: func(cb *cobra.Command, args []string) error {
+			branch := ""
+			if len(args) > 0 {
+				branch = args[0]
+			}
+			stats, err := application.Push(branch)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Push complete: %d new object(s) pushed to %s\n", stats.Pushed, stats.Branch)
+			return nil
+		},
+	}
+
+	pullCmd := &cobra.Command{
+		Use:   "pull [<branch>]",
+		Short: "Pull objects from the remote",
+		RunE: func(cb *cobra.Command, args []string) error {
+			branch := ""
+			if len(args) > 0 {
+				branch = args[0]
+			}
+			stats, err := application.Pull(branch)
+			if err != nil {
+				return err
+			}
+			if stats.Pulled == 0 {
+				fmt.Println("Already up to date.")
+			} else {
+				fmt.Printf("Pull complete: %d new object(s) pulled from %s\n", stats.Pulled, stats.Branch)
+			}
+			return nil
+		},
+	}
+
+	nowCmd := &cobra.Command{
+		Use:   "now",
+		Short: "Push then pull",
+		RunE: func(cb *cobra.Command, args []string) error {
+			stats, err := application.SyncNow()
+			if err != nil {
+				return err
+			}
+			if stats.Pulled == 0 {
+				fmt.Println("Already up to date.")
+			} else {
+				fmt.Printf("Sync complete: %d new object(s)\n", stats.Pulled)
+			}
+			return nil
+		},
+	}
+
 	enableCmd := &cobra.Command{
 		Use:   "enable",
 		Short: "Enable sync",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cb *cobra.Command, args []string) error {
 			if err := application.SyncEnable(); err != nil {
 				return err
 			}
@@ -29,7 +84,7 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 	disableCmd := &cobra.Command{
 		Use:   "disable",
 		Short: "Disable sync",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cb *cobra.Command, args []string) error {
 			if err := application.SyncDisable(); err != nil {
 				return err
 			}
@@ -38,38 +93,10 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 		},
 	}
 
-	nowCmd := &cobra.Command{
-		Use:   "now",
-		Short: "Sync immediately",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			stats, err := application.SyncNow()
-			if err != nil {
-				return err
-			}
-			fmt.Println("Sync completed")
-			if stats.Pushed > 0 {
-				fmt.Printf("  Pushed: %d file(s)\n", stats.Pushed)
-			}
-			if stats.Pulled > 0 {
-				fmt.Printf("  Pulled: %d file(s)\n", stats.Pulled)
-			}
-			if stats.RemoteDeleted > 0 {
-				fmt.Printf("  Deleted on remote: %d file(s)\n", stats.RemoteDeleted)
-			}
-			if stats.LocalDeleted > 0 {
-				fmt.Printf("  Deleted locally: %d file(s)\n", stats.LocalDeleted)
-			}
-			if stats.Conflicts > 0 {
-				fmt.Printf("  Conflicts: %d file(s)\n", stats.Conflicts)
-			}
-			return nil
-		},
-	}
-
 	statusCmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show sync status",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cb *cobra.Command, args []string) error {
 			status, err := application.SyncStatus()
 			if err != nil {
 				return err
@@ -93,7 +120,7 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(enableCmd, disableCmd, nowCmd, statusCmd)
+	cmd.AddCommand(pushCmd, pullCmd, nowCmd, enableCmd, disableCmd, statusCmd)
 
 	return cmd
 }

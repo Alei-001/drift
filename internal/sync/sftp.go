@@ -1,273 +1,191 @@
-// sftp.go implements the SFTP transport for remote synchronization.
 package sync
 
 import (
-	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/drift/drift/internal/config"
-	"github.com/pkg/sftp"
+	sftplib "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
-// SFTPTransport implements the Transport interface over SFTP (SSH file transfer).
+// SFTPTransport implements the Transport interface over SFTP.
 type SFTPTransport struct {
-	sshClient  *ssh.Client
-	sftpClient *sftp.Client
-	basePath   string
+	client *sftplib.Client
+	base   string
 }
 
 // NewSFTPTransport connects to an SFTP server and returns a transport scoped
-// to the project directory under the configured base path.
+// to the project directory.
 func NewSFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*SFTPTransport, error) {
 	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", EffectivePort(gcfg)))
 
-	var authMethods []ssh.AuthMethod
-	// Try key-based authentication first.
-	if gcfg.KeyPath != "" {
-		key, err := os.ReadFile(gcfg.KeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("sftp read key %s: %w", gcfg.KeyPath, err)
-		}
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			return nil, fmt.Errorf("sftp parse key: %w", err)
-		}
-		authMethods = append(authMethods, ssh.PublicKeys(signer))
-	}
-	// Fall back to password authentication.
+	authMethods := []ssh.AuthMethod{}
 	if gcfg.Password != "" {
 		authMethods = append(authMethods, ssh.Password(gcfg.Password))
 	}
-	if len(authMethods) == 0 {
-		return nil, fmt.Errorf("sftp: no authentication method (set key_path or password)")
+	if gcfg.KeyPath != "" {
+		keyPath := gcfg.KeyPath
+		if strings.HasPrefix(keyPath, "~/") {
+			home, _ := os.UserHomeDir()
+			keyPath = filepath.Join(home, keyPath[2:])
+		}
+		key, err := os.ReadFile(keyPath)
+		if err != nil {
+			return nil, fmt.Errorf("read key %s: %w", keyPath, err)
+		}
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			return nil, fmt.Errorf("parse key %s: %w", keyPath, err)
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
 
-	config := &ssh.ClientConfig{
+	sshConfig := &ssh.ClientConfig{
 		User:            gcfg.Username,
 		Auth:            authMethods,
-		HostKeyCallback: knownHostsCallback(addr),
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         30 * time.Second,
 	}
 
-	sshClient, err := ssh.Dial("tcp", addr, config)
+	conn, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
-		return nil, fmt.Errorf("sftp connect %s: %w", addr, err)
+		return nil, fmt.Errorf("ssh connect %s: %w", addr, err)
 	}
 
-	sftpClient, err := sftp.NewClient(sshClient)
+	client, err := sftplib.NewClient(conn)
 	if err != nil {
-		sshClient.Close()
+		conn.Close()
 		return nil, fmt.Errorf("sftp init: %w", err)
 	}
 
-	// Build the base path.
-	basePath := strings.Trim(gcfg.Path, "/")
-	if basePath == "" {
-		basePath = "/" + remoteName
+	base := strings.Trim(gcfg.Path, "/")
+	if base == "" {
+		base = remoteName
 	} else {
-		basePath = "/" + basePath + "/" + remoteName
+		base = base + "/" + remoteName
 	}
 
 	return &SFTPTransport{
-		sshClient:  sshClient,
-		sftpClient: sftpClient,
-		basePath:   basePath,
+		client: client,
+		base:   "/" + base,
 	}, nil
 }
 
-func (t *SFTPTransport) absPath(remotePath string) string {
-	clean := strings.TrimPrefix(remotePath, "/")
-	return path.Join(t.basePath, clean)
+func (t *SFTPTransport) absPath(key string) string {
+	return path.Join(t.base, strings.TrimPrefix(key, "/"))
 }
 
-func (t *SFTPTransport) Get(remotePath string, dst io.Writer) error {
-	f, err := t.sftpClient.Open(t.absPath(remotePath))
+func (t *SFTPTransport) Get(key string) (io.ReadCloser, error) {
+	f, err := t.client.Open(t.absPath(key))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
-		}
-		return err
+		return nil, fmt.Errorf("sftp get %s: %w", key, err)
 	}
-	defer f.Close()
-	_, err = io.Copy(dst, f)
-	return err
+	return f, nil
 }
 
-func (t *SFTPTransport) Put(remotePath string, src io.Reader) error {
-	abs := t.absPath(remotePath)
-	// Ensure parent directory exists.
-	parent := path.Dir(abs)
-	if parent != "." && parent != "/" {
-		if err := t.mkdirAll(parent); err != nil {
-			return fmt.Errorf("sftp mkdir parent: %w", err)
-		}
+func (t *SFTPTransport) Put(key string, data io.Reader) error {
+	abs := t.absPath(key)
+	if err := t.client.MkdirAll(path.Dir(abs)); err != nil {
+		return fmt.Errorf("mkdir parent: %w", err)
 	}
-	f, err := t.sftpClient.Create(abs)
+	f, err := t.client.Create(abs)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = io.Copy(f, src)
-	return err
+	_, copyErr := io.Copy(f, data)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
-func (t *SFTPTransport) Stat(remotePath string) (*RemoteStat, error) {
-	info, err := t.sftpClient.Stat(t.absPath(remotePath))
+func (t *SFTPTransport) Exists(key string) (bool, error) {
+	_, err := t.client.Stat(t.absPath(key))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
+			return false, nil
 		}
-		return nil, err
+		return false, nil
 	}
-	return &RemoteStat{
-		Size:    info.Size(),
-		ModTime: info.ModTime(),
-	}, nil
+	return true, nil
 }
 
-func (t *SFTPTransport) List(prefix string) ([]string, error) {
-	startPath := t.basePath
-	if prefix != "" {
-		startPath = path.Join(t.basePath, strings.TrimPrefix(prefix, "/"))
+func (t *SFTPTransport) GetRef(name string) (string, error) {
+	return t.getTextFile(refKey(name))
+}
+
+func (t *SFTPTransport) PutRef(name string, hash string) error {
+	return t.putTextFile(refKey(name), hash)
+}
+
+func (t *SFTPTransport) ListRefs() (map[string]string, error) {
+	refs := make(map[string]string)
+	refsDir := t.absPath("refs")
+	if err := t.walkRefs(refsDir, "", refs); err != nil {
+		return refs, nil
 	}
-	var files []string
-	walker := t.sftpClient.Walk(startPath)
-	for walker.Step() {
-		if err := walker.Err(); err != nil {
-			if os.IsNotExist(err) {
-				return nil, nil
+	return refs, nil
+}
+
+func (t *SFTPTransport) walkRefs(absDir, relDir string, refs map[string]string) error {
+	entries, err := t.client.ReadDir(absDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "." || name == ".." {
+			continue
+		}
+		relPath := path.Join(relDir, name)
+		if e.IsDir() {
+			if err := t.walkRefs(path.Join(absDir, name), relPath, refs); err != nil {
+				return err
 			}
-			return nil, err
-		}
-		if walker.Stat().IsDir() {
-			continue
-		}
-		// Compute relative path by trimming the base path prefix.
-		// Use HasPrefix with a trailing slash so that a base path of
-		// "/foo" does not match "/foobar/x".
-		full := walker.Path()
-		prefix := t.basePath + "/"
-		if !strings.HasPrefix(full, prefix) {
-			continue
-		}
-		rel := strings.TrimPrefix(full, prefix)
-		if rel == "" || rel == "." {
-			continue
-		}
-		files = append(files, rel)
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func (t *SFTPTransport) Delete(remotePath string) error {
-	err := t.sftpClient.Remove(t.absPath(remotePath))
-	if err != nil && os.IsNotExist(err) {
-		return nil
-	}
-	return err
-}
-
-func (t *SFTPTransport) Mkdir(remotePath string) error {
-	return t.mkdirAll(t.absPath(remotePath))
-}
-
-// mkdirAll creates all directories in the path.
-func (t *SFTPTransport) mkdirAll(absPath string) error {
-	parts := strings.Split(strings.TrimPrefix(absPath, "/"), "/")
-	current := "/"
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-		current = path.Join(current, part)
-		// Try to create; ignore error if it already exists.
-		if err := t.sftpClient.Mkdir(current); err != nil && !os.IsExist(err) {
-			// Check if it already exists as a directory.
-			if info, statErr := t.sftpClient.Stat(current); statErr == nil && info.IsDir() {
+		} else if strings.HasSuffix(relPath, ".ref") {
+			refName := strings.TrimSuffix(relPath, ".ref")
+			f, err := t.client.Open(path.Join(absDir, name))
+			if err != nil {
 				continue
 			}
-			return err
+			data, _ := io.ReadAll(f)
+			f.Close()
+			hash := strings.TrimSpace(string(data))
+			if hash != "" {
+				refs[refName] = hash
+			}
 		}
 	}
 	return nil
 }
 
-func (t *SFTPTransport) Close() error {
-	return errors.Join(t.sftpClient.Close(), t.sshClient.Close())
-}
-
-// knownHostsCallback returns an ssh.HostKeyCallback that verifies the
-// server's host key against ~/.drift/known_hosts. On first connection to
-// an unknown host, the key is automatically added (TOFU model, like SSH's
-// StrictHostKeyChecking=accept-new).
-func knownHostsCallback(addr string) ssh.HostKeyCallback {
-	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-		hostsPath, err := knownHostsPath()
-		if err != nil {
-			return fmt.Errorf("cannot determine known_hosts path: %w", err)
-		}
-
-		// Extract host:port from addr for matching.
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			host = addr
-			port = "22"
-		}
-
-		keyLine := fmt.Sprintf("%s:%s %s %s\n", host, port, key.Type(), base64Key(key.Marshal()))
-
-		// Check if the host key is already known.
-		data, err := os.ReadFile(hostsPath)
-		if err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				if strings.TrimSpace(line) == strings.TrimSpace(keyLine) {
-					return nil // Key matches — verified.
-				}
-				if strings.HasPrefix(line, host+":") || strings.HasPrefix(line, host+" ") {
-					// Host is known but key differs — reject (MITM protection).
-					return fmt.Errorf("host key for %s changed (possible MITM attack); remove the old entry from %s if this is intentional", host, hostsPath)
-				}
-			}
-		}
-
-		// First connection — add the key to known_hosts (TOFU).
-		if err := os.MkdirAll(filepath.Dir(hostsPath), 0755); err != nil {
-			return fmt.Errorf("cannot create known_hosts directory: %w", err)
-		}
-		f, err := os.OpenFile(hostsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-		if err != nil {
-			return fmt.Errorf("cannot open known_hosts: %w", err)
-		}
-		defer f.Close()
-		if _, err := f.WriteString(keyLine); err != nil {
-			return fmt.Errorf("cannot write to known_hosts: %w", err)
-		}
-
-		return nil
+func (t *SFTPTransport) getTextFile(key string) (string, error) {
+	f, err := t.client.Open(t.absPath(key))
+	if err != nil {
+		return "", nil
 	}
-}
-
-// knownHostsPath returns the path to ~/.drift/known_hosts.
-func knownHostsPath() (string, error) {
-	home, err := os.UserHomeDir()
+	defer f.Close()
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".drift", "known_hosts"), nil
+	return strings.TrimSpace(string(data)), nil
 }
 
-// base64Key encodes a public key blob as base64 (standard encoding).
-func base64Key(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
+func (t *SFTPTransport) putTextFile(key, content string) error {
+	return t.Put(key, strings.NewReader(content+"\n"))
 }
+
+func (t *SFTPTransport) Close() error {
+	return t.client.Close()
+}
+
+var _ Transport = (*SFTPTransport)(nil)

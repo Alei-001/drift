@@ -1,4 +1,3 @@
-// smb.go implements the SMB transport for remote synchronization.
 package sync
 
 import (
@@ -8,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path"
-	"sort"
 	"strings"
 	"time"
 
@@ -20,14 +18,11 @@ import (
 type SMBTransport struct {
 	session  *smb2.Session
 	share    *smb2.Share
-	basePath string // path within the share
+	basePath string
 }
 
-// Compile-time guard to ensure SMBTransport implements Transport.
-var _ Transport = (*SMBTransport)(nil)
-
 // NewSMBTransport connects to an SMB share and returns a transport scoped
-// to the project directory under the configured base path.
+// to the project directory.
 func NewSMBTransport(gcfg *config.GlobalConfig, remoteName string) (*SMBTransport, error) {
 	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", EffectivePort(gcfg)))
 
@@ -54,7 +49,6 @@ func NewSMBTransport(gcfg *config.GlobalConfig, remoteName string) (*SMBTranspor
 		return nil, fmt.Errorf("smb mount share %q: %w", gcfg.Share, err)
 	}
 
-	// Build the base path within the share.
 	basePath := strings.Trim(gcfg.Path, "/")
 	if basePath == "" {
 		basePath = remoteName
@@ -69,75 +63,67 @@ func NewSMBTransport(gcfg *config.GlobalConfig, remoteName string) (*SMBTranspor
 	}, nil
 }
 
-func (t *SMBTransport) absPath(remotePath string) string {
-	clean := strings.TrimPrefix(remotePath, "/")
-	return path.Join(t.basePath, clean)
+func (t *SMBTransport) absPath(key string) string {
+	return path.Join(t.basePath, strings.TrimPrefix(key, "/"))
 }
 
-func (t *SMBTransport) Get(remotePath string, dst io.Writer) error {
-	f, err := t.share.Open(t.absPath(remotePath))
+func (t *SMBTransport) Get(key string) (io.ReadCloser, error) {
+	f, err := t.share.Open(t.absPath(key))
 	if err != nil {
-		if isSMBNotFound(err) {
-			return fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
-		}
-		return err
+		return nil, fmt.Errorf("smb get %s: %w", key, err)
 	}
-	defer f.Close()
-	_, err = io.Copy(dst, f)
-	return err
+	return f, nil
 }
 
-func (t *SMBTransport) Put(remotePath string, src io.Reader) error {
-	abs := t.absPath(remotePath)
-	// Ensure parent directory exists.
+func (t *SMBTransport) Put(key string, data io.Reader) error {
+	abs := t.absPath(key)
 	parent := path.Dir(abs)
 	if parent != "." && parent != "/" {
 		if err := t.mkdirAll(parent); err != nil {
-			return fmt.Errorf("smb mkdir parent: %w", err)
+			return fmt.Errorf("mkdir parent: %w", err)
 		}
 	}
 	f, err := t.share.Create(abs)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = io.Copy(f, src)
-	return err
+	_, copyErr := io.Copy(f, data)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
-func (t *SMBTransport) Stat(remotePath string) (*RemoteStat, error) {
-	info, err := t.share.Stat(t.absPath(remotePath))
+func (t *SMBTransport) Exists(key string) (bool, error) {
+	_, err := t.share.Stat(t.absPath(key))
 	if err != nil {
 		if isSMBNotFound(err) {
-			return nil, fmt.Errorf("%w: %s", os.ErrNotExist, remotePath)
+			return false, nil
 		}
-		return nil, err
+		return false, nil
 	}
-	return &RemoteStat{
-		Size:    info.Size(),
-		ModTime: info.ModTime(),
-	}, nil
+	return true, nil
 }
 
-func (t *SMBTransport) List(prefix string) ([]string, error) {
-	startPath := t.basePath
-	if prefix != "" {
-		startPath = path.Join(t.basePath, strings.TrimPrefix(prefix, "/"))
-	}
-	var files []string
-	err := t.walkSMB(startPath, "", &files)
-	if err != nil {
-		if isSMBNotFound(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	sort.Strings(files)
-	return files, nil
+func (t *SMBTransport) GetRef(name string) (string, error) {
+	return t.getTextFile(refKey(name))
 }
 
-// walkSMB recursively lists files under dirPath.
-func (t *SMBTransport) walkSMB(absDir, relDir string, files *[]string) error {
+func (t *SMBTransport) PutRef(name string, hash string) error {
+	return t.putTextFile(refKey(name), hash)
+}
+
+func (t *SMBTransport) ListRefs() (map[string]string, error) {
+	refs := make(map[string]string)
+	refsDir := t.absPath("refs")
+	if err := t.walkRefs(refsDir, "", refs); err != nil {
+		return refs, nil
+	}
+	return refs, nil
+}
+
+func (t *SMBTransport) walkRefs(absDir, relDir string, refs map[string]string) error {
 	entries, err := t.share.ReadDir(absDir)
 	if err != nil {
 		return err
@@ -149,31 +135,28 @@ func (t *SMBTransport) walkSMB(absDir, relDir string, files *[]string) error {
 		}
 		relPath := path.Join(relDir, name)
 		if e.IsDir() {
-			if err := t.walkSMB(path.Join(absDir, name), relPath, files); err != nil {
+			if err := t.walkRefs(path.Join(absDir, name), relPath, refs); err != nil {
 				return err
 			}
-		} else {
-			*files = append(*files, relPath)
+		} else if strings.HasSuffix(relPath, ".ref") {
+			refName := strings.TrimSuffix(relPath, ".ref")
+			f, err := t.share.Open(path.Join(absDir, name))
+			if err != nil {
+				continue
+			}
+			data, _ := io.ReadAll(f)
+			f.Close()
+			hash := strings.TrimSpace(string(data))
+			if hash != "" {
+				refs[refName] = hash
+			}
 		}
 	}
 	return nil
 }
 
-func (t *SMBTransport) Delete(remotePath string) error {
-	err := t.share.Remove(t.absPath(remotePath))
-	if err != nil && isSMBNotFound(err) {
-		return nil
-	}
-	return err
-}
-
-func (t *SMBTransport) Mkdir(remotePath string) error {
-	return t.mkdirAll(t.absPath(remotePath))
-}
-
-// mkdirAll creates all directories in the path.
-func (t *SMBTransport) mkdirAll(absPath string) error {
-	parts := strings.Split(strings.TrimPrefix(absPath, "/"), "/")
+func (t *SMBTransport) mkdirAll(absDir string) error {
+	parts := strings.Split(strings.TrimPrefix(absDir, "/"), "/")
 	current := ""
 	for _, part := range parts {
 		if part == "" {
@@ -181,33 +164,43 @@ func (t *SMBTransport) mkdirAll(absPath string) error {
 		}
 		current = path.Join(current, part)
 		if err := t.share.Mkdir(current, 0755); err != nil && !isSMBAlreadyExists(err) {
-			// Check if it already exists as a directory.
-			if info, statErr := t.share.Stat(current); statErr == nil && info.IsDir() {
-				continue
-			}
 			return err
 		}
 	}
 	return nil
 }
 
+func (t *SMBTransport) getTextFile(key string) (string, error) {
+	f, err := t.share.Open(t.absPath(key))
+	if err != nil {
+		return "", nil
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func (t *SMBTransport) putTextFile(key, content string) error {
+	return t.Put(key, strings.NewReader(content+"\n"))
+}
+
 func (t *SMBTransport) Close() error {
 	return errors.Join(t.share.Umount(), t.session.Logoff())
 }
 
-// isSMBNotFound checks if an SMB error indicates "file not found".
 func isSMBNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
 	s := err.Error()
 	return strings.Contains(s, "STATUS_OBJECT_NAME_NOT_FOUND") ||
-		strings.Contains(s, "no such file") ||
 		strings.Contains(s, "not found") ||
 		os.IsNotExist(err)
 }
 
-// isSMBAlreadyExists checks if an SMB error indicates the directory already exists.
 func isSMBAlreadyExists(err error) bool {
 	if err == nil {
 		return false
@@ -217,3 +210,5 @@ func isSMBAlreadyExists(err error) bool {
 		strings.Contains(s, "already exists") ||
 		os.IsExist(err)
 }
+
+var _ Transport = (*SMBTransport)(nil)

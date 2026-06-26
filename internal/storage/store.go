@@ -135,6 +135,37 @@ func (s *Store) commitPath(id string) string {
 	return filepath.Join(s.DriftDir(), commitsDir, id[:2], id[2:]+".dcm")
 }
 
+// HasObject reports whether the store contains an object with the given hash.
+// It checks blob, tree, and commit paths.
+func (s *Store) HasObject(hash string) bool {
+	if _, err := os.Stat(s.blobPath(hash)); err == nil {
+		return true
+	}
+	if _, err := os.Stat(s.treePath(hash)); err == nil {
+		return true
+	}
+	if _, err := os.Stat(s.commitPath(hash)); err == nil {
+		return true
+	}
+	return false
+}
+
+// OpenObject opens an object stored in the drift dir, returning a reader.
+// The caller must close the reader. Returns os.ErrNotExist if the object
+// is not found.
+func (s *Store) OpenObject(hash string) (io.ReadCloser, error) {
+	for _, p := range []string{s.blobPath(hash), s.treePath(hash), s.commitPath(hash)} {
+		f, err := os.Open(p)
+		if err == nil {
+			return f, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("%w: object %s", ErrObjectNotFound, hash[:8])
+}
+
 func (s *Store) PutBlob(data []byte) (string, error) {
 	unlock, err := s.lock()
 	if err != nil {
