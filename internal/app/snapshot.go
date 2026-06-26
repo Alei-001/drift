@@ -34,6 +34,14 @@ type RestoreResult struct {
 // If force is false, the restore is rejected when the staging area or working tree has pending changes.
 func (a *App) Restore(version string, filters []string, force bool) (*RestoreResult, error) {
 	hasFilter := len(filters) > 0
+	var normalized []string
+	if hasFilter {
+		var err error
+		normalized, err = worktree.NormalizePathFilters(a.dir, filters)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize filters: %w", err)
+		}
+	}
 
 	var oldIdx core.Index
 	if err := a.store.LoadIndex(&oldIdx); err != nil {
@@ -41,7 +49,7 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 	}
 
 	if !force {
-		hasPending, err := a.hasPendingStagedChanges(&oldIdx, filters)
+		hasPending, err := a.hasPendingStagedChanges(&oldIdx, normalized)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check pending staged changes: %w", err)
 		}
@@ -52,7 +60,7 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 		if err != nil {
 			return nil, fmt.Errorf("failed to load current commit: %w", err)
 		}
-		dirty, err := a.wt.HasModifications(currentCommit, &oldIdx, filters)
+		dirty, err := a.wt.HasModifications(currentCommit, &oldIdx, normalized)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check worktree modifications: %w", err)
 		}
@@ -78,10 +86,6 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 	}
 
 	if hasFilter {
-		normalized, err := worktree.NormalizePathFilters(a.dir, filters)
-		if err != nil {
-			return nil, fmt.Errorf("failed to normalize filters: %w", err)
-		}
 		for i, filter := range normalized {
 			matched := false
 			for _, b := range targetBlobs {
@@ -127,7 +131,7 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 	newIdx := &core.Index{}
 	if hasFilter {
 		for _, e := range oldIdx.Entries {
-			if !worktree.PathMatchesAny(e.Path, filters) {
+			if !worktree.PathMatchesAny(e.Path, normalized) {
 				newIdx.Add(e)
 			}
 		}
@@ -159,7 +163,7 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 		if targetPaths[path] {
 			continue
 		}
-		if hasFilter && !worktree.PathMatchesAny(path, filters) {
+		if hasFilter && !worktree.PathMatchesAny(path, normalized) {
 			continue
 		}
 		if err := core.ValidateTreePath(path); err != nil {
@@ -180,7 +184,7 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 		if _, inPrev := prevBlobs[entry.Path]; inPrev {
 			continue
 		}
-		if hasFilter && !worktree.PathMatchesAny(entry.Path, filters) {
+		if hasFilter && !worktree.PathMatchesAny(entry.Path, normalized) {
 			continue
 		}
 		if err := core.ValidateTreePath(entry.Path); err != nil {
