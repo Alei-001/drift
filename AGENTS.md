@@ -3,12 +3,14 @@
 ## Build & Test
 
 ```bash
-go build -o dist/drift ./cmd/drift/   # compile CLI binary to dist/
-go test ./...                         # all tests (~8s)
-go test ./internal/cli/...            # CLI tests only (slowest, ~5s)
+go build -o dist/drift.exe ./cmd/drift/   # compile CLI binary to dist/
+go test ./...                             # all tests (~2s)
+go test ./internal/cli/...                # CLI tests only (slowest, ~5s)
 ```
 
-Build output goes to `dist/` (gitignored). No Makefile. No lint config.
+Build output `dist/drift.exe` is gitignored. On Windows, explicitly use `.exe` suffix
+because Go may not auto-append it when the output path looks like a directory target.
+No Makefile. No lint config.
 
 ## Architecture
 
