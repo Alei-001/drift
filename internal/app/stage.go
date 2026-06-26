@@ -2,6 +2,8 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/drift/drift/internal/core"
@@ -45,10 +47,48 @@ func (a *App) Add(paths []string) (*AddResult, error) {
 	return &AddResult{Added: added, Skipped: skipped}, nil
 }
 
+// parentBlobsByPath loads the current branch's latest commit tree as a
+// path -> BlobEntry map. Returns an empty map when no commit exists yet.
+func (a *App) parentBlobsByPath() (map[string]core.BlobEntry, error) {
+	blobs, err := a.wt.LoadParentTreeBlobs()
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]core.BlobEntry, len(blobs))
+	for _, b := range blobs {
+		m[b.Path] = b
+	}
+	return m, nil
+}
+
+// resetIndexEntryToCommit restores an index entry for path to its committed
+// state: the entry uses the committed blob's hash and mode, plus on-disk
+// mtime/size when the working file is present (keeping the status fast-path
+// effective). Used by Unstage to undo staging without breaking the
+// "index is a full snapshot of tracked files" invariant.
+func (a *App) resetIndexEntryToCommit(idx *core.Index, path string, blob core.BlobEntry) error {
+	entry := core.IndexEntry{
+		Path: path,
+		Hash: blob.Hash,
+		Mode: blob.Mode,
+	}
+	fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
+	if info, err := os.Lstat(fullPath); err == nil {
+		entry.ModifiedAt = info.ModTime()
+		entry.Size = info.Size()
+	}
+	return idx.Add(entry)
+}
+
 func (a *App) Unstage(paths []string) (unstaged []string, notFound []string, err error) {
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {
 		return nil, nil, fmt.Errorf("failed to load index: %w", err)
+	}
+
+	parentBlobs, err := a.parentBlobsByPath()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load parent tree: %w", err)
 	}
 
 	// Match index entries against user-supplied path patterns. Unlike Add,
@@ -61,11 +101,11 @@ func (a *App) Unstage(paths []string) (unstaged []string, notFound []string, err
 		}
 	}
 
-	toRemove := make([]string, 0, len(matched))
+	toReset := make([]string, 0, len(matched))
 	for p := range matched {
-		toRemove = append(toRemove, p)
+		toReset = append(toReset, p)
 	}
-	sort.Strings(toRemove)
+	sort.Strings(toReset)
 
 	// A user-supplied path is "not found" only if it matched nothing in
 	// the index. Directory paths (e.g. "sub") that matched child entries
@@ -85,19 +125,40 @@ func (a *App) Unstage(paths []string) (unstaged []string, notFound []string, err
 		}
 	}
 
-	for _, p := range toRemove {
-		idx.Remove(p)
+	// Reset each matched path to its committed state, preserving the
+	// full-snapshot invariant:
+	//   - path in parent commit -> restore the committed IndexEntry
+	//   - path not in parent commit (newly staged add) -> remove from index
+	//     (the file becomes untracked again)
+	for _, p := range toReset {
+		if blob, inParent := parentBlobs[p]; inParent {
+			if err := a.resetIndexEntryToCommit(&idx, p, blob); err != nil {
+				return nil, nil, fmt.Errorf("failed to reset %s: %w", p, err)
+			}
+		} else {
+			idx.Remove(p)
+		}
 	}
 
-	if len(toRemove) > 0 {
+	if len(toReset) > 0 {
 		if err := a.store.SaveIndex(&idx); err != nil {
 			return nil, nil, fmt.Errorf("failed to save index: %w", err)
 		}
 	}
 
-	return toRemove, notFound, nil
+	return toReset, notFound, nil
 }
 
+// ClearStaging resets the staging area to a full snapshot of the current
+// branch's latest commit (rather than emptying it). This keeps the "index is
+// a full snapshot of tracked files" invariant, so a subsequent `drift add .`
+// or `drift status` does not falsely report committed-but-unstaged files as
+// deleted/untracked. In a fresh repository with no commits, the index is
+// cleared to empty.
 func (a *App) ClearStaging() error {
-	return a.store.SaveIndex(&core.Index{})
+	idx, err := a.wt.BuildIndexFromCommit()
+	if err != nil {
+		return fmt.Errorf("failed to rebuild index from commit: %w", err)
+	}
+	return a.store.SaveIndex(idx)
 }

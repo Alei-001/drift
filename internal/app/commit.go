@@ -85,6 +85,21 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		}
 	}
 
+	// Check tag uniqueness BEFORE any persistence so that a tag conflict
+	// does not leave a half-written commit + branch ref behind.
+	if opts.Tag != "" {
+		tagRef := "tags/" + opts.Tag
+		existing, err := a.store.GetRef(tagRef)
+		if err == nil && existing != "" {
+			// Amend: allow overwriting when the tag already points to the
+			// commit being amended (it will be moved forward). A tag
+			// pointing elsewhere is a real conflict.
+			if !opts.Amend || branchCommitCount == 0 || existing != branchCommits[0].Hash {
+				return nil, fmt.Errorf("tag %q already exists", opts.Tag)
+			}
+		}
+	}
+
 	stagedPaths := a.computeChangedPaths(&idx, branchCommits)
 	author := a.Author()
 
@@ -109,11 +124,22 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		changes := []RefChange{
 			{Ref: branch, Before: prevBranchHash, After: commit.Hash},
 		}
+
+		// Update existing tags that point to the old commit so they
+		// follow the amended commit.
+		oldTags := a.TagsByHash()
+		if labels, ok := oldTags[prevBranchHash]; ok {
+			for _, label := range labels {
+				tagRef := "tags/" + label
+				if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
+					return nil, fmt.Errorf("failed to update tag %q: %w", label, err)
+				}
+				changes = append(changes, RefChange{Ref: tagRef, Before: prevBranchHash, After: commit.Hash})
+			}
+		}
+
 		if opts.Tag != "" {
 			tagRef := "tags/" + opts.Tag
-			if existing, err := a.store.GetRef(tagRef); err == nil && existing != "" {
-				return nil, fmt.Errorf("tag %q already exists", opts.Tag)
-			}
 			if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
 				return nil, fmt.Errorf("failed to save tag: %w", err)
 			}
@@ -156,9 +182,6 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	}
 	if opts.Tag != "" {
 		tagRef := "tags/" + opts.Tag
-		if existing, err := a.store.GetRef(tagRef); err == nil && existing != "" {
-			return nil, fmt.Errorf("tag %q already exists", opts.Tag)
-		}
 		if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
 			return nil, fmt.Errorf("failed to save tag: %w", err)
 		}

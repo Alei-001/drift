@@ -271,9 +271,9 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 	return false, nil
 }
 
-// LoadParentTreeHashes returns a map of path -> blob hash from the current
-// branch's latest commit tree. Returns nil if no commit exists yet.
-func (w *Worktree) LoadParentTreeHashes() (map[string]string, error) {
+// LoadParentTreeBlobs returns the blob entries of the current branch's latest
+// commit tree (path, hash, mode). Returns nil if no commit exists yet.
+func (w *Worktree) LoadParentTreeBlobs() ([]core.BlobEntry, error) {
 	branch, err := w.Store.GetRef("HEAD")
 	if err != nil {
 		if !errors.Is(err, storage.ErrObjectNotFound) {
@@ -303,7 +303,13 @@ func (w *Worktree) LoadParentTreeHashes() (map[string]string, error) {
 		return nil, err
 	}
 	reader := core.NewTreeReader(w.Store)
-	blobs, err := reader.ListBlobs(tree, "")
+	return reader.ListBlobs(tree, "")
+}
+
+// LoadParentTreeHashes returns a map of path -> blob hash from the current
+// branch's latest commit tree. Returns nil if no commit exists yet.
+func (w *Worktree) LoadParentTreeHashes() (map[string]string, error) {
+	blobs, err := w.LoadParentTreeBlobs()
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +318,37 @@ func (w *Worktree) LoadParentTreeHashes() (map[string]string, error) {
 		m[b.Path] = b.Hash
 	}
 	return m, nil
+}
+
+// BuildIndexFromCommit builds a full-snapshot index from the current branch's
+// latest commit tree. Each entry is populated with the committed blob's hash
+// and mode, plus the on-disk mtime/size when the working-tree file is present
+// (so the status fast-path stays effective). When the working file is absent
+// (the file was deleted in the worktree), mtime/size are zero — status will
+// correctly report Worktree=Deleted via the size/hash fallback. Returns an
+// empty index when there is no commit yet (fresh repository).
+func (w *Worktree) BuildIndexFromCommit() (*core.Index, error) {
+	blobs, err := w.LoadParentTreeBlobs()
+	if err != nil {
+		return nil, err
+	}
+	idx := &core.Index{}
+	for _, b := range blobs {
+		entry := core.IndexEntry{
+			Path: b.Path,
+			Hash: b.Hash,
+			Mode: b.Mode,
+		}
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(b.Path))
+		if info, err := os.Lstat(fullPath); err == nil {
+			entry.ModifiedAt = info.ModTime()
+			entry.Size = info.Size()
+		}
+		if err := idx.Add(entry); err != nil {
+			return nil, fmt.Errorf("failed to add %s to index: %w", b.Path, err)
+		}
+	}
+	return idx, nil
 }
 
 // CleanUntracked removes untracked files from the working tree.

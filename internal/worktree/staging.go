@@ -32,6 +32,19 @@ func (w *Worktree) StageAll(idx *core.Index) (added, skipped []string, err error
 	if err != nil {
 		return nil, nil, err
 	}
+
+	var deleted []string
+	for _, entry := range idx.Entries {
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(entry.Path))
+		if _, err := os.Lstat(fullPath); os.IsNotExist(err) {
+			deleted = append(deleted, entry.Path)
+		}
+	}
+	for _, path := range deleted {
+		idx.Remove(path)
+		added = append(added, path)
+	}
+
 	return added, skipped, nil
 }
 
@@ -200,7 +213,22 @@ func (w *Worktree) addFile(relPath, fullPath string, info os.FileInfo, idx *core
 		return nil, nil, nil
 	}
 
+	// The index is supposed to be a full snapshot of all tracked files.
+	// When a working file matches its parent-commit hash but is missing from
+	// the index (e.g. the index was partially rebuilt), still record it so
+	// that StageAll/StagePaths converge on a full snapshot. This is not
+	// reported as "Added" — the file is unchanged — to keep output noise-free.
 	if parentHash, ok := parentTreeHashes[relPath]; ok && parentHash == hash {
+		entry := core.IndexEntry{
+			Path:       relPath,
+			Hash:       hash,
+			ModifiedAt: info.ModTime(),
+			Size:       info.Size(),
+			Mode:       mode,
+		}
+		if err := idx.Add(entry); err != nil {
+			return nil, nil, fmt.Errorf("failed to add %s: %w", relPath, err)
+		}
 		return nil, nil, nil
 	}
 
