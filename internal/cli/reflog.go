@@ -63,13 +63,13 @@ func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
 		descWidth = 60
 	}
 
-	fmt.Printf("%-19s  %-6s    %-*s\n", "DATE", "OP", descWidth, "DESCRIPTION")
+	fmt.Printf("%-19s  %-14s  %-*s\n", "DATE", "OP", descWidth, "DESCRIPTION")
 	for i, op := range operations {
 		desc := descs[i]
 		if len(desc) > descWidth {
 			desc = desc[:descWidth-3] + "..."
 		}
-		fmt.Printf("%-19s  %-6s    %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, desc)
+		fmt.Printf("%-19s  %-14s  %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, desc)
 		if verbose {
 			for _, change := range op.RefChanges {
 				fmt.Printf("  %s: %s → %s\n", change.Ref, shortRef(change.Before), shortRef(change.After))
