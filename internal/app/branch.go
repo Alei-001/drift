@@ -23,7 +23,12 @@ func (a *App) BranchList() ([]string, error) {
 		return nil, fmt.Errorf("failed to list branches: %w", err)
 	}
 
-	var names []string
+	type branchInfo struct {
+		name      string
+		timestamp int64
+	}
+
+	var branches []branchInfo
 	for name := range refs {
 		if name == "HEAD" {
 			continue
@@ -31,9 +36,26 @@ func (a *App) BranchList() ([]string, error) {
 		if strings.HasPrefix(name, "tags/") {
 			continue
 		}
-		names = append(names, name)
+		var ts int64
+		if hash, err := a.store.GetRef(name); err == nil && hash != "" {
+			if c, err := a.store.GetCommit(hash); err == nil {
+				ts = c.Timestamp.UnixMilli()
+			}
+		}
+		branches = append(branches, branchInfo{name: name, timestamp: ts})
 	}
-	sort.Strings(names)
+
+	sort.Slice(branches, func(i, j int) bool {
+		if branches[i].timestamp == branches[j].timestamp {
+			return branches[i].name < branches[j].name
+		}
+		return branches[i].timestamp > branches[j].timestamp
+	})
+
+	names := make([]string, len(branches))
+	for i, b := range branches {
+		names[i] = b.name
+	}
 	return names, nil
 }
 
