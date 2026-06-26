@@ -147,7 +147,7 @@ drift save                    # 无备注
 drift save -m "备注信息"       # 带备注
 drift save --tag 初稿              # 保存并同时设置标签
 drift save -m "初稿" --tag 初稿     # 带备注和标签
-drift save --amend            # 修改最近一条版本（保留版本号）
+drift save --amend            # 修改最近一条版本
 drift save --amend -m "新备注" # 修改版本并更新备注
 drift save -a -m "备注"        # 自动暂存所有改动后保存
 drift save --all              # 等同于 drift add . + drift save
