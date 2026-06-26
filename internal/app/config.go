@@ -175,10 +175,14 @@ func unsetLocalConfigValue(cfg *config.Config, key string) error {
 }
 
 func listLocalConfig(cfg *config.Config) []ConfigEntry {
+	gcAuto := cfg.Core.GCAuto
+	if gcAuto == 0 {
+		gcAuto = 1000
+	}
 	return []ConfigEntry{
 			{Key: "core.autocrlf", Value: cfg.Core.AutoCRLF},
 			{Key: "core.default_branch", Value: cfg.Core.DefaultBranch},
-			{Key: "gc.auto", Value: strconv.Itoa(func() int { v := cfg.Core.GCAuto; if v == 0 { return 1000 }; return v }())},
+			{Key: "gc.auto", Value: strconv.Itoa(gcAuto)},
 			{Key: "sync.enabled", Value: strconv.FormatBool(cfg.Sync.Enabled)},
 			{Key: "user.name", Value: cfg.User.Name},
 			{Key: "user.email", Value: cfg.User.Email},

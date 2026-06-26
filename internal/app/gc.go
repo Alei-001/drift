@@ -53,11 +53,9 @@ func (a *App) GC(opts GCOptions) (*GCResult, error) {
 			startHashes = append(startHashes, hash)
 		}
 	}
-	// HEAD may be a symref; ListRefs already dereferences it, but the raw
-	// HEAD value could be a branch name. Add it just in case.
-	if headHash, err := a.store.GetRef("HEAD"); err == nil && headHash != "" {
-		startHashes = append(startHashes, headHash)
-	}
+	// HEAD may be a symref pointing to a branch name. ListRefs already
+	// includes the target branch's commit hash, so we don't need to add
+	// HEAD separately.
 
 	// 2. Collect reflog-referenced commit hashes.
 	ops, err := a.ReadOperations()
@@ -155,10 +153,13 @@ func (a *App) ShouldAutoGC() bool {
 	return len(entries) >= threshold
 }
 
-// autoGC runs garbage collection in the background and logs warnings to
-// stderr on failure. It is non-fatal — the operation that triggered it
-// continues regardless.
+// autoGC runs garbage collection when the loose object count exceeds the
+// gc.auto threshold. Writes warnings to stderr on failure. It is non-fatal —
+// the operation that triggered it continues regardless.
 func (a *App) autoGC() {
+	if !a.ShouldAutoGC() {
+		return
+	}
 	result, err := a.GC(GCOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: auto gc failed: %v\n", err)
