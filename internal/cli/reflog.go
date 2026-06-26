@@ -46,23 +46,30 @@ func NewReflogCmd(application *apppkg.App) *cobra.Command {
 
 // formatOperations displays operations in human-readable format.
 func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
+	const maxMsgLen = 40
+
+	descs := make([]string, len(operations))
+	for i, op := range operations {
+		descs[i] = truncateParensMessage(op.Desc, maxMsgLen)
+	}
+
 	descWidth := 20
-	for _, op := range operations {
-		if len(op.Desc) > descWidth {
-			descWidth = len(op.Desc)
+	for _, d := range descs {
+		if len(d) > descWidth {
+			descWidth = len(d)
 		}
 	}
 	if descWidth > 60 {
 		descWidth = 60
 	}
 
-	fmt.Printf("%-19s  %-6s  %-*s\n", "DATE", "OP", descWidth, "DESCRIPTION")
-	for _, op := range operations {
-		desc := op.Desc
+	fmt.Printf("%-19s  %-6s    %-*s\n", "DATE", "OP", descWidth, "DESCRIPTION")
+	for i, op := range operations {
+		desc := descs[i]
 		if len(desc) > descWidth {
 			desc = desc[:descWidth-3] + "..."
 		}
-		fmt.Printf("%-19s  %-6s  %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, desc)
+		fmt.Printf("%-19s  %-6s    %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, desc)
 		if verbose {
 			for _, change := range op.RefChanges {
 				fmt.Printf("  %s: %s → %s\n", change.Ref, shortRef(change.Before), shortRef(change.After))
@@ -72,6 +79,23 @@ func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
 			}
 		}
 	}
+}
+
+func truncateParensMessage(desc string, maxMsg int) string {
+	start := strings.Index(desc, " (")
+	if start == -1 {
+		return desc
+	}
+	end := strings.Index(desc[start+2:], ")")
+	if end == -1 {
+		return desc
+	}
+	end += start + 2
+	msg := desc[start+2 : end]
+	if len(msg) > maxMsg {
+		msg = msg[:maxMsg-3] + "..."
+	}
+	return desc[:start+2] + msg + desc[end:]
 }
 
 // formatOperationsPorcelain displays operations in machine-readable format.

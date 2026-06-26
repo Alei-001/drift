@@ -602,7 +602,7 @@ drift reflog --porcelain      # 机器可读格式
 
 **输出示例：**
 
-默认模式（表格式，带表头）：
+默认模式（表格式，带表头，消息长度 40 字符截断）：
 
 ```
 DATE                OP      DESCRIPTION
