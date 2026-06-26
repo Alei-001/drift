@@ -12,11 +12,6 @@ type Config struct {
 	Sync SyncConfig `json:"sync,omitempty"`
 }
 
-type UserConfig struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
-
 type CoreConfig struct {
 	DefaultBranch string `json:"default_branch"`
 	AutoCRLF      string `json:"autocrlf"`

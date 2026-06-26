@@ -12,7 +12,7 @@ import (
 // GlobalConfig stores drift-wide settings that apply across all projects.
 // It lives at ~/.drift/global.json so it survives project cloning.
 type GlobalConfig struct {
-	User GlobalUserConfig `json:"user,omitempty"`
+	User UserConfig `json:"user,omitempty"`
 
 	Protocol string `json:"protocol,omitempty"`
 	Host     string `json:"host,omitempty"`
@@ -27,9 +27,9 @@ type GlobalConfig struct {
 	KeyPath            string `json:"key_path,omitempty"`
 }
 
-// GlobalUserConfig holds the default author identity stored in the global
-// config (~/.drift/global.json). Project-level config takes precedence.
-type GlobalUserConfig struct {
+// UserConfig holds the default author identity used in both project-level
+// (.drift/config.json) and global (~/.drift/global.json) configs.
+type UserConfig struct {
 	Name  string `json:"name,omitempty"`
 	Email string `json:"email,omitempty"`
 }
