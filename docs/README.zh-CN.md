@@ -40,7 +40,7 @@
 
 **源码编译：**
 ```bash
-go build -ldflags "-X github.com/drift/drift/internal/cli.version=0.1.0" -o drift ./cmd/drift/
+go build -ldflags "-X github.com/drift/drift/internal/cli.version=0.1.0" -o dist/drift.exe ./cmd/drift/
 ```
 
 验证安装：
@@ -96,17 +96,20 @@ drift restore v1 素材/封面.psd   # 只从 v1 恢复一个文件
 | `add` | 添加文件到暂存区（支持 glob 通配符、多路径） |
 | `status` | 查看工作区状态 |
 | `save` | 保存暂存区为新版本（`-a` 自动暂存，`--amend` 修改最近版本，`--tag` 设置标签） |
-| `log` | 查看提交历史（`--all` 跨分支） |
+| `log` | 查看提交历史（`--all` 跨分支，`--oneline` 简洁模式） |
+| `reflog` | 查看操作历史（撤销/重做日志） |
 | `restore` | 恢复工作区或指定文件到某个版本 |
 | `export` | 导出版本为 dir / zip / tar.gz |
 | `diff` | 查看版本间差异（`-p` 详细模式，`-f`/`--` 过滤文件） |
-| `branch` | 创建 / 查看 / 删除 / 重命名分支 |
+| `branch` | 查看 / 创建 / 删除 / 重命名分支 |
 | `switch` | 切换分支（自动保存 WIP，`--create` 自动创建） |
-| `tag` | 管理版本标签 |
-| `wip` / `restore-wip` | 查看 / 恢复自动保存的工作进度 |
+| `tag` | 查看 / 添加 / 删除版本标签 |
+| `undo` | 撤销最近操作 |
+| `unstage` | 从暂存区移除文件（无参清空全部） |
+| `clean` | 删除未跟踪文件 |
 | `rm` / `mv` | 删除 / 移动已跟踪文件 |
 | `config` | 查看和设置配置（`user.name`、`core.autocrlf` 等） |
-| `history` / `undo` | 查看 / 撤销最近操作 |
+| `wip` | 管理工作进度（`list` / `save` / `restore` / `drop`） |
 | `version` | 显示 drift 版本 |
 
 完整参考：[commands.md](commands.md)
@@ -125,10 +128,13 @@ drift restore v1 素材/封面.psd   # 只从 v1 恢复一个文件
 drift/
 ├── cmd/drift/          # CLI 入口
 ├── internal/
-│   ├── core/           # 核心对象模型（Blob / Tree / Commit / Index）、哈希、编解码、diff
+│   ├── core/           # 核心对象模型（Blob / Tree / Commit / Index）、哈希、编解码、DAG walker、diff
 │   ├── storage/        # 内容寻址存储、原子写入、文件锁
-│   ├── cli/            # 所有 cobra 命令
-│   └── config/         # JSON 配置读写
+│   ├── app/            # 业务逻辑（save、restore、switch、diff、export、sync）
+│   ├── cli/            # 所有 cobra 命令（表现层）
+│   ├── config/         # 项目级和全局 JSON 配置读写
+│   ├── sync/           # 远程同步引擎（DAG 级 push/pull）和传输层（WebDAV/FTP/SFTP/SMB）
+│   └── worktree/       # 工作树操作（暂存、WIP、清理）
 ├── installer/          # Inno Setup Windows 安装脚本
 ├── .github/workflows/  # CI/CD：发布工作流（tag 触发）
 └── docs/               # 设计文档（中文）
@@ -146,15 +152,15 @@ drift/
 
 ## 发布流程
 
-发布完全通过 GitHub Actions 自动化。推送版本 tag 后工作流会：
+发布通过 GitHub Actions 自动化。推送版本 tag 后工作流会：
 
-1. 编译 Windows（amd64）、macOS（amd64 + arm64）、Linux（amd64 + arm64）二进制
-2. 用 Inno Setup 编译 Windows `setup.exe`（图形化安装程序、PATH 管理、卸载程序）
-3. 将所有产物发布到 GitHub Release
+1. 编译 Windows（amd64）的 `drift.exe`，嵌入应用图标
+2. 用 Inno Setup 编译 Windows 安装程序（`drift-setup-x.y.z.exe`）
+3. 将所有产物发布到 GitHub Release，自动从 changelog 提取发布说明
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 ## 致谢
