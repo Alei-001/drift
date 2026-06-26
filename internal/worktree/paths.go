@@ -33,12 +33,16 @@ func NormalizePathFilters(rootDir string, args []string) ([]string, error) {
 
 // PathMatchesAny reports whether the given path matches any of the filters.
 // A path matches if it equals a filter or is a descendant of it (prefix+"/").
+// The special filter "." matches everything.
 // Empty/nil filters means "match all" (no filtering).
 func PathMatchesAny(path string, filters []string) bool {
 	if len(filters) == 0 {
 		return true
 	}
 	for _, fp := range filters {
+		if fp == "." {
+			return true
+		}
 		if path == fp || strings.HasPrefix(path, fp+"/") {
 			return true
 		}

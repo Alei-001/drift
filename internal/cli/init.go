@@ -28,8 +28,14 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 			fmt.Println("Drift project initialized")
 
 			// Load existing global user info as defaults for the prompt.
-			defaultName, _ := application.ConfigGet(apppkg.GlobalScope, "user.name")
-			defaultEmail, _ := application.ConfigGet(apppkg.GlobalScope, "user.email")
+			defaultName, err := application.ConfigGet(apppkg.GlobalScope, "user.name")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not read global config: %v\n", err)
+			}
+			defaultEmail, err := application.ConfigGet(apppkg.GlobalScope, "user.email")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not read global config: %v\n", err)
+			}
 
 			name, email := promptUserInfoNew(defaultName, defaultEmail)
 

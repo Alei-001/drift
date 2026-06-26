@@ -14,18 +14,19 @@ func NewAddCmd(application *apppkg.App) *cobra.Command {
 		Short: "Add file contents to the staging area",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			added, err := application.Add(args)
+			result, err := application.Add(args)
 			if err != nil {
 				return err
 			}
 
-			// For "add .", always print the count (even if 0) to match the
-			// original behavior. For specific paths, only print if files were added.
-			if len(args) == 1 && args[0] == "." {
-				fmt.Printf("Added %d file(s)\n", added)
-			} else if added > 0 {
-				fmt.Printf("Added %d file(s)\n", added)
+			for _, p := range result.Skipped {
+				fmt.Printf("Skipped (unsupported type): %s\n", p)
 			}
+			for _, p := range result.Added {
+				fmt.Printf("Added: %s\n", p)
+			}
+
+			fmt.Printf("Added %d file(s)\n", len(result.Added))
 			return nil
 		},
 	}

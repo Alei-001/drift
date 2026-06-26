@@ -13,7 +13,7 @@ func NewSaveCmd(application *apppkg.App) *cobra.Command {
 		message string
 		amend   bool
 		all     bool
-		name    string
+		tag     string
 	)
 
 	cmd := &cobra.Command{
@@ -23,7 +23,7 @@ func NewSaveCmd(application *apppkg.App) *cobra.Command {
 			result, err := application.Save(message, apppkg.SaveOptions{
 				Amend: amend,
 				All:   all,
-				Name:  name,
+				Tag:   tag,
 			})
 			if err != nil {
 				return err
@@ -35,13 +35,8 @@ func NewSaveCmd(application *apppkg.App) *cobra.Command {
 				fmt.Printf("Saved: %s (%s)\n", result.ID, result.Message)
 			}
 
-			if len(result.StagedPaths) > 0 {
-				fmt.Printf("Staged %d file(s)\n", len(result.StagedPaths))
-			}
-
-			// AutoSync after save (best-effort)
-			if err := application.AutoSync(); err != nil {
-				fmt.Printf("Warning: sync failed: %v\n", err)
+			if len(result.ChangedPaths) > 0 {
+				fmt.Printf("Changed %d file(s)\n", len(result.ChangedPaths))
 			}
 
 			return nil
@@ -51,7 +46,7 @@ func NewSaveCmd(application *apppkg.App) *cobra.Command {
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Commit message")
 	cmd.Flags().BoolVar(&amend, "amend", false, "Amend the last commit")
 	cmd.Flags().BoolVarP(&all, "all", "a", false, "Stage all changes before saving")
-	cmd.Flags().StringVar(&name, "name", "", "Name this version")
+	cmd.Flags().StringVar(&tag, "tag", "", "Tag this version")
 
 	return cmd
 }

@@ -61,6 +61,9 @@ func (a *App) currentCommit() (*core.Commit, error) {
 		}
 		return nil, err
 	}
+	if hash == "" {
+		return nil, nil
+	}
 	return a.findCommitByHash(hash)
 }
 
@@ -76,7 +79,7 @@ func (a *App) findCommitByHash(hash string) (*core.Commit, error) {
 }
 
 func (a *App) ResolveCommit(version string) (*core.Commit, error) {
-	if hash := a.resolveName(version); hash != "" {
+	if hash := a.resolveTag(version); hash != "" {
 		return a.findCommitByHash(hash)
 	}
 
@@ -129,7 +132,7 @@ func (a *App) ResolveCommit(version string) (*core.Commit, error) {
 		if branchName == "HEAD" || branchName == currentBranch {
 			continue
 		}
-		if strings.HasPrefix(branchName, "names/") {
+		if strings.HasPrefix(branchName, "tags/") {
 			continue
 		}
 		commits, err := a.store.ListBranchCommits(branchName)
@@ -154,8 +157,8 @@ func (a *App) ResolveCommit(version string) (*core.Commit, error) {
 	return nil, fmt.Errorf("version not found: %s", version)
 }
 
-func (a *App) resolveName(version string) string {
-	hash, err := a.store.GetRef("names/" + version)
+func (a *App) resolveTag(version string) string {
+	hash, err := a.store.GetRef("tags/" + version)
 	if err != nil || hash == "" {
 		return ""
 	}

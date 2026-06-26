@@ -20,6 +20,9 @@ func NewRmCmd(application *apppkg.App) *cobra.Command {
 		Short: "Remove files from the working tree and staging area",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Honor global --dry-run: only preview, don't delete.
+			globalDryRun, _ := cmd.Flags().GetBool("dry-run")
+
 			// First, get list of files that would be removed (dry run)
 			toRemove, err := application.Remove(args, apppkg.RemoveOptions{
 				Cached:    cached,
@@ -32,6 +35,15 @@ func NewRmCmd(application *apppkg.App) *cobra.Command {
 
 			if len(toRemove) == 0 {
 				fmt.Println("No files to remove")
+				return nil
+			}
+
+			// Global --dry-run: print what would be removed and exit.
+			if globalDryRun {
+				fmt.Printf("Would remove %d file(s):\n", len(toRemove))
+				for _, p := range toRemove {
+					fmt.Printf("  %s\n", p)
+				}
 				return nil
 			}
 

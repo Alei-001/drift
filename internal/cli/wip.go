@@ -54,7 +54,11 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			for _, e := range entries {
-				fmt.Printf("%s %s\n", e.Path, e.Hash[:8])
+				h := e.Hash
+				if len(h) > 8 {
+					h = h[:8]
+				}
+				fmt.Printf("%s %s\n", e.Path, h)
 			}
 			return nil
 		},
@@ -66,10 +70,15 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 		Short: "Save work in progress",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			branch := application.CurrentBranch()
-			if err := application.WIPSave(branch); err != nil {
+			count, err := application.WIPSave(branch)
+			if err != nil {
 				return err
 			}
-			fmt.Printf("Saved work in progress for branch %s\n", branch)
+			if count == 0 {
+				fmt.Println("Nothing to save")
+				return nil
+			}
+			fmt.Printf("Saved work in progress for branch %s (%d file(s))\n", branch, count)
 			return nil
 		},
 	}
@@ -89,6 +98,10 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
+			if count == 0 {
+				fmt.Printf("No work in progress for branch %s\n", branch)
+				return nil
+			}
 			fmt.Printf("Restored %d file(s) from work in progress for branch %s\n", count, branch)
 			return nil
 		},

@@ -95,14 +95,14 @@ drift restore v1 素材/封面.psd   # restore only one file from v1
 | `init` | Initialize a new Drift project |
 | `add` | Add files to the staging area (supports globs, multiple paths) |
 | `status` | Show working tree status |
-| `save` | Save staged changes as a new version (`-a` auto-stages, `--amend` edits last version, `--name` sets an alias) |
+| `save` | Save staged changes as a new version (`-a` auto-stages, `--amend` edits last version, `--tag` sets a tag) |
 | `log` | View commit history (`--all` across branches) |
 | `restore` | Restore the workspace or specific files to a version |
 | `export` | Export a version as dir / zip / tar.gz |
 | `diff` | Show differences between versions (`-p` for patch, `-f`/`--` for file filtering) |
 | `branch` | Create / list / delete / rename branches |
 | `switch` | Switch branches (auto-saves WIP, `--create` to create on the fly) |
-| `name` | Manage version aliases |
+| `tag` | Manage version tags |
 | `wip` / `restore-wip` | List / restore auto-saved work-in-progress |
 | `rm` / `mv` | Delete / move tracked files |
 | `config` | View and set configuration (`user.name`, `core.autocrlf`, etc.) |

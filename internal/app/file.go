@@ -16,7 +16,8 @@ type RemoveOptions struct {
 }
 
 type MoveOptions struct {
-	Force bool
+	Force  bool
+	DryRun bool
 }
 
 type CleanOptions struct {
@@ -58,7 +59,7 @@ func (a *App) Remove(paths []string, opts RemoveOptions) ([]string, error) {
 	}
 
 	if len(toRemove) == 0 {
-		return nil, fmt.Errorf("no tracked files matched")
+		return nil, nil
 	}
 
 	// DryRun: return list of files that would be removed without actually removing them
@@ -177,17 +178,17 @@ func (a *App) expandRemovePaths(args []string, recursive bool) ([]string, error)
 	return result, nil
 }
 
-func (a *App) Move(sources []string, dest string, opts MoveOptions) error {
+func (a *App) Move(sources []string, dest string, opts MoveOptions) ([]string, error) {
 	destInfo, destErr := os.Lstat(filepath.Join(a.dir, filepath.FromSlash(dest)))
 	destIsDir := destErr == nil && destInfo.IsDir()
 
 	if !destIsDir && len(sources) > 1 {
-		return fmt.Errorf("moving multiple sources requires the destination to be a directory")
+		return nil, fmt.Errorf("moving multiple sources requires the destination to be a directory")
 	}
 
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {
-		return fmt.Errorf("failed to load index: %w", err)
+		return nil, fmt.Errorf("failed to load index: %w", err)
 	}
 
 	tracked := make(map[string]bool)
@@ -196,19 +197,29 @@ func (a *App) Move(sources []string, dest string, opts MoveOptions) error {
 	}
 	parentHashes, err := a.wt.LoadParentTreeHashes()
 	if err != nil {
-		return fmt.Errorf("failed to load parent tree: %w", err)
+		return nil, fmt.Errorf("failed to load parent tree: %w", err)
 	}
 	for p := range parentHashes {
 		tracked[p] = true
 	}
 
+	// Phase 1: validate all sources before moving anything. This prevents
+	// partial-failure inconsistency where some files are moved on disk but
+	// the index hasn't been saved.
+	type plannedMove struct {
+		srcRel   string
+		destRel  string
+		srcFull  string
+		destFull string
+	}
+
+	var planned []plannedMove
 	for _, src := range sources {
-		// Best-effort: these functions rarely fail for normal paths.
 		absSrc, _ := filepath.Abs(src)
 		srcRel, _ := filepath.Rel(a.dir, absSrc)
 		srcRel = filepath.ToSlash(srcRel)
 		if !tracked[srcRel] {
-			return fmt.Errorf("source '%s' is not tracked (use 'drift add' first)", srcRel)
+			return nil, fmt.Errorf("source '%s' is not tracked (use 'drift add' first)", srcRel)
 		}
 
 		var destRel string
@@ -219,85 +230,112 @@ func (a *App) Move(sources []string, dest string, opts MoveOptions) error {
 		}
 
 		if err := core.ValidateTreePath(destRel); err != nil {
-			return fmt.Errorf("invalid destination %q: %w", destRel, err)
+			return nil, fmt.Errorf("invalid destination %q: %w", destRel, err)
 		}
 
 		srcFull := filepath.Join(a.dir, filepath.FromSlash(srcRel))
 		destFull := filepath.Join(a.dir, filepath.FromSlash(destRel))
 
-		if err := os.MkdirAll(filepath.Dir(destFull), 0755); err != nil {
-			return fmt.Errorf("failed to create destination directory: %w", err)
-		}
-
 		if _, err := os.Stat(destFull); err == nil {
 			if !opts.Force {
-				return fmt.Errorf("destination exists (use -f to overwrite): %s", destRel)
-			}
-			if err := os.Remove(destFull); err != nil {
-				return fmt.Errorf("failed to remove existing destination %s: %w", destRel, err)
+				return nil, fmt.Errorf("destination exists (use -f to overwrite): %s", destRel)
 			}
 		}
 
-		if err := os.Rename(srcFull, destFull); err != nil {
-			return fmt.Errorf("failed to move %s to %s: %w", srcRel, destRel, err)
+		// Check for duplicate destinations among sources.
+		for _, p := range planned {
+			if p.destRel == destRel {
+				return nil, fmt.Errorf("multiple sources would move to the same destination: %s", destRel)
+			}
 		}
 
-		if entry, err := idx.Entry(srcRel); err == nil {
+		planned = append(planned, plannedMove{
+			srcRel:   srcRel,
+			destRel:  destRel,
+			srcFull:  srcFull,
+			destFull: destFull,
+		})
+	}
+
+	// DryRun: return planned destinations without executing moves.
+	if opts.DryRun {
+		var dests []string
+		for _, p := range planned {
+			dests = append(dests, p.destRel)
+		}
+		return dests, nil
+	}
+
+	// Phase 2: execute all moves. By this point all preconditions are validated.
+	var moved []string
+	for _, p := range planned {
+		if err := os.MkdirAll(filepath.Dir(p.destFull), 0755); err != nil {
+			return moved, fmt.Errorf("failed to create destination directory: %w", err)
+		}
+
+		if _, err := os.Stat(p.destFull); err == nil {
+			if err := os.Remove(p.destFull); err != nil {
+				return moved, fmt.Errorf("failed to remove existing destination %s: %w", p.destRel, err)
+			}
+		}
+
+		if err := os.Rename(p.srcFull, p.destFull); err != nil {
+			return moved, fmt.Errorf("failed to move %s to %s: %w", p.srcRel, p.destRel, err)
+		}
+
+		if entry, err := idx.Entry(p.srcRel); err == nil {
 			newEntry := entry
-			newEntry.Path = destRel
+			newEntry.Path = p.destRel
 			if err := idx.Add(newEntry); err != nil {
-				return fmt.Errorf("failed to stage %s: %w", destRel, err)
+				return moved, fmt.Errorf("failed to stage %s: %w", p.destRel, err)
 			}
-			idx.Remove(srcRel)
+			idx.Remove(p.srcRel)
 		} else {
-			info, err := os.Lstat(destFull)
+			info, err := os.Lstat(p.destFull)
 			if err != nil {
-				return fmt.Errorf("failed to stat moved file: %w", err)
+				return moved, fmt.Errorf("failed to stat moved file: %w", err)
 			}
-			mode, err := core.NormalizeModeForPath(info.Mode(), destRel)
+			mode, err := core.NormalizeModeForPath(info.Mode(), p.destRel)
 			if err != nil {
-				return fmt.Errorf("unsupported file type for %s: %w", destRel, err)
+				return moved, fmt.Errorf("unsupported file type for %s: %w", p.destRel, err)
 			}
 			var hash string
 			if mode == core.ModeSymlink {
-				target, err := os.Readlink(destFull)
+				target, err := os.Readlink(p.destFull)
 				if err != nil {
-					return fmt.Errorf("failed to read symlink %s: %w", destRel, err)
+					return moved, fmt.Errorf("failed to read symlink %s: %w", p.destRel, err)
 				}
 				hash, err = a.store.PutBlob([]byte(target))
 				if err != nil {
-					return fmt.Errorf("failed to store symlink %s: %w", destRel, err)
+					return moved, fmt.Errorf("failed to store symlink %s: %w", p.destRel, err)
 				}
 			} else {
-				hash, err = a.wt.PutBlobForAdd(destFull)
+				hash, err = a.wt.PutBlobForAdd(p.destFull)
 				if err != nil {
-					return fmt.Errorf("failed to store %s: %w", destRel, err)
+					return moved, fmt.Errorf("failed to store %s: %w", p.destRel, err)
 				}
 			}
 			entry := core.IndexEntry{
-				Path:       destRel,
+				Path:       p.destRel,
 				Hash:       hash,
 				ModifiedAt: info.ModTime(),
 				Size:       info.Size(),
 				Mode:       mode,
 			}
 			if err := idx.Add(entry); err != nil {
-				return fmt.Errorf("failed to stage %s: %w", destRel, err)
+				return moved, fmt.Errorf("failed to stage %s: %w", p.destRel, err)
 			}
 		}
+		moved = append(moved, p.destRel)
 	}
 
 	if err := a.store.SaveIndex(&idx); err != nil {
-		return fmt.Errorf("failed to save index: %w", err)
+		return moved, fmt.Errorf("failed to save index: %w", err)
 	}
 
 	var srcDirs []string
-	for _, src := range sources {
-		// Best-effort: these functions rarely fail for normal paths.
-		absSrc, _ := filepath.Abs(src)
-		srcRel, _ := filepath.Rel(a.dir, absSrc)
-		srcRel = filepath.ToSlash(srcRel)
-		dir := filepath.Dir(srcRel)
+	for _, p := range planned {
+		dir := filepath.Dir(p.srcRel)
 		if dir != "." && dir != "" {
 			srcDirs = append(srcDirs, dir)
 		}
@@ -306,7 +344,7 @@ func (a *App) Move(sources []string, dest string, opts MoveOptions) error {
 		a.wt.CleanEmptyDirs(srcDirs)
 	}
 
-	return nil
+	return moved, nil
 }
 
 func (a *App) Clean(opts CleanOptions) ([]string, error) {

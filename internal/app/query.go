@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -56,11 +57,12 @@ func (a *App) allBranchHistory(limit int) ([]*core.Commit, error) {
 	sort.Strings(branches)
 
 	for _, name := range branches {
-		if name == "HEAD" || strings.HasPrefix(name, "names/") {
+		if name == "HEAD" || strings.HasPrefix(name, "tags/") {
 			continue
 		}
 		commits, err := a.store.ListBranchCommits(name)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read history for branch %s: %v\n", name, err)
 			continue
 		}
 		for _, c := range commits {

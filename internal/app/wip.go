@@ -36,35 +36,37 @@ func (a *App) WIPListAll() ([]string, error) {
 	return worktree.ListWIPBranches(a.store)
 }
 
-func (a *App) WIPSave(branch string) error {
+func (a *App) WIPSave(branch string) (int, error) {
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {
-		return err
+		return 0, err
 	}
 
 	if err := a.wt.StageWorktreeChanges(&idx); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Check if there are any pending staged changes. If not, this is a no-op.
 	hasPending, err := a.hasPendingStagedChanges(&idx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to check pending staged changes: %w", err)
+		return 0, fmt.Errorf("failed to check pending staged changes: %w", err)
 	}
 	if !hasPending {
-		return nil
+		return 0, nil
 	}
 
+	count := len(idx.Entries)
+
 	if err := a.wt.SaveWIP(branch, &idx); err != nil {
-		return err
+		return 0, err
 	}
 
 	emptyIdx := &core.Index{}
 	if err := a.store.SaveIndex(emptyIdx); err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	return count, nil
 }
 
 func (a *App) WIPRestore(branch string) (int, error) {

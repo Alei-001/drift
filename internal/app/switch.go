@@ -61,11 +61,14 @@ func (a *App) Switch(branch string, opts SwitchOptions) (*SwitchResult, error) {
 			if err := a.wt.SaveWIP(currentBranch, &idx); err != nil {
 				return nil, fmt.Errorf("failed to save work-in-progress: %w", err)
 			}
-			result.WIPSaved = true
-			emptyIdx := &core.Index{}
-			if err := a.store.SaveIndex(emptyIdx); err != nil {
+			// Clear the index. If this fails, roll back the WIP save to
+			// avoid leaving the repo in an inconsistent state where WIP
+			// is saved but the index still has the old entries.
+			if err := a.store.SaveIndex(&core.Index{}); err != nil {
+				_ = worktree.DeleteWIP(a.store, currentBranch)
 				return nil, fmt.Errorf("failed to clear index: %w", err)
 			}
+			result.WIPSaved = true
 		}
 	}
 
@@ -85,31 +88,26 @@ func (a *App) Switch(branch string, opts SwitchOptions) (*SwitchResult, error) {
 		return nil, fmt.Errorf("branch %q already exists", branch)
 	}
 
-	// Read current commit's blob set for cleanup. Non-fatal: if the read
-	// fails, stale files may remain on disk but the switch still succeeds.
+	// Tree reader for loading the target commit's tree.
 	reader := core.NewTreeReader(a.store)
-	currentBlobs := make(map[string]bool)
-	if cc, err := a.currentCommit(); err == nil && cc != nil {
-		if t, err := a.store.GetTree(cc.TreeHash); err == nil {
-			if blobs, err := reader.ListBlobs(t, ""); err == nil {
-				for _, b := range blobs {
-					currentBlobs[b.Path] = true
-				}
-			}
-		}
-	}
 
 	if commitHash == "" {
+		// Empty branch: delete all worktree files (they were captured by
+		// WIP save if applicable).
 		var deletedPaths []string
-		for path := range currentBlobs {
+		walkErr := core.WalkWorkingDir(a.dir, func(path string, info os.FileInfo) error {
 			if err := core.ValidateTreePath(path); err != nil {
-				continue
+				return nil
 			}
 			fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
 			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-				return nil, err
+				return err
 			}
 			deletedPaths = append(deletedPaths, path)
+			return nil
+		})
+		if walkErr != nil {
+			return nil, fmt.Errorf("failed to clean worktree: %w", walkErr)
 		}
 		a.wt.CleanEmptyDirs(deletedPaths)
 
@@ -117,15 +115,27 @@ func (a *App) Switch(branch string, opts SwitchOptions) (*SwitchResult, error) {
 		if err := a.store.SaveRef("HEAD", branch); err != nil {
 			return nil, fmt.Errorf("failed to update HEAD: %w", err)
 		}
-		if err := a.recordOperation(OpSwitch, fmt.Sprintf("switch to %s", branch), []RefChange{
+		refChanges := []RefChange{
 			{Ref: "HEAD", Before: currentBranch, After: branch},
-		}); err != nil {
+		}
+		if result.Created {
+			refChanges = append(refChanges, RefChange{Ref: branch, Before: "", After: commitHash})
+		}
+		if err := a.recordOperation(OpSwitch, fmt.Sprintf("switch to %s", branch), refChanges); err != nil {
 			return nil, err
 		}
 		if err := a.store.SaveIndex(&core.Index{}); err != nil {
 			return nil, fmt.Errorf("failed to update index: %w", err)
 		}
 		result.EmptyBranch = true
+
+		// Restore WIP for the target branch if it exists (best-effort).
+		if wip, _ := worktree.LoadWIP(a.store, branch); wip != nil && len(wip.Entries) > 0 {
+			if _, err := a.RestoreWIP(branch); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to restore WIP for %s: %v\n", branch, err)
+			}
+		}
+
 		return result, nil
 	}
 
@@ -160,18 +170,26 @@ func (a *App) Switch(branch string, opts SwitchOptions) (*SwitchResult, error) {
 		}
 	}
 
+	// Clean up: delete any worktree file not in the target tree. This
+	// handles both committed files from the old branch and untracked
+	// files that were captured by WIP save.
 	var deletedPaths []string
-	for path := range currentBlobs {
-		if !targetPaths[path] {
-			if err := core.ValidateTreePath(path); err != nil {
-				continue
-			}
-			fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
-			if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-				return nil, err
-			}
-			deletedPaths = append(deletedPaths, path)
+	walkErr := core.WalkWorkingDir(a.dir, func(path string, info os.FileInfo) error {
+		if targetPaths[path] {
+			return nil
 		}
+		if err := core.ValidateTreePath(path); err != nil {
+			return nil
+		}
+		fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
+		if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		deletedPaths = append(deletedPaths, path)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("failed to clean worktree: %w", walkErr)
 	}
 
 	a.wt.CleanEmptyDirs(deletedPaths)
@@ -184,10 +202,21 @@ func (a *App) Switch(branch string, opts SwitchOptions) (*SwitchResult, error) {
 	if err := a.store.SaveRef("HEAD", branch); err != nil {
 		return nil, fmt.Errorf("failed to update HEAD: %w", err)
 	}
-	if err := a.recordOperation(OpSwitch, fmt.Sprintf("switch to %s", branch), []RefChange{
+	refChanges := []RefChange{
 		{Ref: "HEAD", Before: currentBranch, After: branch},
-	}); err != nil {
+	}
+	if result.Created {
+		refChanges = append(refChanges, RefChange{Ref: branch, Before: "", After: commitHash})
+	}
+	if err := a.recordOperation(OpSwitch, fmt.Sprintf("switch to %s", branch), refChanges); err != nil {
 		return nil, err
+	}
+
+	// Restore WIP for the target branch if it exists (best-effort).
+	if wip, _ := worktree.LoadWIP(a.store, branch); wip != nil && len(wip.Entries) > 0 {
+		if _, err := a.RestoreWIP(branch); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to restore WIP for %s: %v\n", branch, err)
+		}
 	}
 
 	return result, nil
@@ -210,6 +239,13 @@ func (a *App) RestoreWIP(branch string) (int, error) {
 	var restored int
 	var errs []error
 	for _, e := range wip.Entries {
+		blob := core.BlobEntry{Path: e.Path, Hash: e.Hash, Mode: e.Mode}
+		// Write to disk first; only add to index if the write succeeds.
+		// This prevents index entries pointing to non-existent files.
+		if _, err := a.wt.WriteBlob(blob); err != nil {
+			errs = append(errs, fmt.Errorf("failed to write %s: %w", e.Path, err))
+			continue
+		}
 		entry := core.IndexEntry{
 			Path: e.Path,
 			Hash: e.Hash,
@@ -217,11 +253,6 @@ func (a *App) RestoreWIP(branch string) (int, error) {
 		}
 		if err := idx.Add(entry); err != nil {
 			errs = append(errs, fmt.Errorf("failed to add %s to index: %w", e.Path, err))
-			continue
-		}
-		blob := core.BlobEntry{Path: e.Path, Hash: e.Hash, Mode: e.Mode}
-		if _, err := a.wt.WriteBlob(blob); err != nil {
-			errs = append(errs, fmt.Errorf("failed to write %s: %w", e.Path, err))
 			continue
 		}
 		restored++

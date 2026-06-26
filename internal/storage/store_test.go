@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,9 +42,6 @@ func TestStore_Init_CreatesDirs(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("expected %s to exist: %v", rel, err)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".drift", "config.json")); err != nil {
-		t.Fatalf("expected config.json to exist: %v", err)
 	}
 }
 
@@ -412,31 +408,6 @@ func TestStore_LoadIndex_MissingFile(t *testing.T) {
 	}
 	if len(idx.Entries) != 0 {
 		t.Fatalf("expected 0 entries, got %d", len(idx.Entries))
-	}
-}
-
-// TestStore_Init_WritesConfig verifies that Init writes a config.json with expected fields.
-func TestStore_Init_WritesConfig(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(dir)
-	if err := s.Init(); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, ".drift", "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatal(err)
-	}
-	// Issue 13: Init now writes the standard config schema (user + core).
-	user, ok := cfg["user"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected user object, got %v", cfg["user"])
-	}
-	if user["name"] == nil {
-		t.Fatalf("expected user.name to be set, got %v", user["name"])
 	}
 }
 

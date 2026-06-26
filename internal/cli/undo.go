@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	apppkg "github.com/drift/drift/internal/app"
 	"github.com/spf13/cobra"
@@ -20,14 +21,13 @@ func NewUndoCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
-			if result.RemainingCount == number {
-				fmt.Println("Nothing to undo")
-				return nil
-			}
-
 			undone := number - result.RemainingCount
 			fmt.Printf("Undid %d operation(s)\n", undone)
 			fmt.Printf("  %s: %s\n", result.Entry.Op, result.Entry.Desc)
+
+			if result.Warning != "" {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", result.Warning)
+			}
 
 			return nil
 		},

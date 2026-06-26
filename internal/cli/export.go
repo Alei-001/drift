@@ -34,11 +34,11 @@ func NewExportCmd(application *apppkg.App) *cobra.Command {
 				return fmt.Errorf("unsupported format: %s (use dir, zip, or tar)", format)
 			}
 
-			if err := application.Export(version, output, exportFormat, filters); err != nil {
+			if actualOutput, err := application.Export(version, output, exportFormat, filters); err != nil {
 				return err
+			} else {
+				fmt.Printf("Exported %s to %s\n", version, actualOutput)
 			}
-
-			fmt.Printf("Exported %s to %s\n", version, output)
 			return nil
 		},
 	}

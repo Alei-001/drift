@@ -19,13 +19,34 @@ func NewMvCmd(application *apppkg.App) *cobra.Command {
 			sources := args[:len(args)-1]
 			dest := args[len(args)-1]
 
-			if err := application.Move(sources, dest, apppkg.MoveOptions{
+			globalDryRun, _ := cmd.Flags().GetBool("dry-run")
+
+			if globalDryRun {
+				moved, err := application.Move(sources, dest, apppkg.MoveOptions{
+					Force:  force,
+					DryRun: true,
+				})
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Would move %d file(s):\n", len(moved))
+				for _, p := range moved {
+					fmt.Printf("  %s\n", p)
+				}
+				return nil
+			}
+
+			moved, err := application.Move(sources, dest, apppkg.MoveOptions{
 				Force: force,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
 
-			fmt.Printf("Moved %d file(s)\n", len(sources))
+			for _, p := range moved {
+				fmt.Printf("Moved: %s\n", p)
+			}
+			fmt.Printf("Moved %d file(s)\n", len(moved))
 			return nil
 		},
 	}

@@ -93,17 +93,17 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 		targetPaths[b.Path] = true
 	}
 
-	prevBlobs := make(map[string]bool)
+	prevBlobs := make(map[string]string)
 	currentBranch := a.CurrentBranch()
 	// Best-effort: for added/modified/deleted statistics.
 	if currentHash, err := a.store.GetRef(currentBranch); err == nil {
-		if currentHash != commit.Hash {
+		if currentHash != commit.Hash && currentHash != "" {
 			if currentCommit, err := a.findCommitByHash(currentHash); err == nil {
 				if t, err := a.store.GetTree(currentCommit.TreeHash); err == nil {
 					// Best-effort: for added/modified/deleted statistics.
 					prevBlobsList, _ := reader.ListBlobs(t, "")
 					for _, b := range prevBlobsList {
-						prevBlobs[b.Path] = true
+						prevBlobs[b.Path] = b.Hash
 					}
 				}
 			}
@@ -131,11 +131,13 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 
 	var added, modified int
 	for _, b := range targetBlobs {
-		if prevBlobs[b.Path] {
-			modified++
-		} else {
+		prevHash, inPrev := prevBlobs[b.Path]
+		if !inPrev {
 			added++
+		} else if prevHash != b.Hash {
+			modified++
 		}
+		// If hash matches, the file is unchanged — don't count it.
 	}
 
 	var deleted int
@@ -184,10 +186,11 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 		return nil, fmt.Errorf("failed to update index: %w", err)
 	}
 
-	// Record operation for undo log. RefChanges is empty because restore
-	// doesn't change any refs (HEAD, branch refs remain unchanged).
-	// Undo for restore is a no-op since there are no refs to revert.
-	if err := a.recordOperation(OpRestore, fmt.Sprintf("restore %s", version), []RefChange{}); err != nil {
+	// Record operation for undo log. Save the old index snapshot so undo
+	// can restore the pre-restore index state.
+	oldIdxSnapshot := make([]core.IndexEntry, len(oldIdx.Entries))
+	copy(oldIdxSnapshot, oldIdx.Entries)
+	if err := a.recordOperationWithIndex(OpRestore, fmt.Sprintf("restore %s", version), []RefChange{}, oldIdxSnapshot); err != nil {
 		return nil, err
 	}
 
@@ -199,42 +202,58 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 	}, nil
 }
 
-func (a *App) Export(version, output string, format ExportFormat, filters []string) error {
+func (a *App) Export(version, output string, format ExportFormat, filters []string) (string, error) {
 	commit, err := a.ResolveCommit(version)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	tree, err := a.store.GetTree(commit.TreeHash)
 	if err != nil {
-		return fmt.Errorf("failed to load tree: %w", err)
+		return "", fmt.Errorf("failed to load tree: %w", err)
 	}
 
 	reader := core.NewTreeReader(a.store)
 	blobs, err := reader.ListBlobs(tree, "")
 	if err != nil {
-		return fmt.Errorf("failed to list files: %w", err)
+		return "", fmt.Errorf("failed to list files: %w", err)
 	}
 
 	// Apply path filters if provided.
 	if len(filters) > 0 {
 		normalized, err := worktree.NormalizePathFilters(a.dir, filters)
 		if err != nil {
-			return fmt.Errorf("failed to normalize filters: %w", err)
+			return "", fmt.Errorf("failed to normalize filters: %w", err)
 		}
 		blobs = worktree.FilterBlobs(blobs, normalized)
 	}
 
+	actualOutput := output
 	switch format {
 	case ExportZip:
-		return a.exportZip(blobs, output)
+		if !strings.HasSuffix(output, ".zip") {
+			actualOutput = output + ".zip"
+		}
+		if err := a.exportZip(blobs, actualOutput); err != nil {
+			return "", err
+		}
 	case ExportTar:
-		return a.exportTar(blobs, output)
+		if !strings.HasSuffix(output, ".tar.gz") {
+			actualOutput = output + ".tar.gz"
+		}
+		if err := a.exportTar(blobs, actualOutput); err != nil {
+			return "", err
+		}
 	case ExportDir, "":
-		return a.exportDir(blobs, output)
+		if err := a.exportDir(blobs, output); err != nil {
+			return "", err
+		}
+		actualOutput = output
 	default:
-		return fmt.Errorf("unsupported format: %s (use dir, zip, or tar)", format)
+		return "", fmt.Errorf("unsupported format: %s (use dir, zip, or tar)", format)
 	}
+
+	return actualOutput, nil
 }
 
 func (a *App) exportDir(blobs []core.BlobEntry, output string) error {
@@ -246,8 +265,11 @@ func (a *App) exportDir(blobs []core.BlobEntry, output string) error {
 		return err
 	}
 
+	// Reuse a Worktree rooted at the output directory so symlink handling,
+	// fast-path checks, and permission restoration are shared with restore.
+	exportWt := worktree.New(a.store, output, a.wt.AutoCRLF)
 	for _, blob := range blobs {
-		if err := a.writeBlobToFile(blob, output); err != nil {
+		if _, err := exportWt.WriteBlob(blob); err != nil {
 			return err
 		}
 	}
@@ -256,10 +278,6 @@ func (a *App) exportDir(blobs []core.BlobEntry, output string) error {
 }
 
 func (a *App) exportZip(blobs []core.BlobEntry, output string) error {
-	if !strings.HasSuffix(output, ".zip") {
-		output += ".zip"
-	}
-
 	if _, err := os.Stat(output); err == nil {
 		return fmt.Errorf("file already exists: %s", output)
 	}
@@ -268,25 +286,30 @@ func (a *App) exportZip(blobs []core.BlobEntry, output string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	w := zip.NewWriter(f)
-	defer w.Close()
+	writeErr := a.writeBlobsToZip(blobs, w)
+	closeErr := w.Close()
+	f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return fmt.Errorf("failed to finalize zip: %w", closeErr)
+	}
+	return nil
+}
 
+func (a *App) writeBlobsToZip(blobs []core.BlobEntry, w *zip.Writer) error {
 	for _, blob := range blobs {
 		if err := a.addBlobToZip(blob, w); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
 func (a *App) exportTar(blobs []core.BlobEntry, output string) error {
-	if !strings.HasSuffix(output, ".tar.gz") {
-		output += ".tar.gz"
-	}
-
 	if _, err := os.Stat(output); err == nil {
 		return fmt.Errorf("file already exists: %s", output)
 	}
@@ -295,46 +318,32 @@ func (a *App) exportTar(blobs []core.BlobEntry, output string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	gw := gzip.NewWriter(f)
-	defer gw.Close()
-
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
+	writeErr := a.writeBlobsToTar(blobs, tw)
+	tarCloseErr := tw.Close()
+	gzipCloseErr := gw.Close()
+	f.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if tarCloseErr != nil {
+		return fmt.Errorf("failed to finalize tar: %w", tarCloseErr)
+	}
+	if gzipCloseErr != nil {
+		return fmt.Errorf("failed to finalize gzip: %w", gzipCloseErr)
+	}
+	return nil
+}
 
+func (a *App) writeBlobsToTar(blobs []core.BlobEntry, tw *tar.Writer) error {
 	for _, blob := range blobs {
 		if err := a.addBlobToTar(blob, tw); err != nil {
 			return err
 		}
 	}
-
 	return nil
-}
-
-func (a *App) writeBlobToFile(blob core.BlobEntry, outputDir string) error {
-	if err := core.ValidateTreePath(blob.Path); err != nil {
-		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
-	}
-
-	fullPath := filepath.Join(outputDir, filepath.FromSlash(blob.Path))
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return err
-	}
-
-	perm := os.FileMode(core.ToOSFileMode(blob.Mode))
-	f, err := os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
-	if err != nil {
-		return err
-	}
-	if err := a.store.GetBlobToWriter(blob.Hash, f); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(fullPath, perm)
 }
 
 func (a *App) addBlobToZip(blob core.BlobEntry, w *zip.Writer) error {
@@ -342,7 +351,13 @@ func (a *App) addBlobToZip(blob core.BlobEntry, w *zip.Writer) error {
 		return fmt.Errorf("unsafe export path %q: %w", blob.Path, err)
 	}
 
-	f, err := w.Create(blob.Path)
+	fh := &zip.FileHeader{
+		Name:   blob.Path,
+		Method: zip.Deflate,
+	}
+	fh.SetMode(os.FileMode(core.ToOSFileMode(blob.Mode)))
+
+	f, err := w.CreateHeader(fh)
 	if err != nil {
 		return err
 	}

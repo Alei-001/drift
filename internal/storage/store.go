@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/core"
 )
 
@@ -96,13 +95,6 @@ func (s *Store) Init() error {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", d, err)
 		}
-	}
-
-	// Issue 13: use the same config schema as config.LoadConfig expects
-	// (user + core), not an ad-hoc map. Issue 23: write atomically.
-	cfg := config.DefaultConfig()
-	if err := config.SaveConfig(s.DriftDir(), cfg); err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
 	}
 
 	return nil
@@ -533,7 +525,7 @@ func (s *Store) SaveRef(name, commitHash string) error {
 	path := filepath.Join(s.DriftDir(), refsDir, name+refExt)
 	data := []byte(commitHash + "\n")
 
-	// Create parent directory for nested refs (e.g. "names/label").
+	// Create parent directory for nested refs (e.g. "tags/label").
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
@@ -674,7 +666,7 @@ func (s *Store) RenameRef(oldName, newName string) error {
 		return fmt.Errorf("branch %q already exists", newName)
 	}
 
-	// Create parent directory for nested refs (e.g. "names/label").
+	// Create parent directory for nested refs (e.g. "tags/label").
 	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
 		return err
 	}

@@ -10,6 +10,7 @@ import (
 
 	apppkg "github.com/drift/drift/internal/app"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // NewSyncCmd creates the sync subcommand.
@@ -49,6 +50,9 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 				}
 				if info.TLS {
 					fmt.Println("TLS: enabled")
+				}
+				if info.Share != "" {
+					fmt.Printf("Share: %s\n", info.Share)
 				}
 				return nil
 			}
@@ -111,10 +115,26 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 		Use:   "now",
 		Short: "Sync immediately",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := application.SyncNow(); err != nil {
+			stats, err := application.SyncNow()
+			if err != nil {
 				return err
 			}
 			fmt.Println("Sync completed")
+			if stats.Pushed > 0 {
+				fmt.Printf("  Pushed: %d file(s)\n", stats.Pushed)
+			}
+			if stats.Pulled > 0 {
+				fmt.Printf("  Pulled: %d file(s)\n", stats.Pulled)
+			}
+			if stats.RemoteDeleted > 0 {
+				fmt.Printf("  Deleted on remote: %d file(s)\n", stats.RemoteDeleted)
+			}
+			if stats.LocalDeleted > 0 {
+				fmt.Printf("  Deleted locally: %d file(s)\n", stats.LocalDeleted)
+			}
+			if stats.Conflicts > 0 {
+				fmt.Printf("  Conflicts: %d file(s)\n", stats.Conflicts)
+			}
 			return nil
 		},
 	}
@@ -264,10 +284,23 @@ func promptInput(prompt string) string {
 	return strings.TrimSpace(input)
 }
 
-// promptPassword prompts the user for password (hidden input).
+// promptPassword prompts the user for password with hidden input.
 func promptPassword(prompt string) string {
 	fmt.Print(prompt + ": ")
 	reader := bufio.NewReader(os.Stdin)
+
+	// Try to disable echo using golang.org/x/term.
+	if oldState, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
+		defer term.Restore(int(os.Stdin.Fd()), oldState)
+		bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		if err != nil {
+			return ""
+		}
+		return string(bytes)
+	}
+
+	// Fallback: read normally (non-TTY environment).
 	input, _ := reader.ReadString('\n')
 	return strings.TrimSpace(input)
 }

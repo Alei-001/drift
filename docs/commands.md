@@ -26,7 +26,7 @@
 | `config` | 配置管理 | ✅ |
 | `rm` | 删除文件 | ✅ |
 | `mv` | 移动/重命名文件 | ✅ |
-| `name` | 版本别名 | ✅ |
+| `tag` | 版本标签 | ✅ |
 | `history` | 操作历史 | ✅ |
 | `undo` | 撤销操作 | ✅ |
 | `wip` | 工作进度管理 | ✅ |
@@ -145,15 +145,15 @@ drift unstage <路径>           # 仅移除指定文件
 ```bash
 drift save                    # 无备注
 drift save -m "备注信息"       # 带备注
-drift save --name 初稿         # 保存并同时设置别名
-drift save -m "初稿" --name 初稿  # 带备注和别名
+drift save --tag 初稿              # 保存并同时设置标签
+drift save -m "初稿" --tag 初稿     # 带备注和标签
 drift save --amend            # 修改最近一条版本（保留版本号）
 drift save --amend -m "新备注" # 修改版本并更新备注
 drift save -a -m "备注"        # 自动暂存所有改动后保存
 drift save --all              # 等同于 drift add . + drift save
 ```
 
-`-m` / `--message` 可选。`--name` 可选，用于在保存时直接为该版本设置别名（等效于保存后执行 `drift name <版本> <别名>`）。`-a` / `--all` 可选，自动暂存工作区所有改动后再保存（类似 `git commit -a`），无需先执行 `drift add`。
+`-m` / `--message` 可选。`--tag` 可选，用于在保存时直接为该版本设置标签（等效于保存后执行 `drift tag <版本> <标签>`）。`-a` / `--all` 可选，自动暂存工作区所有改动后再保存（类似 `git commit -a`），无需先执行 `drift add`。
 
 **行为：**
 - 从暂存区构建 Tree 对象
@@ -161,7 +161,7 @@ drift save --all              # 等同于 drift add . + drift save
 - 更新当前分支引用并清空暂存区
 - 若文件内容与上一版本完全相同，拒绝保存
 - 保存后列出本次实际变更的文件（与上一版本比较，非全部已跟踪文件）
-- 若指定 `--name`，保存成功后自动创建别名
+- 若指定 `--tag`，保存成功后自动创建标签
 - 若指定 `--all`，保存前自动暂存所有改动（含新增、修改、删除的已跟踪文件）
 
 **--amend 行为：**
@@ -244,7 +244,7 @@ drift export a1b2c3d4 -o ./交付客户           # 导出到目录（默认）
 drift export a1b2c3d4 -o ./交付.zip -f zip    # 导出为 zip
 drift export a1b2c3d4 -o ./交付.tar.gz -f tar # 导出为 tar.gz
 drift export main -o ./main-branch     # 导出分支最新版本
-drift export 初稿 -o ./draft           # 使用别名导出
+drift export 初稿 -o ./draft           # 使用标签导出
 
 # 路径过滤（只导出指定文件/目录）
 drift export a1b2c3d4 -o ./部分 章节/         # 只导出 章节/ 目录
@@ -533,40 +533,40 @@ drift diff a1b2c3d4 e5f6a7b8 -p --output diff.txt   # 保存差异到文件
 | 版本 ID | `a1b2c3d4` | 提交哈希前 8 位，支持缩写前缀（如 `a1b2`） |
 | 分支名 | `main` | 该分支的最新版本 |
 | 分支/版本 | `main/a1b2c3d4` | 精确指定某分支的某版本 |
-| 别名 | `初稿` | 通过 `drift name` 设置的别名 |
+| 别名 | `初稿` | 通过 `drift tag` 设置的标签 |
 
 > **说明**：`drift diff` 支持同分支内不同版本对比（最常用），也支持跨分支对比。由于 Drift 不做合并，分支是独立的创作线，跨分支对比主要用于查看两条创作线之间的差异。
 
 ---
 
-## 版本别名命令
+## 版本标签命令
 
-### `drift name` ✅
+### `drift tag` ✅
 
-为版本设置友好别名（类似 Git 的 tag）。
+为版本设置友好标签（类似 Git 的 tag）。
 
 ```bash
-drift name <版本> <标签名>    # 为版本设置别名
-drift name --list             # 查看所有别名
-drift name --delete <标签名>  # 删除别名
+drift tag <版本> <标签名>       # 为版本设置标签
+drift tag --list                # 查看所有标签
+drift tag --delete <标签名>     # 删除标签
 ```
 
 **示例：**
 
 ```bash
-drift name a1b2c3d4 初稿          # 为版本 a1b2c3d4 设置别名 "初稿"
-drift name e5f6a7b8 终稿          # 为版本 e5f6a7b8 设置别名 "终稿"
-drift name a1b2 初稿              # 支持缩写前缀（等价于上一条）
-drift name --list                 # 查看所有别名
-drift name --delete 初稿          # 删除别名
+drift tag a1b2c3d4 初稿             # 为版本 a1b2c3d4 设置标签 "初稿"
+drift tag e5f6a7b8 终稿             # 为版本 e5f6a7b8 设置标签 "终稿"
+drift tag a1b2 初稿                 # 支持缩写前缀（等价于上一条）
+drift tag --list                    # 查看所有标签
+drift tag --delete 初稿             # 删除标签
 ```
 
 **行为：**
-- 别名为版本提供一个易记的名称
-- 别名可在所有需要版本号的命令中使用（diff、export、restore 等）
-- 别名以 `refs/names/<标签>.ref` 存储在 `.drift/` 中
-- 同一版本可拥有多个别名
-- 别名显示在 `drift log` 输出中（如 `a1b2c3d4 (初稿) [main] ...`）
+	- 标签为版本提供一个易记的名称
+	- 标签可在所有需要版本号的命令中使用（diff、export、restore 等）
+	- 标签以 `refs/tags/<标签>.ref` 存储在 `.drift/` 中
+	- 同一版本可拥有多个标签
+	- 标签显示在 `drift log` 输出中（如 `a1b2c3d4 (初稿) [main] ...`）
 
 ---
 
@@ -607,7 +607,7 @@ To undo the most recent operation: drift undo
 - `branch-delete` — 删除分支
 - `branch-rename` — 重命名分支
 - `restore` — 恢复工作区
-- `name-add` / `name-delete` — 别名增删
+- `tag-add` / `tag-delete` — 标签增删
 
 ### `drift undo` ✅
 

@@ -10,6 +10,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/studio-b12/gowebdav v0.12.0
 	golang.org/x/crypto v0.53.0
+	golang.org/x/term v0.44.0
 )
 
 require (

@@ -8,51 +8,55 @@ import (
 	"github.com/drift/drift/internal/worktree"
 )
 
-func (a *App) Add(paths []string) (int, error) {
+// AddResult holds the outcome of staging paths.
+type AddResult struct {
+	Added   []string
+	Skipped []string
+}
+
+func (a *App) Add(paths []string) (*AddResult, error) {
 	expanded, err := worktree.ExpandAddPaths(a.dir, paths)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if len(expanded) == 0 {
-		return 0, fmt.Errorf("no matching files found")
+		return nil, fmt.Errorf("no matching files found")
 	}
 
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {
-		return 0, fmt.Errorf("failed to load index: %w", err)
+		return nil, fmt.Errorf("failed to load index: %w", err)
 	}
 
-	var added int
+	var added, skipped []string
 	if len(expanded) == 1 && expanded[0] == "." {
-		added, err = a.wt.StageAll(&idx)
+		added, skipped, err = a.wt.StageAll(&idx)
 	} else {
-		added, err = a.wt.StagePaths(&idx, expanded)
+		added, skipped, err = a.wt.StagePaths(&idx, expanded)
 	}
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if err := a.store.SaveIndex(&idx); err != nil {
-		return 0, fmt.Errorf("failed to save index: %w", err)
+		return nil, fmt.Errorf("failed to save index: %w", err)
 	}
 
-	return added, nil
+	return &AddResult{Added: added, Skipped: skipped}, nil
 }
 
 func (a *App) Unstage(paths []string) (unstaged []string, notFound []string, err error) {
-	expanded, err := worktree.ExpandAddPaths(a.dir, paths)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	var idx core.Index
 	if err := a.store.LoadIndex(&idx); err != nil {
 		return nil, nil, fmt.Errorf("failed to load index: %w", err)
 	}
 
+	// Match index entries against user-supplied path patterns. Unlike Add,
+	// Unstage does not require paths to exist in the working directory —
+	// only in the index.
 	matched := make(map[string]bool)
 	for _, entry := range idx.Entries {
-		if worktree.PathMatchesAny(entry.Path, expanded) {
+		if worktree.PathMatchesAny(entry.Path, paths) {
 			matched[entry.Path] = true
 		}
 	}
@@ -63,9 +67,20 @@ func (a *App) Unstage(paths []string) (unstaged []string, notFound []string, err
 	}
 	sort.Strings(toRemove)
 
-	// Find paths that were requested but not found in index
-	for _, p := range expanded {
-		if !matched[p] {
+	// A user-supplied path is "not found" only if it matched nothing in
+	// the index. Directory paths (e.g. "sub") that matched child entries
+	// (e.g. "sub/x.txt") are NOT reported as not-found.
+	matchedByInput := make(map[string]bool, len(paths))
+	for _, entry := range idx.Entries {
+		for _, p := range paths {
+			if worktree.PathMatchesAny(entry.Path, []string{p}) {
+				matchedByInput[p] = true
+				break
+			}
+		}
+	}
+	for _, p := range paths {
+		if !matchedByInput[p] {
 			notFound = append(notFound, p)
 		}
 	}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"sort"
 
 	"github.com/drift/drift/internal/core"
@@ -10,14 +11,14 @@ import (
 type SaveOptions struct {
 	Amend bool
 	All   bool
-	Name  string
+	Tag   string
 }
 
 type SaveResult struct {
 	ID          string
 	Message     string
 	Branch      string
-	StagedPaths []string
+	ChangedPaths []string
 	Amended     bool
 }
 
@@ -31,7 +32,7 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		if err := a.store.LoadIndex(&idx); err != nil {
 			return nil, fmt.Errorf("failed to load index: %w", err)
 		}
-		if _, err := a.wt.StageAll(&idx); err != nil {
+		if _, _, err := a.wt.StageAll(&idx); err != nil {
 			return nil, fmt.Errorf("failed to stage changes: %w", err)
 		}
 		if err := a.store.SaveIndex(&idx); err != nil {
@@ -46,6 +47,12 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 
 	if len(idx.Entries) == 0 {
 		return nil, fmt.Errorf("nothing to save (use 'drift add' first, or 'drift save --all')")
+	}
+
+	if opts.Tag != "" {
+		if err := validateTagLabel(opts.Tag); err != nil {
+			return nil, fmt.Errorf("failed to tag version: %w", err)
+		}
 	}
 
 	builder := core.NewTreeBuilder(func(t *core.Tree) error {
@@ -99,24 +106,34 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 			return nil, fmt.Errorf("failed to save amended commit: %w", err)
 		}
 
-		if err := a.recordOperation(OpSave, fmt.Sprintf("amend %s on %s", commit.ID, branch), []RefChange{
+		changes := []RefChange{
 			{Ref: branch, Before: prevBranchHash, After: commit.Hash},
-		}); err != nil {
+		}
+		if opts.Tag != "" {
+			tagRef := "tags/" + opts.Tag
+			if existing, err := a.store.GetRef(tagRef); err == nil && existing != "" {
+				return nil, fmt.Errorf("tag %q already exists", opts.Tag)
+			}
+			if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
+				return nil, fmt.Errorf("failed to save tag: %w", err)
+			}
+			changes = append(changes, RefChange{Ref: tagRef, Before: "", After: commit.Hash})
+		}
+		if err := a.recordOperation(OpSave, fmt.Sprintf("amend %s on %s", commit.ID, branch), changes); err != nil {
 			return nil, err
 		}
 
-		if opts.Name != "" {
-			if err := a.NameAdd(commit.ID, opts.Name); err != nil {
-				// Non-fatal: name assignment failure shouldn't block the save.
-			}
+		// AutoSync after amend (best-effort, non-fatal).
+		if err := a.AutoSync(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: sync failed: %v\n", err)
 		}
 
 		return &SaveResult{
 			ID:          commit.ID,
 			Message:     message,
 			Branch:      branch,
-			StagedPaths: stagedPaths,
-			Amended:     true,
+			ChangedPaths: stagedPaths,
+			Amended:      true,
 		}, nil
 	}
 
@@ -134,23 +151,33 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	if msg != "" {
 		desc = fmt.Sprintf("save %s (%s) on %s", commit.ID, msg, branch)
 	}
-	if err := a.recordOperation(OpSave, desc, []RefChange{
+	changes := []RefChange{
 		{Ref: branch, Before: prevBranchHash, After: commit.Hash},
-	}); err != nil {
+	}
+	if opts.Tag != "" {
+		tagRef := "tags/" + opts.Tag
+		if existing, err := a.store.GetRef(tagRef); err == nil && existing != "" {
+			return nil, fmt.Errorf("tag %q already exists", opts.Tag)
+		}
+		if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
+			return nil, fmt.Errorf("failed to save tag: %w", err)
+		}
+		changes = append(changes, RefChange{Ref: tagRef, Before: "", After: commit.Hash})
+	}
+	if err := a.recordOperation(OpSave, desc, changes); err != nil {
 		return nil, err
 	}
 
-	if opts.Name != "" {
-		if err := a.NameAdd(commit.ID, opts.Name); err != nil {
-			// Non-fatal: name assignment failure shouldn't block the save.
-		}
+	// AutoSync after save (best-effort, non-fatal).
+	if err := a.AutoSync(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: sync failed: %v\n", err)
 	}
 
 	return &SaveResult{
 		ID:          commit.ID,
 		Message:     msg,
 		Branch:      branch,
-		StagedPaths: stagedPaths,
+		ChangedPaths: stagedPaths,
 	}, nil
 }
 

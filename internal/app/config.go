@@ -185,6 +185,23 @@ func getGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) (string, err
 		return gcfg.User.Name, nil
 	case "user.email":
 		return gcfg.User.Email, nil
+	case "remote.protocol":
+		return gcfg.Protocol, nil
+	case "remote.host":
+		return gcfg.Host, nil
+	case "remote.port":
+		if gcfg.Port != 0 {
+			return strconv.Itoa(gcfg.Port), nil
+		}
+		return "", nil
+	case "remote.path":
+		return gcfg.Path, nil
+	case "remote.username":
+		return gcfg.Username, nil
+	case "remote.tls":
+		return strconv.FormatBool(gcfg.TLS), nil
+	case "remote.share":
+		return gcfg.Share, nil
 	default:
 		return "", fmt.Errorf("unknown global config key: %s", key)
 	}

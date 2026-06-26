@@ -28,7 +28,7 @@ func (a *App) BranchList() ([]string, error) {
 		if name == "HEAD" {
 			continue
 		}
-		if strings.HasPrefix(name, "names/") {
+		if strings.HasPrefix(name, "tags/") {
 			continue
 		}
 		names = append(names, name)
@@ -52,6 +52,12 @@ func (a *App) BranchCreate(name string) error {
 
 	if err := a.store.SaveRef(name, commitHash); err != nil {
 		return fmt.Errorf("failed to create branch: %w", err)
+	}
+
+	if err := a.recordOperation(OpBranchCreate, fmt.Sprintf("create branch %s", name), []RefChange{
+		{Ref: name, Before: "", After: commitHash},
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -97,8 +103,13 @@ func (a *App) BranchRename(oldName, newName string) error {
 	// Best-effort: for undo record.
 	newHash, _ := a.store.GetRef(newName)
 	headAfter, _ := a.store.GetRef("HEAD")
+
+	// Record ref changes so undo can fully reverse the rename:
+	//   oldName: Before=oldHash → undo does SaveRef(oldName, oldHash) (restore)
+	//   newName: Before=""      → undo does DeleteRef(newName) (remove)
 	changes := []RefChange{
 		{Ref: oldName, Before: oldHash, After: newHash},
+		{Ref: newName, Before: "", After: newHash},
 	}
 	if headBefore != headAfter {
 		changes = append(changes, RefChange{Ref: "HEAD", Before: headBefore, After: headAfter})

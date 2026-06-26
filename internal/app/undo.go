@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/drift/drift/internal/core"
 )
 
 const operationsFile = "operations.log"
@@ -17,18 +20,20 @@ type OpType string
 const (
 	OpSave         OpType = "save"
 	OpSwitch       OpType = "switch"
+	OpBranchCreate OpType = "branch-create"
 	OpBranchDelete OpType = "branch-delete"
 	OpBranchRename OpType = "branch-rename"
 	OpRestore      OpType = "restore"
-	OpNameAdd      OpType = "name-add"
-	OpNameDelete   OpType = "name-delete"
+	OpTagAdd      OpType = "tag-add"
+	OpTagDelete   OpType = "tag-delete"
 )
 
 type OperationEntry struct {
-	Timestamp  time.Time   `json:"timestamp"`
-	Op         OpType      `json:"op"`
-	Desc       string      `json:"desc"`
-	RefChanges []RefChange `json:"ref_changes"`
+	Timestamp     time.Time        `json:"timestamp"`
+	Op            OpType           `json:"op"`
+	Desc          string           `json:"desc"`
+	RefChanges    []RefChange      `json:"ref_changes"`
+	IndexSnapshot []core.IndexEntry `json:"index_snapshot,omitempty"`
 }
 
 type RefChange struct {
@@ -40,14 +45,20 @@ type RefChange struct {
 type UndoResult struct {
 	Entry          OperationEntry
 	RemainingCount int
+	Warning        string
 }
 
 func (a *App) recordOperation(op OpType, desc string, changes []RefChange) error {
+	return a.recordOperationWithIndex(op, desc, changes, nil)
+}
+
+func (a *App) recordOperationWithIndex(op OpType, desc string, changes []RefChange, indexSnapshot []core.IndexEntry) error {
 	entry := OperationEntry{
-		Timestamp:  time.Now(),
-		Op:         op,
-		Desc:       desc,
-		RefChanges: changes,
+		Timestamp:     time.Now(),
+		Op:            op,
+		Desc:          desc,
+		RefChanges:    changes,
+		IndexSnapshot: indexSnapshot,
 	}
 
 	path := filepath.Join(a.store.DriftDir(), operationsFile)
@@ -86,14 +97,13 @@ func (a *App) ReadOperations() ([]OperationEntry, error) {
 		}
 		var entry OperationEntry
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping malformed operation log entry: %v\n", err)
 			continue
 		}
 		entries = append(entries, entry)
 	}
 
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
+	slices.Reverse(entries)
 
 	return entries, nil
 }
@@ -132,17 +142,19 @@ func (a *App) Undo(count int) (*UndoResult, error) {
 	}
 
 	var lastEntry OperationEntry
-	var totalRestored int
 	for i := 0; i < count; i++ {
-		entry, restored, err := a.undoOne()
+		entry, _, err := a.undoOne()
 		if err != nil {
 			if i == 0 {
 				return nil, err
 			}
-			return &UndoResult{Entry: lastEntry, RemainingCount: count - i}, nil
+			return &UndoResult{
+				Entry:          lastEntry,
+				RemainingCount: count - i,
+				Warning:        err.Error(),
+			}, nil
 		}
 		lastEntry = *entry
-		totalRestored += restored
 	}
 
 	return &UndoResult{Entry: lastEntry, RemainingCount: 0}, nil
@@ -172,12 +184,25 @@ func (a *App) undoOne() (*OperationEntry, int, error) {
 		}
 	}
 
-	if err := a.removeLastOperation(); err != nil {
-		errs = append(errs, fmt.Errorf("failed to remove operation from log: %w", err))
+	// Restore index snapshot if present (e.g. for restore operations).
+	if len(last.IndexSnapshot) > 0 {
+		oldIdx := &core.Index{}
+		for _, e := range last.IndexSnapshot {
+			oldIdx.Add(e)
+		}
+		if err := a.store.SaveIndex(oldIdx); err != nil {
+			errs = append(errs, fmt.Errorf("failed to restore index: %w", err))
+		}
 	}
 
+	// Only remove the operation from the log if all ref changes succeeded.
+	// This allows the user to retry undo if a ref change failed.
 	if len(errs) > 0 {
 		return &last, len(last.RefChanges) - len(errs), errors.Join(errs...)
+	}
+
+	if err := a.removeLastOperation(); err != nil {
+		return &last, 0, fmt.Errorf("failed to remove operation from log: %w", err)
 	}
 
 	return &last, len(last.RefChanges), nil

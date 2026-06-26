@@ -102,7 +102,7 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	root.AddCommand(NewRestoreCmd(application))
 	root.AddCommand(NewSwitchCmd(application))
 	root.AddCommand(NewBranchCmd(application))
-	root.AddCommand(NewNameCmd(application))
+	root.AddCommand(NewTagCmd(application))
 	root.AddCommand(NewRmCmd(application))
 	root.AddCommand(NewMvCmd(application))
 	root.AddCommand(NewWIPCmd(application))

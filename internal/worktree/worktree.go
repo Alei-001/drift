@@ -1,7 +1,7 @@
-// Package worktree encapsulates working-tree file operations: writing blobs
-// to disk, staging changes, checking for modifications, and managing
-// work-in-progress (WIP) state. It bridges the storage layer (content-addressed
-// objects) and the filesystem (working directory).
+// Worktree represents the working directory and provides operations for
+// writing blobs to disk, staging changes, checking for modifications, and
+// managing work-in-progress (WIP) state. It bridges the storage layer
+// (content-addressed objects) and the filesystem (working directory).
 package worktree
 
 import (
@@ -15,6 +15,10 @@ import (
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
 )
+
+// errUntrackedFound is a sentinel error used internally by HasModifications
+// to short-circuit the worktree walk when an untracked file is found.
+var errUntrackedFound = errors.New("untracked file found")
 
 // Worktree represents the working directory and provides operations for
 // writing blobs to disk, staging changes, and checking for modifications.
@@ -173,57 +177,67 @@ func (w *Worktree) CleanEmptyDirs(deletedPaths []string) {
 	}
 }
 
-// HasModifications checks whether any tracked file in the current branch's
-// commit has unstaged modifications in the working tree.
+// HasModifications checks whether the working tree has unstaged modifications
+// (modified tracked files, deleted tracked files, or untracked files).
 // If filters is non-empty, only paths matching the filters are checked.
 func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filters []string) (bool, error) {
-	if commit == nil {
-		return false, nil
-	}
-
-	tree, err := w.Store.GetTree(commit.TreeHash)
-	if err != nil {
-		return false, err
-	}
-
-	reader := core.NewTreeReader(w.Store)
-	blobs, err := reader.ListBlobs(tree, "")
-	if err != nil {
-		return false, err
-	}
-
-	for _, b := range blobs {
-		if !PathMatchesAny(b.Path, filters) {
-			continue
+	// Build the set of tracked paths from both index and commit.
+	tracked := make(map[string]string) // path → expected hash (index preferred)
+	for _, e := range idx.Entries {
+		if PathMatchesAny(e.Path, filters) {
+			tracked[e.Path] = e.Hash
 		}
-		if idx.Has(b.Path) {
-			continue
+	}
+
+	if commit != nil {
+		tree, err := w.Store.GetTree(commit.TreeHash)
+		if err != nil {
+			return false, err
 		}
-		fullPath := filepath.Join(w.Root, filepath.FromSlash(b.Path))
+		reader := core.NewTreeReader(w.Store)
+		blobs, err := reader.ListBlobs(tree, "")
+		if err != nil {
+			return false, err
+		}
+		for _, b := range blobs {
+			if !PathMatchesAny(b.Path, filters) {
+				continue
+			}
+			if _, inIdx := tracked[b.Path]; !inIdx {
+				tracked[b.Path] = b.Hash
+			}
+		}
+	}
+
+	// Check each tracked file: does worktree match the expected hash?
+	for path, expectedHash := range tracked {
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
 		info, err := os.Lstat(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
+				return true, nil // tracked file deleted
+			}
+			continue
+		}
+
+		// Symlink: compare target string.
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(fullPath)
+			if err != nil {
+				continue
+			}
+			data, err := w.Store.GetBlob(expectedHash)
+			if err != nil {
+				continue
+			}
+			if target != string(data) {
 				return true, nil
 			}
 			continue
 		}
 
-		if b.Mode == core.ModeSymlink {
-			target, err := os.Readlink(fullPath)
-			if err != nil || target != "" {
-				data, err := w.Store.GetBlob(b.Hash)
-				if err != nil {
-					return false, fmt.Errorf("failed to read blob %s for %s: %w", b.Hash, b.Path, err)
-				}
-				if target != string(data) {
-					return true, nil
-				}
-			}
-			_ = info
-			continue
-		}
-
-		blobSize, sizeErr := w.Store.GetBlobSize(b.Hash)
+		// Fast path: size comparison.
+		blobSize, sizeErr := w.Store.GetBlobSize(expectedHash)
 		if sizeErr == nil && info.Size() != blobSize {
 			return true, nil
 		}
@@ -232,9 +246,26 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 		if err != nil {
 			continue
 		}
-		if fileHash != b.Hash {
+		if fileHash != expectedHash {
 			return true, nil
 		}
+	}
+
+	// Check for untracked files (not in index, not in commit).
+	walkErr := core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
+		if _, isTracked := tracked[path]; isTracked {
+			return nil
+		}
+		if len(filters) > 0 && !PathMatchesAny(path, filters) {
+			return nil
+		}
+		return errUntrackedFound
+	})
+	if walkErr == errUntrackedFound {
+		return true, nil
+	}
+	if walkErr != nil {
+		return false, walkErr
 	}
 
 	return false, nil

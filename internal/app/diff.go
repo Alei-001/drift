@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/worktree"
@@ -27,6 +28,17 @@ type DiffEntry struct {
 
 type DiffResult struct {
 	Entries []DiffEntry
+}
+
+// computeEdits runs Myers diff on old/new content and returns the edit script.
+// Returns nil for binary content or empty data.
+func computeEdits(oldData, newData []byte, isBinary bool) []core.DiffEdit {
+	if isBinary || len(oldData) == 0 || len(newData) == 0 {
+		return nil
+	}
+	oldLines := strings.Split(string(oldData), "\n")
+	newLines := strings.Split(string(newData), "\n")
+	return core.Myers(oldLines, newLines)
 }
 
 func (a *App) Diff(opts DiffOptions) (*DiffResult, error) {
@@ -167,6 +179,29 @@ func (a *App) collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []str
 			continue
 		}
 
+		// Symlink: compare target string, not file content.
+		if blob.Mode == core.ModeSymlink || info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(fullPath)
+			if err != nil {
+				continue
+			}
+			blobData, err := a.store.GetBlob(blob.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read blob %s for %s: %w", blob.Hash, blob.Path, err)
+			}
+			if target == string(blobData) {
+				continue
+			}
+			entries = append(entries, DiffEntry{
+				Path:     blob.Path,
+				Status:   "modified",
+				IsBinary: false,
+				OldSize:  int64(len(blobData)),
+				NewSize:  int64(len(target)),
+			})
+			continue
+		}
+
 		blobSize, sizeErr := a.store.GetBlobSize(blob.Hash)
 		if sizeErr == nil && info.Size() != blobSize {
 			workData, err := os.ReadFile(fullPath)
@@ -177,12 +212,14 @@ func (a *App) collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []str
 			if err != nil {
 				return nil, fmt.Errorf("failed to read blob %s for %s: %w", blob.Hash, blob.Path, err)
 			}
+			isBin := isBinary(blobData) || isBinary(workData)
 			entries = append(entries, DiffEntry{
 				Path:     blob.Path,
 				Status:   "modified",
-				IsBinary: isBinary(blobData) || isBinary(workData),
+				IsBinary: isBin,
 				OldSize:  int64(len(blobData)),
 				NewSize:  int64(len(workData)),
+				Edits:    computeEdits(blobData, workData, isBin),
 			})
 			continue
 		}
@@ -203,45 +240,48 @@ func (a *App) collectWorktreeDiffs(targetBlobs []core.BlobEntry, filePaths []str
 		if err != nil {
 			return nil, fmt.Errorf("failed to read blob %s for %s: %w", blob.Hash, blob.Path, err)
 		}
-		if string(workData) == string(blobData) {
-			continue
-		}
 
+		isBin := isBinary(blobData) || isBinary(workData)
 		entries = append(entries, DiffEntry{
 			Path:     blob.Path,
 			Status:   "modified",
-			IsBinary: isBinary(blobData) || isBinary(workData),
+			IsBinary: isBin,
 			OldSize:  int64(len(blobData)),
 			NewSize:  int64(len(workData)),
+			Edits:    computeEdits(blobData, workData, isBin),
 		})
 	}
 
-	if len(filePaths) == 0 {
-		var idx core.Index
-		// Non-fatal: index may not exist in a fresh repo; empty index means all files are untracked, which is correct.
-		_ = a.store.LoadIndex(&idx)
+	// Walk working dir for untracked (added) files. Always run, but apply
+	// path filters when present so filtered diffs don't miss new files.
+	var idx core.Index
+	// Non-fatal: index may not exist in a fresh repo; empty index means all
+	// files are untracked, which is correct.
+	_ = a.store.LoadIndex(&idx)
 
-		err := core.WalkWorkingDir(a.dir, func(path string, info os.FileInfo) error {
-			if trackedPaths[path] || idx.Has(path) {
-				return nil
-			}
-			fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
-			data, err := os.ReadFile(fullPath)
-			if err != nil {
-				return nil
-			}
-			entries = append(entries, DiffEntry{
-				Path:     path,
-				Status:   "added",
-				IsBinary: isBinary(data),
-				OldSize:  0,
-				NewSize:  int64(len(data)),
-			})
+	walkErr := core.WalkWorkingDir(a.dir, func(path string, info os.FileInfo) error {
+		if trackedPaths[path] || idx.Has(path) {
 			return nil
-		})
-		if err != nil {
-			return entries, fmt.Errorf("failed to walk working dir: %w", err)
 		}
+		if len(filePaths) > 0 && !worktree.PathMatchesAny(path, filePaths) {
+			return nil
+		}
+		fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			return nil
+		}
+		entries = append(entries, DiffEntry{
+			Path:     path,
+			Status:   "added",
+			IsBinary: isBinary(data),
+			OldSize:  0,
+			NewSize:  int64(len(data)),
+		})
+		return nil
+	})
+	if walkErr != nil {
+		return entries, fmt.Errorf("failed to walk working dir: %w", walkErr)
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -276,12 +316,14 @@ func (a *App) collectVersionDiffs(blobs1, blobs2 []core.BlobEntry) ([]DiffEntry,
 			if err != nil {
 				return nil, fmt.Errorf("failed to read blob %s for %s: %w", b2.Hash, path, err)
 			}
+			isBin := isBinary(data1) || isBinary(data2)
 			entries = append(entries, DiffEntry{
 				Path:     path,
 				Status:   "modified",
-				IsBinary: isBinary(data1) || isBinary(data2),
+				IsBinary: isBin,
 				OldSize:  int64(len(data1)),
 				NewSize:  int64(len(data2)),
+				Edits:    computeEdits(data1, data2, isBin),
 			})
 		} else {
 			data1, err := a.store.GetBlob(b1.Hash)

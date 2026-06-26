@@ -128,11 +128,11 @@ cmd/drift/main.go
 │     CurrentBranch() string                              │
 │     Switch(branch string, opts SwitchOpts)(*SwitchResult)│
 │                                                          │
-│   Names:                                                 │
-│     NameAdd(version, label string) error                │
-│     NameDelete(label string) error                      │
-│     NameList() ([]NameEntry, error)                     │
-│     NamesByHash() map[string][]string                   │
+│   Tags:                                                 │
+│     TagAdd(version, label string) error                 │
+│     TagDelete(label string) error                       │
+│     TagList() ([]TagEntry, error)                       │
+│     TagsByHash() map[string][]string                    │
 │                                                          │
 │   WIP:                                                   │
 │     WIPList(branch string) ([]WIPEntry, error)           │
@@ -174,7 +174,7 @@ cmd/drift/main.go
 │     snapshot.go   — Export, Restore                      │
 │     switch.go     — Switch, RestoreWIP                   │
 │     branch.go     — Branch CRUD                          │
-│     name.go       — Name CRUD, NamesByHash              │
+│     tag.go — Tag CRUD, TagsByHash              │
 │     wip.go        — WIP list/save/restore/drop            │
 │     file.go       — Remove, Move, Clean                  │
 │     undo.go       — Undo + OperationEntry types          │
@@ -401,7 +401,7 @@ coding reference during the transition, deleted after full verification.
 | `repo/save.go` | `SaveOptions`, `SaveResult` | `app/commit.go` |
 | `repo/switch.go` | `SwitchOptions`, `SwitchResult` | `app/switch.go` |
 | `repo/history.go` | `OpType`, `OperationEntry`, `RefChange` | `app/history.go` → renamed to `undo.go` |
-| `repo/name.go` | `NameEntry` | `app/name.go` |
+| `repo/name.go` | `TagEntry` | `app/tag.go` |
 | `repo/repo.go` | `Repository` | Deleted (replaced by `app.App`) |
 
 ---
@@ -420,7 +420,7 @@ diff.go         Diff core logic (from cli/diff.go)
 snapshot.go     Export, Restore
 switch.go       Switch, RestoreWIP (from repo/switch.go)
 branch.go       Branch CRUD (from repo/branch.go)
-name.go         Name CRUD, NamesByHash (from repo/name.go)
+tag.go Tag CRUD, TagsByHash (from repo/name.go)
 wip.go          WIP list/save/restore/drop (from repo/wip.go)
 file.go         Remove, Move, Clean
 undo.go         Undo + OpType/OperationEntry/RefChange (from repo/history.go)
@@ -445,7 +445,7 @@ All command files rewritten from `var xxxCmd = &cobra.Command{...} + init()` to
 | `status.go` | `NewStatusCmd` — ~30 lines (from 133) |
 | `switch.go` | `NewSwitchCmd` — ~40 lines (from 46) |
 | `branch.go` | `NewBranchCmd` — ~40 lines (from 88) |
-| `name.go` | `NewNameCmd` — ~30 lines (from 109) |
+| `tag.go` | `NewTagCmd` — ~30 lines (from 109) |
 | `wip.go` | `NewWIPCmd` — ~40 lines (from 138) |
 | `clean.go` | `NewCleanCmd` — ~30 lines (from 65) |
 | `rm.go` | `NewRmCmd` — ~50 lines (from 193) |

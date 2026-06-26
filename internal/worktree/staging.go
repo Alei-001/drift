@@ -12,62 +12,61 @@ import (
 )
 
 // StageAll stages all working-tree changes (equivalent to 'drift add .').
-// Returns the count of newly staged files.
-func (w *Worktree) StageAll(idx *core.Index) (int, error) {
+// Returns the list of newly staged paths and the list of skipped paths
+// (unsupported file types). Output formatting is the caller's responsibility.
+func (w *Worktree) StageAll(idx *core.Index) (added, skipped []string, err error) {
 	parentHashes, err := w.LoadParentTreeHashes()
 	if err != nil {
-		return 0, fmt.Errorf("failed to load parent tree hashes: %w", err)
+		return nil, nil, fmt.Errorf("failed to load parent tree hashes: %w", err)
 	}
-	var added int
 	err = core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
-		wasAdded, err := w.addFile(path, fullPath, info, idx, parentHashes)
+		a, sk, err := w.addFile(path, fullPath, info, idx, parentHashes)
 		if err != nil {
 			return err
 		}
-		if wasAdded {
-			added++
-		}
+		added = append(added, a...)
+		skipped = append(skipped, sk...)
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return nil, nil, err
 	}
-	return added, nil
+	return added, skipped, nil
 }
 
-// StagePaths stages specific paths. Returns the count of newly staged files.
-func (w *Worktree) StagePaths(idx *core.Index, paths []string) (int, error) {
+// StagePaths stages specific paths. Returns the list of newly staged paths
+// and skipped paths. Output formatting is the caller's responsibility.
+func (w *Worktree) StagePaths(idx *core.Index, paths []string) (added, skipped []string, err error) {
 	parentHashes, err := w.LoadParentTreeHashes()
 	if err != nil {
-		return 0, fmt.Errorf("failed to load parent tree hashes: %w", err)
+		return nil, nil, fmt.Errorf("failed to load parent tree hashes: %w", err)
 	}
-	var added int
 
 	for _, p := range paths {
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(p))
 		info, err := os.Lstat(fullPath)
 		if err != nil {
-			return 0, fmt.Errorf("path not found: %s", p)
+			return nil, nil, fmt.Errorf("path not found: %s", p)
 		}
 
 		if info.IsDir() {
-			n, err := w.addDirectoryInto(p, idx, parentHashes)
+			a, sk, err := w.addDirectoryInto(p, idx, parentHashes)
 			if err != nil {
-				return 0, err
+				return nil, nil, err
 			}
-			added += n
+			added = append(added, a...)
+			skipped = append(skipped, sk...)
 		} else {
-			wasAdded, err := w.addFile(p, fullPath, info, idx, parentHashes)
+			a, sk, err := w.addFile(p, fullPath, info, idx, parentHashes)
 			if err != nil {
-				return 0, err
+				return nil, nil, err
 			}
-			if wasAdded {
-				added++
-			}
+			added = append(added, a...)
+			skipped = append(skipped, sk...)
 		}
 	}
-	return added, nil
+	return added, skipped, nil
 }
 
 // StageWorktreeChanges re-stages worktree modifications into the index,
@@ -168,40 +167,41 @@ func (w *Worktree) PutBlobForAdd(path string) (string, error) {
 	return w.Store.PutBlobFromReader(buf)
 }
 
-// addFile stages a single file/symlink. Returns true if the file was newly added.
-func (w *Worktree) addFile(relPath, fullPath string, info os.FileInfo, idx *core.Index, parentTreeHashes map[string]string) (bool, error) {
+// addFile stages a single file/symlink. Returns the list of newly staged
+// paths (at most one) and the list of skipped paths (at most one, for
+// unsupported file types).
+func (w *Worktree) addFile(relPath, fullPath string, info os.FileInfo, idx *core.Index, parentTreeHashes map[string]string) (added, skipped []string, err error) {
 	mode, err := core.NormalizeModeForPath(info.Mode(), relPath)
 	if err != nil {
-		fmt.Printf("Skipped (unsupported type): %s\n", relPath)
-		return false, nil
+		return nil, []string{relPath}, nil
 	}
 
 	var hash string
 	if mode == core.ModeSymlink {
 		target, err := os.Readlink(fullPath)
 		if err != nil {
-			return false, fmt.Errorf("failed to read symlink %s: %w", relPath, err)
+			return nil, nil, fmt.Errorf("failed to read symlink %s: %w", relPath, err)
 		}
 		if err := core.ValidateSymlinkTarget(w.Root, relPath, target); err != nil {
-			return false, fmt.Errorf("unsafe symlink %s: %w", relPath, err)
+			return nil, nil, fmt.Errorf("unsafe symlink %s: %w", relPath, err)
 		}
 		hash, err = w.Store.PutBlob([]byte(target))
 		if err != nil {
-			return false, fmt.Errorf("failed to store symlink %s: %w", relPath, err)
+			return nil, nil, fmt.Errorf("failed to store symlink %s: %w", relPath, err)
 		}
 	} else {
 		hash, err = w.PutBlobForAdd(fullPath)
 		if err != nil {
-			return false, fmt.Errorf("failed to store %s: %w", relPath, err)
+			return nil, nil, fmt.Errorf("failed to store %s: %w", relPath, err)
 		}
 	}
 
 	if existing, err := idx.Entry(relPath); err == nil && existing.Hash == hash {
-		return false, nil
+		return nil, nil, nil
 	}
 
 	if parentHash, ok := parentTreeHashes[relPath]; ok && parentHash == hash {
-		return false, nil
+		return nil, nil, nil
 	}
 
 	entry := core.IndexEntry{
@@ -213,34 +213,31 @@ func (w *Worktree) addFile(relPath, fullPath string, info os.FileInfo, idx *core
 	}
 
 	if err := idx.Add(entry); err != nil {
-		return false, fmt.Errorf("failed to add %s: %w", relPath, err)
+		return nil, nil, fmt.Errorf("failed to add %s: %w", relPath, err)
 	}
 
-	fmt.Printf("Added: %s\n", relPath)
-	return true, nil
+	return []string{relPath}, nil, nil
 }
 
 // addDirectoryInto walks a directory and adds files into the provided index.
-func (w *Worktree) addDirectoryInto(dirPath string, idx *core.Index, parentHashes map[string]string) (int, error) {
+func (w *Worktree) addDirectoryInto(dirPath string, idx *core.Index, parentHashes map[string]string) (added, skipped []string, err error) {
 	fullDir := filepath.Join(w.Root, filepath.FromSlash(dirPath))
-	var added int
 
-	err := core.WalkWorkingDirWithIgnore(fullDir, w.Root, func(path string, info os.FileInfo) error {
+	err = core.WalkWorkingDirWithIgnore(fullDir, w.Root, func(path string, info os.FileInfo) error {
 		relPath := filepath.ToSlash(filepath.Join(dirPath, path))
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(relPath))
-		wasAdded, err := w.addFile(relPath, fullPath, info, idx, parentHashes)
+		a, sk, err := w.addFile(relPath, fullPath, info, idx, parentHashes)
 		if err != nil {
 			return err
 		}
-		if wasAdded {
-			added++
-		}
+		added = append(added, a...)
+		skipped = append(skipped, sk...)
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return nil, nil, err
 	}
-	return added, nil
+	return added, skipped, nil
 }
 
 // ExpandAddPaths expands glob patterns in the given arguments and returns

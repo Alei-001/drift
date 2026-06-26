@@ -29,12 +29,12 @@ func NewHistoryCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
-			namesByHash := application.NamesByHash()
+			tagsByHash := application.TagsByHash()
 
 			if porcelain {
-				formatCommitsPorcelain(commits, namesByHash)
+				formatCommitsPorcelain(commits, tagsByHash)
 			} else {
-				formatCommits(commits, namesByHash, oneline)
+				formatCommits(commits, tagsByHash, oneline)
 			}
 			return nil
 		},
@@ -49,35 +49,48 @@ func NewHistoryCmd(application *apppkg.App) *cobra.Command {
 }
 
 // formatCommits displays commits in human-readable format.
-func formatCommits(commits []*core.Commit, namesByHash map[string][]string, oneline bool) {
+func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneline bool) {
 	for _, c := range commits {
-		names := namesByHash[c.Hash]
-		var nameStr string
-		if len(names) > 0 {
-			nameStr = fmt.Sprintf(" (%s)", names[0])
+		tags := tagsByHash[c.Hash]
+		var tagStr string
+		if len(tags) > 0 {
+			tagStr = fmt.Sprintf(" (%s)", tags[0])
+		}
+
+		id := c.ID
+		if len(id) > 8 {
+			id = id[:8]
 		}
 
 		if oneline {
-			fmt.Printf("%s%s %s\n", c.ID[:8], nameStr, c.Message)
+			fmt.Printf("%s%s %s\n", id, tagStr, c.Message)
 		} else {
-			fmt.Printf("commit %s%s\n", c.ID, nameStr)
-			fmt.Printf("Author: %s\n", c.Author.Name)
-			fmt.Printf("Date: %s\n\n", c.Timestamp.Format("Mon Jan 2 15:04:05 2006 -0700"))
-			fmt.Printf("    %s\n\n", c.Message)
+			fmt.Printf("commit %s%s\n", c.ID, tagStr)
+			if c.Author.Email != "" {
+				fmt.Printf("Author: %s <%s>\n", c.Author.Name, c.Author.Email)
+			} else {
+				fmt.Printf("Author: %s\n", c.Author.Name)
+			}
+			fmt.Printf("Date: %s\n", c.Timestamp.Format("Mon Jan 2 15:04:05 2006 -0700"))
+			fmt.Printf("Message: %s\n", c.Message)
 		}
 	}
 }
 
 // formatCommitsPorcelain displays commits in machine-readable format.
-func formatCommitsPorcelain(commits []*core.Commit, namesByHash map[string][]string) {
+func formatCommitsPorcelain(commits []*core.Commit, tagsByHash map[string][]string) {
 	for _, c := range commits {
-		names := namesByHash[c.Hash]
+		tags := tagsByHash[c.Hash]
 		fmt.Printf("commit %s\n", c.ID)
-		fmt.Printf("author %s\n", c.Author.Name)
+		if c.Author.Email != "" {
+			fmt.Printf("author %s <%s>\n", c.Author.Name, c.Author.Email)
+		} else {
+			fmt.Printf("author %s\n", c.Author.Name)
+		}
 		fmt.Printf("date %s\n", c.Timestamp.Format("Mon Jan 2 15:04:05 2006 -0700"))
 		fmt.Printf("message %s\n", c.Message)
-		for _, name := range names {
-			fmt.Printf("name %s\n", name)
+		for _, tag := range tags {
+			fmt.Printf("tag %s\n", tag)
 		}
 		fmt.Println()
 	}
