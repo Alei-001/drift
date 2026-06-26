@@ -2,10 +2,14 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	apppkg "github.com/drift/drift/internal/app"
+	"github.com/drift/drift/internal/core"
 	"github.com/spf13/cobra"
 )
+
+const nullHash = "0000000000000000000000000000000000000000000000000000000000000000"
 
 // NewReflogCmd creates the reflog subcommand.
 func NewReflogCmd(application *apppkg.App) *cobra.Command {
@@ -59,9 +63,12 @@ func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
 			desc = desc[:descWidth-3] + "..."
 		}
 		fmt.Printf("%-19s  %-6s  %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, desc)
-		if verbose && len(op.RefChanges) > 0 {
+		if verbose {
 			for _, change := range op.RefChanges {
-				fmt.Printf("  %s: %s -> %s\n", change.Ref, change.Before, change.After)
+				fmt.Printf("  %s: %s → %s\n", change.Ref, shortRef(change.Before), shortRef(change.After))
+			}
+			for _, e := range op.IndexSnapshot {
+				fmt.Printf("  %s %s\n", e.Path, e.Hash[:8])
 			}
 		}
 	}
@@ -74,8 +81,29 @@ func formatOperationsPorcelain(operations []apppkg.OperationEntry) {
 		fmt.Printf("op %s\n", op.Op)
 		fmt.Printf("desc %s\n", op.Desc)
 		for _, change := range op.RefChanges {
-			fmt.Printf("ref %s %s %s\n", change.Ref, change.Before, change.After)
+			before := change.Before
+			if before == "" {
+				before = nullHash
+			}
+			after := change.After
+			if after == "" {
+				after = nullHash
+			}
+			fmt.Printf("ref %s %s %s\n", change.Ref, before, after)
+		}
+		for _, e := range op.IndexSnapshot {
+			fmt.Printf("index %s %s\n", e.Path, e.Hash)
 		}
 		fmt.Println()
 	}
+}
+
+func shortRef(v string) string {
+	if v == "" {
+		return strings.Repeat("-", core.CommitIDLen)
+	}
+	if len(v) > core.CommitIDLen {
+		return v[:core.CommitIDLen]
+	}
+	return v
 }

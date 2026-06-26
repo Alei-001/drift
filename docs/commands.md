@@ -602,16 +602,41 @@ drift reflog --porcelain      # 机器可读格式
 
 **输出示例：**
 
-```
-Recent operations (newest first):
+默认模式（表格式，带表头）：
 
-  1. 2024-06-23 10:30:00  save  修改配色 on main
-  2. 2024-06-23 10:25:00  save  on main
-  3. 2024-06-23 10:20:00  branch-create  experiment
-  4. 2024-06-23 10:15:00  save  on main
-
-To undo the most recent operation: drift undo
 ```
+DATE                OP      DESCRIPTION
+2026-06-26 20:08:18  save    save 5db1a613 (mv test) on sec
+2026-06-26 19:45:05  switch  switch to sec
+```
+
+详细模式（`-v`，显示 ref 变更，hash 缩写到 8 位，`-` 表示空）：
+
+```
+DATE                OP      DESCRIPTION
+2026-06-26 20:22:32  tag-add  tag 5db1a613 as v1.0.3
+  tags/v1.0.3: -       → 5db1a613
+2026-06-26 20:08:18  save    save 5db1a613 (mv test) on sec
+  sec:           012f9f08 → 5db1a613
+2026-06-26 19:45:05  switch  switch to sec
+  HEAD:          acd     → sec
+```
+
+机器可读格式（`--porcelain`，空字段用全零 hash 占位）：
+
+```
+timestamp 2026-06-26T20:22:32+08:00
+op tag-add
+desc tag 5db1a613 as v1.0.3
+ref tags/v1.0.3 0000...0000 5db1a6135d46...
+
+timestamp 2026-06-26T19:45:05+08:00
+op switch
+desc switch to sec
+ref HEAD acd sec
+```
+
+每行 `split(" ", 3)` 解析：字段顺序固定，空 hash 用 64 位 `0` 占位（HEAD 的 before/after 除外——存的是分支名）。`index` 行记录操作前的索引快照（如 restore）。每项之间空行分隔。
 
 **记录的操作类型：**
 - `save` — 保存版本
