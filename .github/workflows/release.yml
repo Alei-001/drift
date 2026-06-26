@@ -1,169 +1,71 @@
-name: Release
+name: Build and Release
 
-# Triggered when a version tag (v*.*.*) is pushed.
-# Builds drift for Windows/macOS/Linux, packages a Windows setup.exe
-# via Inno Setup, and uploads everything to a GitHub Release.
 on:
   push:
     tags:
-      - 'v*.*.*'
-
-permissions:
-  contents: write
+      - 'v*'
 
 jobs:
-  # ------------------------------------------------------------------
-  # Build cross-platform binaries
-  # ------------------------------------------------------------------
   build:
-    name: Build (${{ matrix.os }}/${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows
-            arch: amd64
-            runner: windows-latest
-            binary: drift.exe
-            archive: drift-windows-amd64.zip
-          - os: darwin
-            arch: amd64
-            runner: macos-latest
-            binary: drift
-            archive: drift-darwin-amd64.tar.gz
-          - os: darwin
-            arch: arm64
-            runner: macos-latest
-            binary: drift
-            archive: drift-darwin-arm64.tar.gz
-          - os: linux
-            arch: amd64
-            runner: ubuntu-latest
-            binary: drift
-            archive: drift-linux-amd64.tar.gz
-          - os: linux
-            arch: arm64
-            runner: ubuntu-latest
-            binary: drift
-            archive: drift-linux-arm64.tar.gz
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache: true
-
-      - name: Extract version from tag
-        id: version
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-        run: |
-          go build -trimpath -ldflags "-s -w -X github.com/drift/drift/internal/cli.version=${{ steps.version.outputs.VERSION }}" -o ${{ matrix.binary }} ./cmd/drift/
-
-      - name: Package (Unix)
-        if: matrix.os != 'windows'
-        run: tar -czf ${{ matrix.archive }} ${{ matrix.binary }}
-
-      - name: Package (Windows)
-        if: matrix.os == 'windows'
-        run: Compress-Archive -Path ${{ matrix.binary }} -DestinationPath ${{ matrix.archive }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
-          retention-days: 7
-
-  # ------------------------------------------------------------------
-  # Build Windows setup.exe with Inno Setup
-  # ------------------------------------------------------------------
-  windows-setup:
-    name: Build Windows setup.exe
     runs-on: windows-latest
-    needs: build
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          go-version: '1.26'
 
       - name: Extract version from tag
-        id: version
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          "DRIFT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build drift.exe
-        env:
-          GOOS: windows
-          GOARCH: amd64
+        shell: pwsh
         run: |
-          go build -trimpath -ldflags "-s -w -X github.com/drift/drift/internal/cli.version=${{ steps.version.outputs.VERSION }}" -o installer\drift.exe ./cmd/drift/
+          go build `
+            -ldflags "-X github.com/drift/drift/internal/cli.version=$env:DRIFT_VERSION -s -w" `
+            -o dist/drift.exe `
+            ./cmd/drift/
+          Write-Host "Built drift.exe v$env:DRIFT_VERSION"
 
-      - name: Compile Inno Setup installer
-        run: iscc /Q /DDriftVersion=${{ steps.version.outputs.VERSION }} installer\drift.iss
+      - name: Verify version
+        shell: pwsh
+        run: ./dist/drift.exe version
 
-      - name: Rename setup.exe with version
-        shell: bash
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Refresh PATH
+        shell: pwsh
+        run: $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+
+      - name: Build installer
+        shell: pwsh
         run: |
-          mv "installer/drift-setup-${{ steps.version.outputs.VERSION }}.exe" "drift-setup-${{ steps.version.outputs.VERSION }}.exe"
+          Copy-Item dist/drift.exe installer/drift.exe
+          iscc /DDriftVersion=$env:DRIFT_VERSION installer/drift.iss
+          $setup = Get-ChildItem installer/drift-setup-*.exe | Select-Object -First 1
+          Move-Item $setup dist/
+          Write-Host "Built $($setup.Name)"
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: drift-setup-${{ steps.version.outputs.VERSION }}.exe
-          path: drift-setup-${{ steps.version.outputs.VERSION }}.exe
-          retention-days: 7
+          name: drift-windows-v${{ env.DRIFT_VERSION }}
+          path: |
+            dist/drift.exe
+            dist/drift-setup-*.exe
 
-  # ------------------------------------------------------------------
-  # Publish GitHub Release with all artifacts
-  # ------------------------------------------------------------------
-  release:
-    name: Publish Release
-    runs-on: ubuntu-latest
-    needs: [build, windows-setup]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Extract version from tag
-        id: version
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: List artifacts
-        run: ls -la artifacts/
-
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Drift ${{ github.ref_name }}
-          generate_release_notes: true
+          name: Drift v${{ env.DRIFT_VERSION }}
           files: |
-            artifacts/drift-windows-amd64.zip
-            artifacts/drift-darwin-amd64.tar.gz
-            artifacts/drift-darwin-arm64.tar.gz
-            artifacts/drift-linux-amd64.tar.gz
-            artifacts/drift-linux-arm64.tar.gz
-            artifacts/drift-setup-${{ steps.version.outputs.VERSION }}.exe
+            dist/drift.exe
+            dist/drift-setup-*.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: false
