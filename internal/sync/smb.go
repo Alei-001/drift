@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drift/drift/internal/config"
 	smb2 "github.com/hirochachacha/go-smb2"
 )
 
@@ -27,8 +28,8 @@ var _ Transport = (*SMBTransport)(nil)
 
 // NewSMBTransport connects to an SMB share and returns a transport scoped
 // to the project directory under the configured base path.
-func NewSMBTransport(gcfg *GlobalConfig, remoteName string) (*SMBTransport, error) {
-	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", gcfg.EffectivePort()))
+func NewSMBTransport(gcfg *config.GlobalConfig, remoteName string) (*SMBTransport, error) {
+	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", EffectivePort(gcfg)))
 
 	conn, err := net.DialTimeout("tcp", addr, 30*time.Second)
 	if err != nil {

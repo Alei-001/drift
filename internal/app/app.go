@@ -8,7 +8,6 @@ import (
 	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
-	driftsync "github.com/drift/drift/internal/sync"
 	"github.com/drift/drift/internal/worktree"
 )
 
@@ -43,7 +42,7 @@ func (a *App) Author() core.Signature {
 			Email: a.config.User.Email,
 		}
 	}
-	if gcfg, err := driftsync.LoadGlobalConfig(); err == nil {
+	if gcfg, err := config.LoadGlobalConfig(); err == nil {
 		return core.Signature{
 			Name:  gcfg.User.Name,
 			Email: gcfg.User.Email,

@@ -44,7 +44,7 @@ func (a *App) SyncEnable() error {
 		return fmt.Errorf("not a drift repository")
 	}
 
-	gcfg, err := driftsync.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func (a *App) SyncEnable() error {
 	remoteName := filepath.Base(a.dir)
 
 	if a.config.Sync.ProjectID == "" {
-		a.config.Sync.ProjectID = driftsync.NewProjectID()
+		a.config.Sync.ProjectID = config.NewProjectID()
 	}
 	a.config.Sync.Enabled = true
 	a.config.Sync.RemoteName = remoteName
@@ -103,7 +103,7 @@ func (a *App) SyncNow() (*SyncStats, error) {
 		return nil, fmt.Errorf("sync is not enabled (run 'drift sync enable')")
 	}
 
-	gcfg, err := driftsync.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func (a *App) AutoSync() error {
 }
 
 func (a *App) SyncRemoteSet(protocol string, opts SyncRemoteOptions) error {
-	gcfg := &driftsync.GlobalConfig{
+	gcfg := &config.GlobalConfig{
 		Protocol:           protocol,
 		Host:               opts.Host,
 		Port:               opts.Port,
@@ -199,11 +199,11 @@ func (a *App) SyncRemoteSet(protocol string, opts SyncRemoteOptions) error {
 		gcfg.Path = abs
 	}
 
-	return driftsync.SaveGlobalConfig(gcfg)
+	return config.SaveGlobalConfig(gcfg)
 }
 
 func (a *App) SyncRemoteShow() (*SyncRemoteInfo, error) {
-	gcfg, err := driftsync.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func (a *App) SyncRemoteShow() (*SyncRemoteInfo, error) {
 }
 
 func (a *App) SyncRemoteUnset() error {
-	gcfg, err := driftsync.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (a *App) SyncRemoteUnset() error {
 	gcfg.InsecureSkipVerify = false
 	gcfg.Share = ""
 	gcfg.KeyPath = ""
-	if err := driftsync.SaveGlobalConfig(gcfg); err != nil {
+	if err := config.SaveGlobalConfig(gcfg); err != nil {
 		return err
 	}
 
@@ -253,7 +253,7 @@ func (a *App) SyncRemoteUnset() error {
 }
 
 func (a *App) Clone(remoteName, destDir string) (int, error) {
-	gcfg, err := driftsync.LoadGlobalConfig()
+	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
 		return 0, err
 	}

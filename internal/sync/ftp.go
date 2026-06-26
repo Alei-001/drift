@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drift/drift/internal/config"
 	"github.com/jlaffaye/ftp"
 )
 
@@ -24,8 +25,8 @@ type FTPTransport struct {
 
 // NewFTPTransport connects to an FTP server and returns a transport scoped
 // to the project directory under the configured base path.
-func NewFTPTransport(gcfg *GlobalConfig, remoteName string) (*FTPTransport, error) {
-	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", gcfg.EffectivePort()))
+func NewFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*FTPTransport, error) {
+	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", EffectivePort(gcfg)))
 	opts := []ftp.DialOption{ftp.DialWithTimeout(30 * time.Second)}
 	if gcfg.TLS {
 		tlsConfig := &tls.Config{

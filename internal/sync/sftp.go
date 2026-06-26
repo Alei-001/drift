@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drift/drift/internal/config"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -27,8 +28,8 @@ type SFTPTransport struct {
 
 // NewSFTPTransport connects to an SFTP server and returns a transport scoped
 // to the project directory under the configured base path.
-func NewSFTPTransport(gcfg *GlobalConfig, remoteName string) (*SFTPTransport, error) {
-	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", gcfg.EffectivePort()))
+func NewSFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*SFTPTransport, error) {
+	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", EffectivePort(gcfg)))
 
 	var authMethods []ssh.AuthMethod
 	// Try key-based authentication first.

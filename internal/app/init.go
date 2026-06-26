@@ -5,7 +5,6 @@ import (
 
 	"github.com/drift/drift/internal/config"
 	"github.com/drift/drift/internal/storage"
-	driftsync "github.com/drift/drift/internal/sync"
 	"github.com/drift/drift/internal/worktree"
 )
 
@@ -24,7 +23,7 @@ func (a *App) Init() error {
 	// once (core settings + project ID; user info comes from global config
 	// unless overridden per-project).
 	cfg := config.DefaultConfig()
-	cfg.Sync.ProjectID = driftsync.NewProjectID()
+	cfg.Sync.ProjectID = config.NewProjectID()
 	if err := config.SaveConfig(a.store.DriftDir(), cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}

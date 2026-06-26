@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/drift/drift/internal/config"
-	driftsync "github.com/drift/drift/internal/sync"
 )
 
 type ConfigScope string
@@ -28,7 +27,7 @@ func (a *App) ConfigGet(scope ConfigScope, key string) (string, error) {
 		}
 		return getLocalConfigValue(a.config, key)
 	case GlobalScope:
-		gcfg, err := driftsync.LoadGlobalConfig()
+		gcfg, err := config.LoadGlobalConfig()
 		if err != nil {
 			return "", err
 		}
@@ -49,14 +48,14 @@ func (a *App) ConfigSet(scope ConfigScope, key, value string) error {
 		}
 		return config.SaveConfig(a.store.DriftDir(), a.config)
 	case GlobalScope:
-		gcfg, err := driftsync.LoadGlobalConfig()
+		gcfg, err := config.LoadGlobalConfig()
 		if err != nil {
 			return err
 		}
 		if err := setGlobalConfigValue(gcfg, key, value); err != nil {
 			return err
 		}
-		return driftsync.SaveGlobalConfig(gcfg)
+		return config.SaveGlobalConfig(gcfg)
 	default:
 		return fmt.Errorf("invalid config scope: %s", scope)
 	}
@@ -73,14 +72,14 @@ func (a *App) ConfigUnset(scope ConfigScope, key string) error {
 		}
 		return config.SaveConfig(a.store.DriftDir(), a.config)
 	case GlobalScope:
-		gcfg, err := driftsync.LoadGlobalConfig()
+		gcfg, err := config.LoadGlobalConfig()
 		if err != nil {
 			return err
 		}
 		if err := unsetGlobalConfigValue(gcfg, key); err != nil {
 			return err
 		}
-		return driftsync.SaveGlobalConfig(gcfg)
+		return config.SaveGlobalConfig(gcfg)
 	default:
 		return fmt.Errorf("invalid config scope: %s", scope)
 	}
@@ -94,7 +93,7 @@ func (a *App) ConfigList(scope ConfigScope) ([]ConfigEntry, error) {
 		}
 		return listLocalConfig(a.config), nil
 	case GlobalScope:
-		gcfg, err := driftsync.LoadGlobalConfig()
+		gcfg, err := config.LoadGlobalConfig()
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +177,7 @@ func portStr(p int) string {
 	return strconv.Itoa(p)
 }
 
-func listGlobalConfig(gcfg *driftsync.GlobalConfig) []ConfigEntry {
+func listGlobalConfig(gcfg *config.GlobalConfig) []ConfigEntry {
 	return []ConfigEntry{
 		{Key: "remote.protocol", Value: gcfg.Protocol},
 		{Key: "remote.host", Value: gcfg.Host},
@@ -194,7 +193,7 @@ func listGlobalConfig(gcfg *driftsync.GlobalConfig) []ConfigEntry {
 	}
 }
 
-func getGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) (string, error) {
+func getGlobalConfigValue(gcfg *config.GlobalConfig, key string) (string, error) {
 	switch key {
 	case "user.name":
 		return gcfg.User.Name, nil
@@ -226,7 +225,7 @@ func getGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) (string, err
 	}
 }
 
-func setGlobalConfigValue(gcfg *driftsync.GlobalConfig, key, value string) error {
+func setGlobalConfigValue(gcfg *config.GlobalConfig, key, value string) error {
 	switch key {
 	case "user.name":
 		gcfg.User.Name = value
@@ -268,7 +267,7 @@ func setGlobalConfigValue(gcfg *driftsync.GlobalConfig, key, value string) error
 	return nil
 }
 
-func unsetGlobalConfigValue(gcfg *driftsync.GlobalConfig, key string) error {
+func unsetGlobalConfigValue(gcfg *config.GlobalConfig, key string) error {
 	switch key {
 	case "user.name":
 		gcfg.User.Name = ""

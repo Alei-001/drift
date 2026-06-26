@@ -7,159 +7,30 @@
 package sync
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/drift/drift/internal/config"
 )
-
-// GlobalConfig stores drift-wide settings that apply across all projects.
-// It lives at ~/.drift/global.json so it survives project cloning.
-type GlobalConfig struct {
-	// User holds the default author identity for all projects. Individual
-	// projects can override this via their project-level config.
-	User GlobalUserConfig `json:"user,omitempty"`
-
-	// Protocol specifies the remote storage protocol.
-	// Valid values: "local", "webdav", "ftp", "sftp", "smb".
-	Protocol string `json:"protocol,omitempty"`
-
-	// Host is the remote server hostname or IP (network protocols only).
-	Host string `json:"host,omitempty"`
-
-	// Port is the remote server port. If 0, the protocol default is used.
-	Port int `json:"port,omitempty"`
-
-	// Path is the remote base directory path, or the local filesystem path
-	// for the "local" protocol.
-	Path string `json:"path,omitempty"`
-
-	// Username for authentication (network protocols).
-	Username string `json:"username,omitempty"`
-
-	// Password for authentication. Stored in plaintext; a future
-	// improvement could use the OS keychain. Acceptable for self-hosted
-	// NAS setups where the config file is on a trusted machine.
-	Password string `json:"password,omitempty"`
-
-	// TLS enables encrypted transport (FTPS for FTP, HTTPS for WebDAV).
-	TLS bool `json:"tls,omitempty"`
-
-	// InsecureSkipVerify disables TLS certificate verification. Useful for
-	// self-signed certificates on self-hosted NAS servers. Only effective
-	// when TLS is true.
-	InsecureSkipVerify bool `json:"insecure_skip_verify,omitempty"`
-
-	// Share is the SMB share name (SMB protocol only).
-	Share string `json:"share,omitempty"`
-
-	// KeyPath is the path to a private key file for SSH authentication
-	// (SFTP protocol only). If empty, password authentication is used.
-	KeyPath string `json:"key_path,omitempty"`
-}
-
-// GlobalUserConfig holds the default author identity stored in the global
-// config (~/.drift/global.json). Project-level config takes precedence.
-type GlobalUserConfig struct {
-	Name  string `json:"name,omitempty"`
-	Email string `json:"email,omitempty"`
-}
-
-// globalConfigPathOverride allows tests to redirect the global config to a
-// temp directory. When empty, the default ~/.drift/global.json is used.
-var globalConfigPathOverride string
-
-// globalConfigPath returns the path to ~/.drift/global.json.
-func globalConfigPath() (string, error) {
-	if globalConfigPathOverride != "" {
-		return globalConfigPathOverride, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot determine home directory: %w", err)
-	}
-	return filepath.Join(home, ".drift", "global.json"), nil
-}
-
-// SetGlobalConfigPathForTest overrides the global config path. Pass an empty
-// string to restore the default. Intended for testing only.
-func SetGlobalConfigPathForTest(path string) {
-	globalConfigPathOverride = path
-}
-
-// LoadGlobalConfig reads the global config, returning an empty config if
-// the file does not exist yet.
-func LoadGlobalConfig() (*GlobalConfig, error) {
-	path, err := globalConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &GlobalConfig{}, nil
-		}
-		return nil, fmt.Errorf("cannot read global config: %w", err)
-	}
-	cfg := &GlobalConfig{}
-	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("invalid global config: %w", err)
-	}
-	return cfg, nil
-}
-
-// SaveGlobalConfig writes the global config atomically.
-func SaveGlobalConfig(cfg *GlobalConfig) error {
-	path, err := globalConfigPath()
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("cannot create %s: %w", dir, err)
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	// Use 0600 so the plaintext password in the config is only readable by
-	// the owner.
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-// NewProjectID generates a random 16-byte hex project identifier.
-// Called once at 'drift init' time.
-func NewProjectID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("fallback-%d", os.Getpid())
-	}
-	return hex.EncodeToString(b)
-}
 
 // RemoteType indicates what kind of remote is configured.
 type RemoteType int
 
 const (
 	RemoteNone   RemoteType = iota
-	RemoteLocal             // local filesystem (NAS mount, etc.)
-	RemoteWebDAV            // WebDAV server
-	RemoteFTP               // FTP server
-	RemoteSFTP              // SFTP server (SSH file transfer)
-	RemoteSMB               // SMB/CIFS share
+	RemoteLocal
+	RemoteWebDAV
+	RemoteFTP
+	RemoteSFTP
+	RemoteSMB
 )
 
 // GetRemoteType returns the configured remote type based on the Protocol field.
-func (g *GlobalConfig) GetRemoteType() RemoteType {
+func GetRemoteType(g *config.GlobalConfig) RemoteType {
 	switch g.Protocol {
 	case "local":
 		return RemoteLocal
@@ -176,9 +47,6 @@ func (g *GlobalConfig) GetRemoteType() RemoteType {
 	}
 }
 
-// defaultPort returns the default port for a protocol.
-// For webdav, the default depends on TLS (80 for HTTP, 443 for HTTPS),
-// so callers should use EffectivePort which has access to the TLS flag.
 func defaultPort(protocol string) int {
 	switch protocol {
 	case "ftp":
@@ -188,15 +56,14 @@ func defaultPort(protocol string) int {
 	case "smb":
 		return 445
 	case "webdav":
-		return 80 // default; EffectivePort overrides to 443 when TLS is set
+		return 80
 	default:
 		return 0
 	}
 }
 
 // EffectivePort returns the configured port or the protocol default.
-// For webdav, the default port depends on the TLS flag (443 for HTTPS, 80 for HTTP).
-func (g *GlobalConfig) EffectivePort() int {
+func EffectivePort(g *config.GlobalConfig) int {
 	if g.Port != 0 {
 		return g.Port
 	}
@@ -206,14 +73,13 @@ func (g *GlobalConfig) EffectivePort() int {
 	return defaultPort(g.Protocol)
 }
 
-// webDAVBaseURL reconstructs the WebDAV base URL from unified config fields.
-func (g *GlobalConfig) webDAVBaseURL() string {
+func webDAVBaseURL(g *config.GlobalConfig) string {
 	scheme := "http"
 	if g.TLS {
 		scheme = "https"
 	}
 	basePath := strings.Trim(g.Path, "/")
-	port := g.EffectivePort()
+	port := EffectivePort(g)
 	if basePath != "" {
 		return fmt.Sprintf("%s://%s:%d/%s", scheme, g.Host, port, basePath)
 	}
@@ -222,13 +88,12 @@ func (g *GlobalConfig) webDAVBaseURL() string {
 
 // ProjectTransportForConfig returns a Transport scoped to a project, based
 // on the global config. The caller must call Close() when done.
-// Returns nil and an error if no remote is configured or connection fails.
-func ProjectTransportForConfig(gcfg *GlobalConfig, remoteName string) (Transport, error) {
-	switch gcfg.GetRemoteType() {
+func ProjectTransportForConfig(gcfg *config.GlobalConfig, remoteName string) (Transport, error) {
+	switch GetRemoteType(gcfg) {
 	case RemoteLocal:
 		return NewLocalTransport(gcfg.Path).ProjectTransport(remoteName), nil
 	case RemoteWebDAV:
-		baseURL := gcfg.webDAVBaseURL() + "/" + remoteName
+		baseURL := webDAVBaseURL(gcfg) + "/" + remoteName
 		return NewWebDAVTransport(baseURL, gcfg.Username, gcfg.Password, gcfg.InsecureSkipVerify), nil
 	case RemoteFTP:
 		return NewFTPTransport(gcfg, remoteName)
@@ -252,22 +117,14 @@ func NewLocalTransport(remoteRoot string) *LocalTransport {
 	return &LocalTransport{remoteRoot: remoteRoot}
 }
 
-// Close releases any resources held by the transport. The local transport
-// holds no resources, so this is a no-op.
 func (t *LocalTransport) Close() error { return nil }
 
-// RemoteRoot returns the configured remote root path.
-func (t *LocalTransport) RemoteRoot() string {
-	return t.remoteRoot
-}
+func (t *LocalTransport) RemoteRoot() string { return t.remoteRoot }
 
-// remoteProjectDir returns the path to a project on the remote.
 func (t *LocalTransport) remoteProjectDir(remoteName string) string {
 	return filepath.Join(t.remoteRoot, remoteName)
 }
 
-// ProjectExists reports whether a project with the given remote name exists
-// on the remote.
 func (t *LocalTransport) ProjectExists(remoteName string) (bool, error) {
 	dir := t.remoteProjectDir(remoteName)
 	info, err := os.Stat(dir)
@@ -280,7 +137,6 @@ func (t *LocalTransport) ProjectExists(remoteName string) (bool, error) {
 	return info.IsDir(), nil
 }
 
-// ListProjects returns the names of all projects on the remote.
 func (t *LocalTransport) ListProjects() ([]string, error) {
 	entries, err := os.ReadDir(t.remoteRoot)
 	if err != nil {
@@ -304,7 +160,6 @@ func (t *LocalTransport) ListProjects() ([]string, error) {
 	return names, nil
 }
 
-// Clone copies an entire remote project to a local destination directory.
 func (t *LocalTransport) Clone(remoteName, destDir string) error {
 	src := t.remoteProjectDir(remoteName)
 	if exists, err := t.ProjectExists(remoteName); err != nil {
@@ -329,15 +184,12 @@ func (t *LocalTransport) Clone(remoteName, destDir string) error {
 	return copyDir(src, destDir)
 }
 
-// ProjectTransport returns a Transport scoped to a specific project on the
-// remote.
 func (t *LocalTransport) ProjectTransport(remoteName string) Transport {
 	return &localProjectTransport{
 		root: filepath.Join(t.remoteRoot, remoteName),
 	}
 }
 
-// localProjectTransport is a Transport scoped to a project directory.
 type localProjectTransport struct {
 	root string
 }
@@ -443,7 +295,6 @@ func (t *localProjectTransport) Mkdir(remotePath string) error {
 
 func (t *localProjectTransport) Close() error { return nil }
 
-// copyDir recursively copies src into dst. Symlinks are skipped.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -466,7 +317,6 @@ func copyDir(src, dst string) error {
 	})
 }
 
-// copyFile copies a single file from src to dst, preserving mode.
 func copyFile(src, dst string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
