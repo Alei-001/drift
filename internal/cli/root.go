@@ -60,15 +60,10 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 			switch cmd.Name() {
 			case "drift", "init", "help", "version", "clone":
 				return nil
-			case "config":
-				if global, _ := cmd.Flags().GetBool("global"); global {
-					return nil
-				}
-			case "remote":
-				// "drift sync remote" — parent is "sync", no repo needed.
-				if cmd.Parent() != nil && cmd.Parent().Name() == "sync" {
-					return nil
-				}
+		case "config":
+			// Config subcommands handle init at the app layer
+			// (e.g. config remote works globally, config user.name needs a repo).
+			return nil
 			}
 
 			if !application.IsInitialized() {

@@ -30,7 +30,7 @@
 | `reflog` | 操作历史 | ✅ |
 | `undo` | 撤销操作 | ✅ |
 | `wip` | 工作进度管理 | ✅ |
-| `sync` | 远程同步（NAS/WebDAV） | ✅ |
+| `sync` | 远程同步操作（enable/disable/status/now） | ✅ |
 | `clone` | 从远程克隆项目 | ✅ |
 | `version` | 显示版本号 | ✅ |
 
@@ -748,8 +748,6 @@ drift config --global --unset <key>  # 清除全局配置值
 | `remote.share` | 全局 | SMB 共享名（SMB 协议专用） | 空 |
 | `remote.key_path` | 全局 | SSH 私钥路径（SFTP 协议专用） | 空 |
 
-> **注意**：`remote.*` 配置项推荐通过 `drift sync remote` 命令设置，但也可以直接用 `drift config --global` 操作。
-
 **输出示例：**
 
 ```bash
@@ -809,52 +807,46 @@ drift config sync.enabled               # 查看同步是否启用
 drift config --unset sync.enabled       # 关闭同步
 ```
 
----
+### `drift config remote` ✅
 
-## 远程同步命令
+配置远程根路径，支持五种协议：本地路径（NAS 挂载、网盘同步文件夹）、WebDAV（Nextcloud、ownCloud、群晖 NAS、坚果云等）、FTP/FTPS、SFTP（SSH 文件传输）、SMB/CIFS（Windows 共享、NAS）。
 
-### `drift sync` ✅
-
-管理远程同步，支持五种协议：本地路径（NAS 挂载、网盘同步文件夹）、WebDAV（Nextcloud、ownCloud、群晖 NAS、坚果云等）、FTP/FTPS、SFTP（SSH 文件传输）、SMB/CIFS（Windows 共享、NAS）。
-
-#### `drift sync remote` — 配置远程根路径
-
-支持两种配置方式：**显式协议模式**（推荐，字段统一清晰）和**简写自动检测模式**（兼容旧用法）。
+支持两种配置方式：**显式协议模式**（推荐，字段统一清晰）和**简写自动检测模式**。
 
 ```bash
 # ===== 显式协议模式（推荐）=====
 
 # 本地路径（NAS 挂载、网盘文件夹）
-drift sync remote --protocol local --path /mnt/nas
+drift config remote --protocol local --path /mnt/nas
 
 # WebDAV 服务器
-drift sync remote --protocol webdav --host cloud.example.com --path /dav \
+drift config remote --protocol webdav --host cloud.example.com --path /dav \
   --tls --user alice --pass secret
 
 # FTP/FTPS 服务器
-drift sync remote --protocol ftp --host nas.local --path /backups \
+drift config remote --protocol ftp --host nas.local --path /backups \
   --user alice --pass secret
-drift sync remote --protocol ftp --host nas.local --tls --insecure   # FTPS, 自签证书
+drift config remote --protocol ftp --host nas.local --tls --insecure   # FTPS, 自签证书
 
 # SFTP 服务器（密码或密钥认证）
-drift sync remote --protocol sftp --host nas.local --path /backups --user alice
-drift sync remote --protocol sftp --host nas.local --user alice --key-path ~/.ssh/id_rsa
+drift config remote --protocol sftp --host nas.local --path /backups --user alice
+drift config remote --protocol sftp --host nas.local --user alice --key-path ~/.ssh/id_rsa
 
 # SMB/CIFS 共享（Windows 共享、NAS）
-drift sync remote --protocol smb --host nas.local --share photos --user alice
+drift config remote --protocol smb --host nas.local --share photos --user alice
 
-# ===== 简写自动检测模式（兼容）=====
+# ===== 简写自动检测模式 =====
 
 # 本地路径
-drift sync remote /mnt/nas
+drift config remote /mnt/nas
 
 # WebDAV URL
-drift sync remote https://cloud.example.com/dav --user alice --pass secret
+drift config remote https://cloud.example.com/dav --user alice --pass secret
 
 # ===== 管理远程配置 =====
 
-drift sync remote --show    # 查看当前远程
-drift sync remote --unset   # 移除远程配置
+drift config remote --show    # 查看当前远程
+drift config remote --unset   # 移除远程配置
 ```
 
 **参数：**
@@ -885,12 +877,22 @@ drift sync remote --unset   # 移除远程配置
 | `smb` | 445 | — |
 
 **行为：**
-- 远程根路径是全局配置，存在 `~/.drift/global.json`，所有项目共享
+- 远程根路径保存在全局配置 `~/.drift/global.json`，所有项目共享
 - 本地路径模式：验证目录存在，远程项目以子目录形式存储（可直接浏览文件）
 - 网络协议模式：项目以子目录形式存储在远程服务器上
 - 凭据通过参数或交互式输入提供；SFTP 支持密钥认证（`--key-path`）
 - SFTP 使用 TOFU（Trust On First Use）主机密钥验证，记录在 `~/.drift/known_hosts`
 - WebDAV/FTP 的 `--insecure` 标志用于自签证书场景
+
+---
+
+## 远程同步操作
+
+### `drift sync` ✅
+
+管理同步操作。远程地址通过 `drift config remote` 配置，以下子命令控制启停和触发同步。
+
+支持五种传输协议：本地路径（NAS 挂载、网盘同步文件夹）、WebDAV、FTP/FTPS、SFTP、SMB/CIFS。
 
 #### `drift sync enable` — 为当前项目启用同步
 
@@ -964,7 +966,7 @@ drift clone <项目名> <目标目录>    # 克隆到指定目录
 
 ```bash
 # 首次配置远程根路径（全局，一次性）
-drift sync remote /mnt/nas
+drift config remote /mnt/nas
 
 # 在另一台设备上克隆项目
 drift clone my-novel
