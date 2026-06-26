@@ -456,6 +456,8 @@ drift switch <名称> -c          # --create 简写
 drift diff                         # 工作区 vs 当前分支最新版本（摘要）
 drift diff a1b2c3d4                # 工作区 vs 指定版本（摘要）
 drift diff a1b2c3d4 e5f6a7b8       # 两个版本对比（摘要）
+drift diff v1 v2                   # 两个标签对比（跨分支也支持，标签全局唯一）
+drift diff v1 main                 # 标签 vs 分支最新
 drift diff main feature            # main 最新 vs feature 最新（摘要）
 drift diff main/a1b2c3d4 feature/a1b2c3d4  # 跨分支精确比较（摘要）
 ```
@@ -475,6 +477,7 @@ Changed 2 file(s):
 ```bash
 drift diff -p                      # 工作区 vs 当前分支（详细）
 drift diff a1b2c3d4 e5f6a7b8 -p    # 两个版本对比（详细）
+drift diff v1 v2 -p                # 两个标签对比（详细）
 ```
 
 **详细输出示例（文本文件）：**
@@ -505,6 +508,7 @@ Binary files differ: 素材/封面.psd
 drift diff a1b2c3d4 e5f6a7b8 --file 章节/第一章.txt   # --file 标志
 drift diff a1b2c3d4 e5f6a7b8 -f 章节/第一章.txt        # -f 简写
 drift diff a1b2c3d4 e5f6a7b8 -- 章节/第一章.txt        # -- 分隔符后直接跟路径
+drift diff v1 v2 -f 章节/                                # 两个标签对比并过滤目录
 
 # 多个文件/目录（每种方式都支持重复）：
 drift diff a1b2c3d4 e5f6a7b8 --file 章节/ --file 笔记/
