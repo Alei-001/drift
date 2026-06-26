@@ -60,10 +60,10 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if stats.Pulled == 0 {
+			if stats.Pushed == 0 && stats.Pulled == 0 {
 				fmt.Println("Already up to date.")
 			} else {
-				fmt.Printf("Sync complete: %d new object(s)\n", stats.Pulled)
+				fmt.Printf("Sync complete: %d pushed, %d pulled\n", stats.Pushed, stats.Pulled)
 			}
 			return nil
 		},

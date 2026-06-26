@@ -155,15 +155,22 @@ func (a *App) Pull(branch string) (*PullStats, error) {
 	return &PullStats{Branch: result.Branch, Pulled: result.Pulled}, nil
 }
 
-func (a *App) SyncNow() (*PullStats, error) {
-	// Sync = push first, then pull.
+type SyncStats struct {
+	Pushed int
+	Pulled int
+}
+
+func (a *App) SyncNow() (*SyncStats, error) {
 	branch := a.CurrentBranch()
-	if stats, err := a.Push(branch); err != nil {
+	pushStats, err := a.Push(branch)
+	if err != nil {
 		return nil, fmt.Errorf("push: %w", err)
-	} else if stats.Pushed > 0 {
-		// Already pushed; continue to pull.
 	}
-	return a.Pull(branch)
+	pullStats, err := a.Pull(branch)
+	if err != nil {
+		return nil, fmt.Errorf("pull: %w", err)
+	}
+	return &SyncStats{Pushed: pushStats.Pushed, Pulled: pullStats.Pulled}, nil
 }
 
 func (a *App) checkSyncEnabled() bool {

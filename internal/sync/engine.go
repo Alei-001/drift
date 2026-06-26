@@ -64,6 +64,7 @@ func trackingRef(branch string) string {
 // Rejects if the remote ref has diverged from the local tracking ref (someone
 // else pushed since the last sync). The caller must pull first.
 func (e *Engine) Push(branch string) (*PushResult, error) {
+	refName := "heads/" + branch
 	localHash, err := e.store.GetRef(branch)
 	if err != nil {
 		return nil, fmt.Errorf("read local ref %s: %w", branch, err)
@@ -72,10 +73,10 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 		return nil, fmt.Errorf("branch %s has no commits", branch)
 	}
 
-	trackingHash, _ := e.store.GetRef(trackingRef(branch))
+	trackingHash, _ := e.store.GetRef(trackingRef(refName))
 
 	// Read the remote ref.
-	remoteHash, err := e.transport.GetRef("heads/" + branch)
+	remoteHash, err := e.transport.GetRef(refName)
 	if err != nil {
 		return nil, fmt.Errorf("read remote ref heads/%s: %w", branch, err)
 	}
@@ -119,12 +120,12 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 	}
 
 	// Update remote ref.
-	if err := e.transport.PutRef("heads/"+branch, localHash); err != nil {
+	if err := e.transport.PutRef(refName, localHash); err != nil {
 		return nil, fmt.Errorf("update remote ref: %w", err)
 	}
 
 	// Update local tracking ref.
-	if err := e.store.SaveRef(trackingRef(branch), localHash); err != nil {
+	if err := e.store.SaveRef(trackingRef(refName), localHash); err != nil {
 		return nil, fmt.Errorf("save tracking ref: %w", err)
 	}
 
@@ -135,8 +136,8 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 // store, then updates the local tracking ref. It does not modify the working
 // directory.
 func (e *Engine) Fetch(branch string) (*FetchResult, error) {
-	// Read remote ref.
-	remoteHash, err := e.transport.GetRef("heads/" + branch)
+	refName := "heads/" + branch
+	remoteHash, err := e.transport.GetRef(refName)
 	if err != nil {
 		return nil, fmt.Errorf("read remote ref heads/%s: %w", branch, err)
 	}
@@ -144,7 +145,7 @@ func (e *Engine) Fetch(branch string) (*FetchResult, error) {
 		return nil, fmt.Errorf("branch %s not found on remote", branch)
 	}
 
-	trackingHash, _ := e.store.GetRef(trackingRef(branch))
+	trackingHash, _ := e.store.GetRef(trackingRef(refName))
 	if remoteHash == trackingHash {
 		return &FetchResult{Branch: branch, Fetched: 0}, nil
 	}
@@ -176,7 +177,7 @@ func (e *Engine) Fetch(branch string) (*FetchResult, error) {
 	}
 
 	// Update tracking ref.
-	if err := e.store.SaveRef(trackingRef(branch), remoteHash); err != nil {
+	if err := e.store.SaveRef(trackingRef(refName), remoteHash); err != nil {
 		return nil, fmt.Errorf("save tracking ref: %w", err)
 	}
 
@@ -186,6 +187,7 @@ func (e *Engine) Fetch(branch string) (*FetchResult, error) {
 // Pull is Fetch followed by updating the local branch ref. Does not update
 // the working directory — the app layer handles that.
 func (e *Engine) Pull(branch string) (*PullResult, error) {
+	refName := "heads/" + branch
 	result, err := e.Fetch(branch)
 	if err != nil {
 		return nil, err
@@ -195,7 +197,7 @@ func (e *Engine) Pull(branch string) (*PullResult, error) {
 	}
 
 	// Fast-forward the local branch.
-	remoteHash, _ := e.transport.GetRef("heads/" + branch)
+	remoteHash, _ := e.transport.GetRef(refName)
 	if err := e.store.SaveRef(branch, remoteHash); err != nil {
 		return nil, fmt.Errorf("update local ref %s: %w", branch, err)
 	}
