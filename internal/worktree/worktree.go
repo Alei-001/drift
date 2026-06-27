@@ -1,5 +1,5 @@
 // Worktree represents the working directory and provides operations for
-// writing blobs to disk, staging changes, checking for modifications, and
+// writing blobs to disk, detecting changes, checking for modifications, and
 // managing work-in-progress (WIP) state. It bridges the storage layer
 // (content-addressed objects) and the filesystem (working directory).
 package worktree
@@ -24,7 +24,7 @@ import (
 var errUntrackedFound = errors.New("untracked file found")
 
 // Worktree represents the working directory and provides operations for
-// writing blobs to disk, staging changes, and checking for modifications.
+// writing blobs to disk, detecting changes, and checking for modifications.
 type Worktree struct {
 	Store    *storage.Store
 	Root     string
@@ -184,7 +184,7 @@ func (w *Worktree) CleanEmptyDirs(deletedPaths []string) {
 	}
 }
 
-// HasModifications checks whether the working tree has unstaged modifications
+// HasModifications checks whether the working tree has unsaved modifications
 // (modified tracked files, deleted tracked files, or untracked files).
 // If filters is non-empty, only paths matching the filters are checked.
 func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filters []string) (bool, error) {

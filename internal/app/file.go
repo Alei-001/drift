@@ -225,7 +225,7 @@ func (a *App) Move(sources []string, dest string, opts MoveOptions) ([]string, e
 		}
 		srcRel = filepath.ToSlash(srcRel)
 		if !tracked[srcRel] {
-			return nil, fmt.Errorf("source '%s' is not tracked (use 'drift add' first)", srcRel)
+			return nil, fmt.Errorf("source '%s' is not tracked", srcRel)
 		}
 
 		var destRel string

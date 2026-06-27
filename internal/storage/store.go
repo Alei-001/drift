@@ -871,7 +871,7 @@ func (s *Store) LoadIndex(idx *core.Index) error {
 //
 // The caller must pass the index that was used to build the commit's tree.
 // Persisting it as-is keeps full metadata (mtime/size) so that subsequent
-// `drift add` or `drift status` does not falsely report committed files as
+// `drift status` does not falsely report committed files as
 // deleted, and the status fast-path remains effective.
 func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, idx *core.Index) error {
 	if err := validateHash(c.Hash); err != nil {
@@ -914,7 +914,7 @@ func (s *Store) SaveCommitTransaction(c *core.Commit, branch string, idx *core.I
 	// 3. Persist the index. The index already reflects all tracked files
 	//    (it is what the commit's tree was built from), so write it back
 	//    unchanged. This prevents false "Deleted" status entries for
-	//    committed files that haven't been re-staged via `drift add`.
+	//    committed files from the index.
 	idxPath := filepath.Join(s.DriftDir(), indexFile)
 	idxData, err := idx.Marshal()
 	if err != nil {
