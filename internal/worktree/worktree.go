@@ -5,6 +5,7 @@
 package worktree
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -533,4 +534,161 @@ func (w *Worktree) BuildChangedIndex(parentTree *core.Tree) (*core.Index, []stri
 
 	sort.Strings(changed)
 	return idx, changed, nil
+}
+
+func (w *Worktree) StageWorktreeChanges(idx *core.Index) error {
+	parentHashes, err := w.LoadParentTreeHashes()
+	if err != nil {
+		return fmt.Errorf("failed to load parent tree hashes: %w", err)
+	}
+
+	if err := core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
+
+		mode, err := core.NormalizeModeForPath(info.Mode(), path)
+		if err != nil {
+			return fmt.Errorf("failed to normalize mode for %s: %w", path, err)
+		}
+
+		var hash string
+		if mode == core.ModeSymlink {
+			target, err := os.Readlink(fullPath)
+			if err != nil {
+				return fmt.Errorf("failed to read symlink %s: %w", path, err)
+			}
+			if err := core.ValidateSymlinkTarget(w.Root, path, target); err != nil {
+				return fmt.Errorf("unsafe symlink %s: %w", path, err)
+			}
+			hash, err = w.Store.PutBlob([]byte(target))
+			if err != nil {
+				return fmt.Errorf("failed to store symlink %s: %w", path, err)
+			}
+		} else {
+			hash, err = w.PutBlobForAdd(fullPath)
+			if err != nil {
+				return fmt.Errorf("failed to store %s: %w", path, err)
+			}
+		}
+
+		if parentHash, ok := parentHashes[path]; ok && parentHash == hash {
+			return nil
+		}
+
+		entry := core.IndexEntry{
+			Path:       path,
+			Hash:       hash,
+			ModifiedAt: info.ModTime(),
+			Size:       info.Size(),
+			Mode:       mode,
+		}
+		return idx.Add(entry)
+	}); err != nil {
+		return err
+	}
+
+	var deleted []string
+	for _, entry := range idx.Entries {
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(entry.Path))
+		if _, err := os.Lstat(fullPath); os.IsNotExist(err) {
+			deleted = append(deleted, entry.Path)
+		}
+	}
+	for _, path := range deleted {
+		idx.Remove(path)
+	}
+
+	return nil
+}
+
+func (w *Worktree) PutBlobForAdd(path string) (string, error) {
+	if w.AutoCRLF == "" {
+		return w.Store.PutBlobFromFile(path)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	headBuf := core.GetByteSlice()
+	if cap(*headBuf) < 8192 {
+		*headBuf = make([]byte, 8192)
+	}
+	head := (*headBuf)[:8192]
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		core.PutByteSlice(headBuf)
+		return "", err
+	}
+	head = head[:n]
+	defer core.PutByteSlice(headBuf)
+
+	r := io.MultiReader(bytes.NewReader(head), f)
+
+	if bytes.Contains(head, []byte{0}) {
+		return w.Store.PutBlobFromReader(r)
+	}
+
+	buf := core.GetBuffer()
+	defer core.PutBuffer(buf)
+	buf.Reset()
+
+	writer := core.NewLFWriter(buf)
+	if _, err := io.Copy(writer, r); err != nil {
+		return "", err
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+	return w.Store.PutBlobFromReader(buf)
+}
+
+func (w *Worktree) StoreBlob(fullPath string) (hash string, mode uint32, err error) {
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(fullPath)
+		if err != nil {
+			return "", 0, err
+		}
+		hash, blbErr := w.Store.PutBlob([]byte(target))
+		if blbErr != nil {
+			return "", 0, blbErr
+		}
+		return hash, core.ModeSymlink, nil
+	}
+
+	if !info.Mode().IsRegular() {
+		mode, modeErr := core.NormalizeModeForPath(info.Mode(), "")
+		if modeErr != nil {
+			return "", 0, modeErr
+		}
+		return "", mode, fmt.Errorf("unsupported file type")
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	isText := !bytes.Contains(data, []byte{0})
+	if isText {
+		data = bytes.ReplaceAll(data, []byte{'\r', '\n'}, []byte{'\n'})
+	}
+
+	hash, blbErr := w.Store.PutBlob(data)
+	if blbErr != nil {
+		return "", 0, blbErr
+	}
+
+	finalMode := uint32(core.ModeRegular)
+	if info.Mode()&0111 != 0 {
+		finalMode = core.ModeExecutable
+	}
+
+	return hash, finalMode, nil
 }

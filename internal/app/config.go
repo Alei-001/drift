@@ -14,11 +14,6 @@ const (
 	GlobalScope ConfigScope = "global"
 )
 
-type ConfigEntry struct {
-	Key   string
-	Value string
-}
-
 func (a *App) ConfigGet(scope ConfigScope, key string) (string, error) {
 	switch scope {
 	case LocalScope:
@@ -58,48 +53,6 @@ func (a *App) ConfigSet(scope ConfigScope, key, value string) error {
 		return config.SaveGlobalConfig(gcfg)
 	default:
 		return fmt.Errorf("invalid config scope: %s", scope)
-	}
-}
-
-func (a *App) ConfigUnset(scope ConfigScope, key string) error {
-	switch scope {
-	case LocalScope:
-		if !a.IsInitialized() {
-			return fmt.Errorf("not a drift repository")
-		}
-		if err := unsetLocalConfigValue(a.config, key); err != nil {
-			return err
-		}
-		return config.SaveConfig(a.store.DriftDir(), a.config)
-	case GlobalScope:
-		gcfg, err := config.LoadGlobalConfig()
-		if err != nil {
-			return err
-		}
-		if err := unsetGlobalConfigValue(gcfg, key); err != nil {
-			return err
-		}
-		return config.SaveGlobalConfig(gcfg)
-	default:
-		return fmt.Errorf("invalid config scope: %s", scope)
-	}
-}
-
-func (a *App) ConfigList(scope ConfigScope) ([]ConfigEntry, error) {
-	switch scope {
-	case LocalScope:
-		if !a.IsInitialized() {
-			return nil, fmt.Errorf("not a drift repository")
-		}
-		return listLocalConfig(a.config), nil
-	case GlobalScope:
-		gcfg, err := config.LoadGlobalConfig()
-		if err != nil {
-			return nil, err
-		}
-		return listGlobalConfig(gcfg), nil
-	default:
-		return nil, fmt.Errorf("invalid config scope: %s", scope)
 	}
 }
 
@@ -166,70 +119,6 @@ func setLocalConfigValue(cfg *config.Config, key, value string) error {
 	return nil
 }
 
-func unsetLocalConfigValue(cfg *config.Config, key string) error {
-	switch key {
-	case "user.name":
-		cfg.User.Name = ""
-	case "user.email":
-		cfg.User.Email = ""
-	case "core.autocrlf":
-		cfg.Core.AutoCRLF = ""
-	case "core.default_branch":
-		cfg.Core.DefaultBranch = ""
-	case "sync.enabled":
-			cfg.Sync.Enabled = false
-		case "gc.auto":
-			cfg.Core.GCAuto = 0
-		case "gc.reflogExpire":
-			cfg.Core.ReflogExpire = 0
-	default:
-		return fmt.Errorf("unknown config key: %s", key)
-	}
-	return nil
-}
-
-func listLocalConfig(cfg *config.Config) []ConfigEntry {
-	gcAuto := cfg.Core.GCAuto
-	if gcAuto == 0 {
-		gcAuto = 1000
-	}
-	reflogExpire := cfg.Core.ReflogExpire
-	if reflogExpire == 0 {
-		reflogExpire = 90
-	}
-	return []ConfigEntry{
-			{Key: "core.autocrlf", Value: cfg.Core.AutoCRLF},
-			{Key: "core.default_branch", Value: cfg.Core.DefaultBranch},
-			{Key: "gc.auto", Value: strconv.Itoa(gcAuto)},
-			{Key: "gc.reflogExpire", Value: strconv.Itoa(reflogExpire)},
-			{Key: "sync.enabled", Value: strconv.FormatBool(cfg.Sync.Enabled)},
-			{Key: "user.name", Value: cfg.User.Name},
-			{Key: "user.email", Value: cfg.User.Email},
-		}
-}
-
-func portStr(p int) string {
-	if p == 0 {
-		return ""
-	}
-	return strconv.Itoa(p)
-}
-
-func listGlobalConfig(gcfg *config.GlobalConfig) []ConfigEntry {
-	return []ConfigEntry{
-		{Key: "remote.protocol", Value: gcfg.Protocol},
-		{Key: "remote.host", Value: gcfg.Host},
-		{Key: "remote.port", Value: portStr(gcfg.Port)},
-		{Key: "remote.path", Value: gcfg.Path},
-		{Key: "remote.username", Value: gcfg.Username},
-		{Key: "remote.tls", Value: strconv.FormatBool(gcfg.TLS)},
-		{Key: "remote.insecure_skip_verify", Value: strconv.FormatBool(gcfg.InsecureSkipVerify)},
-		{Key: "remote.share", Value: gcfg.Share},
-		{Key: "remote.key_path", Value: gcfg.KeyPath},
-		{Key: "user.name", Value: gcfg.User.Name},
-		{Key: "user.email", Value: gcfg.User.Email},
-	}
-}
 
 func getGlobalConfigValue(gcfg *config.GlobalConfig, key string) (string, error) {
 	switch key {
@@ -305,33 +194,4 @@ func setGlobalConfigValue(gcfg *config.GlobalConfig, key, value string) error {
 	return nil
 }
 
-func unsetGlobalConfigValue(gcfg *config.GlobalConfig, key string) error {
-	switch key {
-	case "user.name":
-		gcfg.User.Name = ""
-	case "user.email":
-		gcfg.User.Email = ""
-	case "remote.protocol":
-		gcfg.Protocol = ""
-	case "remote.host":
-		gcfg.Host = ""
-	case "remote.port":
-		gcfg.Port = 0
-	case "remote.path":
-		gcfg.Path = ""
-	case "remote.username":
-		gcfg.Username = ""
-	case "remote.tls":
-		gcfg.TLS = false
-	case "remote.insecure_skip_verify":
-		gcfg.InsecureSkipVerify = false
-	case "remote.share":
-		gcfg.Share = ""
-	case "remote.key_path":
-		gcfg.KeyPath = ""
-	default:
-		return fmt.Errorf("unknown global config key: %s", key)
-	}
-	return nil
-}
 

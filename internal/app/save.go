@@ -1,12 +1,10 @@
 package app
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -79,25 +77,8 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 			continue
 		}
 		fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
-		if entry.Mode == core.ModeSymlink {
-			target, readErr := os.Readlink(fullPath)
-			if readErr != nil {
-				continue
-			}
-			if _, putErr := a.store.PutBlob([]byte(target)); putErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to store blob for %s: %v\n", path, putErr)
-			}
-		} else {
-			data, readErr := os.ReadFile(fullPath)
-			if readErr != nil {
-				continue
-			}
-			if !bytes.Contains(data, []byte{0}) {
-				data = bytes.ReplaceAll(data, []byte{'\r', '\n'}, []byte{'\n'})
-			}
-			if _, putErr := a.store.PutBlob(data); putErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to store blob for %s: %v\n", path, putErr)
-			}
+		if _, _, putErr := a.wt.StoreBlob(fullPath); putErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to store blob for %s: %v\n", path, putErr)
 		}
 	}
 
@@ -169,66 +150,4 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	}, nil
 }
 
-// computeChangedPaths returns the paths that differ between the new tree
-// (built from the index) and the parent commit's tree. Uses LazyDiffTrees to
-// skip unchanged subtrees — much faster than flattening both trees.
-func (a *App) computeChangedPaths(newTree *core.Tree, branchCommits []*core.Commit) []string {
-	// New branch: all index entries are new.
-	if len(branchCommits) == 0 {
-		reader := core.NewTreeReader(a.store)
-		blobs, err := reader.ListBlobs(newTree, "")
-		if err != nil {
-			return nil
-		}
-		paths := make([]string, len(blobs))
-		for i, b := range blobs {
-			paths[i] = b.Path
-		}
-		return paths
-	}
 
-	parent := branchCommits[0]
-	if parent.TreeHash == "" {
-		reader := core.NewTreeReader(a.store)
-		blobs, err := reader.ListBlobs(newTree, "")
-		if err != nil {
-			return nil
-		}
-		paths := make([]string, len(blobs))
-		for i, b := range blobs {
-			paths[i] = b.Path
-		}
-		return paths
-	}
-
-	parentTree, err := a.store.GetTree(parent.TreeHash)
-	if err != nil {
-		// Fall back: list new tree blobs.
-		reader := core.NewTreeReader(a.store)
-		blobs, _ := reader.ListBlobs(newTree, "")
-		paths := make([]string, len(blobs))
-		for i, b := range blobs {
-			paths[i] = b.Path
-		}
-		return paths
-	}
-
-	reader := core.NewTreeReader(a.store)
-	changes, err := reader.LazyDiffTrees(parentTree, newTree)
-	if err != nil {
-		// Fall back: list new tree blobs.
-		blobs, _ := reader.ListBlobs(newTree, "")
-		paths := make([]string, len(blobs))
-		for i, b := range blobs {
-			paths[i] = b.Path
-		}
-		return paths
-	}
-
-	changed := make([]string, 0, len(changes))
-	for _, ch := range changes {
-		changed = append(changed, ch.Path)
-	}
-	sort.Strings(changed)
-	return changed
-}

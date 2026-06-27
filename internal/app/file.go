@@ -297,36 +297,19 @@ func (a *App) Move(sources []string, dest string, opts MoveOptions) ([]string, e
 			}
 			idx.Remove(p.srcRel)
 		} else {
-			info, err := os.Lstat(p.destFull)
-			if err != nil {
-				return moved, fmt.Errorf("failed to stat moved file: %w", err)
+			hash, mode, storeErr := a.wt.StoreBlob(p.destFull)
+			if storeErr != nil {
+				return moved, fmt.Errorf("failed to store %s: %w", p.destRel, storeErr)
 			}
-			mode, err := core.NormalizeModeForPath(info.Mode(), p.destRel)
-			if err != nil {
-				return moved, fmt.Errorf("unsupported file type for %s: %w", p.destRel, err)
-			}
-			var hash string
-			if mode == core.ModeSymlink {
-				target, err := os.Readlink(p.destFull)
-				if err != nil {
-					return moved, fmt.Errorf("failed to read symlink %s: %w", p.destRel, err)
-				}
-				hash, err = a.store.PutBlob([]byte(target))
-				if err != nil {
-					return moved, fmt.Errorf("failed to store symlink %s: %w", p.destRel, err)
-				}
-			} else {
-				hash, err = a.wt.PutBlobForAdd(p.destFull)
-				if err != nil {
-					return moved, fmt.Errorf("failed to store %s: %w", p.destRel, err)
-				}
-			}
+			info, statErr := os.Lstat(p.destFull)
 			entry := core.IndexEntry{
-				Path:       p.destRel,
-				Hash:       hash,
-				ModifiedAt: info.ModTime(),
-				Size:       info.Size(),
-				Mode:       mode,
+				Path: p.destRel,
+				Hash: hash,
+				Mode: mode,
+			}
+			if statErr == nil {
+				entry.ModifiedAt = info.ModTime()
+				entry.Size = info.Size()
 			}
 			if err := idx.Add(entry); err != nil {
 				return moved, fmt.Errorf("failed to stage %s: %w", p.destRel, err)

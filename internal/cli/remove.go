@@ -17,7 +17,7 @@ func NewRemoveCmd(application *apppkg.App) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "remove <path> [<path>...]",
-		Short: "Remove files from the working tree and staging area",
+		Short: "Remove files from the working tree",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Honor global --dry-run: only preview, don't delete.
@@ -74,7 +74,7 @@ func NewRemoveCmd(application *apppkg.App) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&cached, "cached", false, "Only remove from staging area")
+	cmd.Flags().BoolVar(&cached, "cached", false, "Only stop tracking, keep file on disk")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "Remove directories recursively")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompt")
 
