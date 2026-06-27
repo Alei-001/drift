@@ -37,11 +37,11 @@ func NewLogCmd(application *apppkg.App) *cobra.Command {
 
 			tagsByHash := application.TagsByHash()
 
-			if porcelain {
-				formatCommitsPorcelain(commits, tagsByHash)
-			} else {
-				formatCommits(commits, tagsByHash, oneline)
-			}
+		if porcelain {
+			formatCommitsPorcelain(commits, tagsByHash)
+		} else {
+			formatCommits(commits, tagsByHash, oneline, allBranches)
+		}
 			return nil
 		},
 	}
@@ -55,9 +55,10 @@ func NewLogCmd(application *apppkg.App) *cobra.Command {
 }
 
 // formatCommits displays commits in human-readable format.
-func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneline bool) {
+func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneline, allBranches bool) {
 	if oneline {
 		const versionWidth = 8
+		const branchWidth = 8
 		const sep = "    "
 
 		msgWidth := 20
@@ -70,29 +71,60 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 			msgWidth = 60
 		}
 
-		fmt.Printf("%s%s%s%s%s\n",
-			colorCyan(fmt.Sprintf("%-*s", versionWidth, "VERSION")),
-			sep,
-			colorCyan(fmt.Sprintf("%-*s", msgWidth, "MESSAGE")),
-			sep,
-			colorCyan("TAG"))
-		for _, c := range commits {
-			id := c.ID
-			if len(id) > 8 {
-				id = id[:8]
+		if allBranches {
+			fmt.Printf("%s%s%s%s%s%s%s\n",
+				colorCyan(fmt.Sprintf("%-*s", versionWidth, "VERSION")),
+				sep,
+				colorCyan(fmt.Sprintf("%-*s", branchWidth, "BRANCH")),
+				sep,
+				colorCyan(fmt.Sprintf("%-*s", msgWidth, "MESSAGE")),
+				sep,
+				colorCyan("TAG"))
+			for _, c := range commits {
+				id := c.ID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				tags := tagsByHash[c.Hash]
+				tag := strings.Join(tags, ", ")
+				msg := c.Message
+				if len(msg) > msgWidth {
+					msg = msg[:msgWidth-3] + "..."
+				}
+				fmt.Printf("%s%s%s%s%s%s%s\n",
+					colorYellow(fmt.Sprintf("%-*s", versionWidth, id)),
+					sep,
+					colorCyan(fmt.Sprintf("%-*s", branchWidth, c.Branch)),
+					sep,
+					fmt.Sprintf("%-*s", msgWidth, msg),
+					sep,
+					colorGreen(tag))
 			}
-			tags := tagsByHash[c.Hash]
-			tag := strings.Join(tags, ", ")
-			msg := c.Message
-			if len(msg) > msgWidth {
-				msg = msg[:msgWidth-3] + "..."
-			}
+		} else {
 			fmt.Printf("%s%s%s%s%s\n",
-				colorYellow(fmt.Sprintf("%-*s", versionWidth, id)),
+				colorCyan(fmt.Sprintf("%-*s", versionWidth, "VERSION")),
 				sep,
-				fmt.Sprintf("%-*s", msgWidth, msg),
+				colorCyan(fmt.Sprintf("%-*s", msgWidth, "MESSAGE")),
 				sep,
-				colorGreen(tag))
+				colorCyan("TAG"))
+			for _, c := range commits {
+				id := c.ID
+				if len(id) > 8 {
+					id = id[:8]
+				}
+				tags := tagsByHash[c.Hash]
+				tag := strings.Join(tags, ", ")
+				msg := c.Message
+				if len(msg) > msgWidth {
+					msg = msg[:msgWidth-3] + "..."
+				}
+				fmt.Printf("%s%s%s%s%s\n",
+					colorYellow(fmt.Sprintf("%-*s", versionWidth, id)),
+					sep,
+					fmt.Sprintf("%-*s", msgWidth, msg),
+					sep,
+					colorGreen(tag))
+			}
 		}
 		return
 	}
@@ -100,6 +132,9 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 	for _, c := range commits {
 		tags := tagsByHash[c.Hash]
 		fmt.Printf("commit %s\n", colorYellow(c.ID))
+		if allBranches {
+			fmt.Printf("Branch:  %s\n", colorCyan(c.Branch))
+		}
 		if len(tags) > 0 {
 			fmt.Printf("Tags:    %s\n", colorGreen(strings.Join(tags, ", ")))
 		}
