@@ -46,7 +46,6 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 				if err := application.Chdir(cwd); err != nil {
 					return err
 				}
-				application.WarnIfOutdated()
 			}
 
 			// --help on any command: skip init check so help works
@@ -59,7 +58,7 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 			// an initialized repository, add its case here.
 			// See docs/refactoring/03-phase3-cli-framework.md.
 			switch cmd.Name() {
-			case "drift", "init", "help", "version", "clone", "upgrade":
+			case "drift", "init", "help", "version", "clone":
 				return nil
 		case "config":
 			// Config subcommands handle init at the app layer
@@ -110,7 +109,6 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	root.AddCommand(NewConfigCmd(application))
 	// root.AddCommand(NewSyncCmd(application))
 	root.AddCommand(NewGCCmd(application))
-	root.AddCommand(NewUpgradeCmd(application))
 
 	return root
 }
