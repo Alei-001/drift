@@ -121,6 +121,12 @@ func getLocalConfigValue(cfg *config.Config, key string) (string, error) {
 				v = 1000
 			}
 			return strconv.Itoa(v), nil
+		case "gc.reflogExpire":
+			v := cfg.Core.ReflogExpire
+			if v == 0 {
+				v = 90
+			}
+			return strconv.Itoa(v), nil
 	default:
 		return "", fmt.Errorf("unknown config key: %s", key)
 	}
@@ -148,6 +154,12 @@ func setLocalConfigValue(cfg *config.Config, key, value string) error {
 				return fmt.Errorf("invalid integer value for gc.auto: %s", value)
 			}
 			cfg.Core.GCAuto = v
+		case "gc.reflogExpire":
+			v, err := strconv.Atoi(value)
+			if err != nil || v < 0 {
+				return fmt.Errorf("invalid integer value for gc.reflogExpire: %s", value)
+			}
+			cfg.Core.ReflogExpire = v
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -168,6 +180,8 @@ func unsetLocalConfigValue(cfg *config.Config, key string) error {
 			cfg.Sync.Enabled = false
 		case "gc.auto":
 			cfg.Core.GCAuto = 0
+		case "gc.reflogExpire":
+			cfg.Core.ReflogExpire = 0
 	default:
 		return fmt.Errorf("unknown config key: %s", key)
 	}
@@ -179,10 +193,15 @@ func listLocalConfig(cfg *config.Config) []ConfigEntry {
 	if gcAuto == 0 {
 		gcAuto = 1000
 	}
+	reflogExpire := cfg.Core.ReflogExpire
+	if reflogExpire == 0 {
+		reflogExpire = 90
+	}
 	return []ConfigEntry{
 			{Key: "core.autocrlf", Value: cfg.Core.AutoCRLF},
 			{Key: "core.default_branch", Value: cfg.Core.DefaultBranch},
 			{Key: "gc.auto", Value: strconv.Itoa(gcAuto)},
+			{Key: "gc.reflogExpire", Value: strconv.Itoa(reflogExpire)},
 			{Key: "sync.enabled", Value: strconv.FormatBool(cfg.Sync.Enabled)},
 			{Key: "user.name", Value: cfg.User.Name},
 			{Key: "user.email", Value: cfg.User.Email},

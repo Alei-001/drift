@@ -15,7 +15,8 @@ type Config struct {
 type CoreConfig struct {
 	DefaultBranch string `json:"default_branch"`
 	AutoCRLF      string `json:"autocrlf"`
-	GCAuto        int    `json:"gc_auto,omitempty"` // 0 = use default (1000)
+	GCAuto        int    `json:"gc_auto,omitempty"`
+	ReflogExpire  int    `json:"reflog_expire,omitempty"` // days, 0 = 90
 }
 
 // SyncConfig holds per-project sync state. Managed by the sync subsystem.

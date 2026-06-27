@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/drift/drift/internal/core"
 	"github.com/drift/drift/internal/storage"
@@ -25,6 +26,10 @@ type GCResult struct {
 // defaultGCAuto is the loose object count above which auto-GC triggers.
 const defaultGCAuto = 1000
 
+// defaultReflogExpireDays is how many days of reflog entries GC preserves.
+// Mirrors Git's gc.reflogExpire default of 90 days.
+const defaultReflogExpireDays = 90
+
 // gcAutoThreshold returns the configured gc.auto threshold, or the default.
 func (a *App) gcAutoThreshold() int {
 	if a.config != nil {
@@ -34,6 +39,14 @@ func (a *App) gcAutoThreshold() int {
 		}
 	}
 	return defaultGCAuto
+}
+
+// reflogExpireDays returns the configured reflog expire duration or 90 days.
+func (a *App) reflogExpireDays() int {
+	if a.config != nil && a.config.Core.ReflogExpire > 0 {
+		return a.config.Core.ReflogExpire
+	}
+	return defaultReflogExpireDays
 }
 
 // GC removes unreachable objects from the store. Reachability is determined
@@ -57,12 +70,17 @@ func (a *App) GC(opts GCOptions) (*GCResult, error) {
 	// includes the target branch's commit hash, so we don't need to add
 	// HEAD separately.
 
-	// 2. Collect reflog-referenced commit hashes.
+	// 2. Collect reflog-referenced commit hashes, skipping entries older
+	// than gc.reflogExpire so old objects can be reclaimed.
+	cutoff := time.Now().AddDate(0, 0, -a.reflogExpireDays())
 	ops, err := a.ReadOperations()
 	if err != nil {
 		return nil, fmt.Errorf("read operations: %w", err)
 	}
 	for _, op := range ops {
+		if op.Timestamp.Before(cutoff) {
+			continue
+		}
 		for _, ch := range op.RefChanges {
 			if ch.Before != "" {
 				startHashes = append(startHashes, ch.Before)
