@@ -27,6 +27,8 @@ func main() {
 	}
 
 	application := app.New(store, cfg, dir)
+	application.WarnIfOutdated()
+
 	rootCmd := cli.BuildRootCmd(application)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

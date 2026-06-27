@@ -29,6 +29,11 @@ func (a *App) Init() error {
 	}
 	a.config = cfg
 
+	// Mark repository format version so future upgrades can detect it.
+	if err := WriteRepoVersion(a.store.DriftDir()); err != nil {
+		return fmt.Errorf("failed to write version file: %w", err)
+	}
+
 	return nil
 }
 
