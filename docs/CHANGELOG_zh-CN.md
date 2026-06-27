@@ -1,6 +1,68 @@
 # 更新日志
 
-## v1.1.0 (2026-06-27)
+## v1.1.1 (2026-06-27)
+
+### Bug 修复
+
+- **Save 不再丢失子目录文件。** `GetTree` 返回的 Tree 对象 Hash 字段未设置，导致
+  `BuildFromIndexWithBase` 失败后静默回退，使新 commit 丢失所有子目录条目。
+- **子树复用优化恢复。** 树构建器的 `BuildFromIndexWithBase` 快速路径在比较新旧
+  子树条目时，新条目未排序而旧条目已排序，导致比较永久不匹配，每次 save 都从
+  零重建全部子树。
+- **`--no-color` 标志可正常工作。** `BuildRootCmd` 内的局部变量遮蔽了包级变量，
+  导致 `--no-color` 标志绑定到局部变量，`useColor()` 永远读不到用户设置。
+- **Windows autocrlf 状态下 status 不再误报修改。** `HasModifications` 在
+  Windows 且 `autocrlf=true` 时现用 LF 归一化 hash 与 blob 存储格式比较。
+- **工作树中的符号链接现可正确检测。** `drift status` 此前对所有符号链接都
+  标记为 Modified，因为 `CalculateHashFromFile` 跟随了符号链接而非比较目标路径
+  字符串的 hash。
+- **路径穿越漏洞修复。** `ExpandAddPaths`、`NormalizePathFilters` 和 `Clone`
+  现均调用 `ValidateTreePath` 验证路径是否安全，防止目录逃逸攻击。
+- **SFTP 主机密钥验证。** SFTP 连接默认通过 `~/.ssh/known_hosts` 验证主机
+  密钥。如需跳过，设置 `insecure_skip_verify: true`。
+- **FTP 同步目录创建修复。** `mkdirAll` 错误地重复了 basePath 前缀，导致
+  对象存储到错误的远程路径。
+- **首次 Push 不再 panic。** `trackingHash[:8]` 在 tracking ref 不存在时
+  panic，现所有 hash 切片均使用 `shortHash()` 保护。
+- **Commit hash 完整性。** `NewCommit` 现验证 message、author name 和 email
+  不含 NUL 字节（会破坏 hash 计算），并返回 `error`。
+- **Diff 现可检测 mode 变更。** `DiffTrees` 和 `LazyDiffTrees` 在比较 hash
+  之外同时比较 mode，`chmod +x` 变更会在 `drift diff` 中可见。
+- **Commit 序列化增加校验。** `Commit.Marshal` 在编码前拒绝空 Hash/TreeHash，
+  防止写出损坏的 commit 文件。
+- **错误处理全面强化。** `BranchCreate`、`Switch`、`Save`、`Restore`、`Push`、
+  `Pull`、`TagAdd`、`Move`、`ResolveCommit`、`ListRefs` 不再静默丢弃
+  `GetRef`、`GetTree`、`GetCommit`、`currentCommit` 和 `filepath` 操作
+  返回的 I/O 错误，明确区分 `ErrObjectNotFound` 与真实故障。
+- **僵死锁检测。** 锁轮询循环现检查记录的 PID 是否存活，发现进程已死时立即
+  清理锁文件并重试，不再等待完整的 5 秒超时。
+- **`Chdir` 原子性。** `App.Chdir` 不再在验证 config 前修改 `a.store`，
+  防止 config 加载失败时 App 进入半切换状态。
+- **`SyncEnable` nil 配置检查。** `SyncEnable` 和 `SyncDisable` 现在
+  访问 sync 设置前检查 `a.config` 是否为 nil。
+- **`StageWorktreeChanges` 处理已删除文件。** WIP save 现会从 index 中
+  移除工作树中被删除的文件条目，防止产生过时的 WIP 快照。
+- **`DeleteRef` 更新 HEAD。** 删除当前检出的分支时，现于锁内清除 HEAD，
+  避免悬空引用。
+- **`lock()` 失败时返回 nil unlocker。** 此前返回空函数可能被误用，现改为
+  `nil` 使误用立即可见。
+- **统一错误哨兵值。** `ErrCorruptedObject`（解压错误）与 `ErrObjectCorrupted`
+  （hash 不一致）合并为单一哨兵值，`errors.Is` 可覆盖两种情况。
+
+### 改进
+
+- **CLI 全命令着色。** 21 个命令统一使用 ANSI 颜色：成功/新增=绿色，警告/
+  修改=黄色，错误/删除=红色，标题/分支名=青色，空状态=灰色。
+- **log 和 reflog 表格对齐。** 列宽格式化现先计算纯文本宽度再应用颜色，
+  表头与数据列对齐一致，列间距加宽。
+- **Clone 正确写出符号链接。** Clone 现通过 `os.Symlink` 创建符号链接，
+  不再将目标路径写为普通文件。
+- **`GetBlobSize` 错误类型统一。** 与其他对象获取器一致，使用
+  `ErrObjectCorrupted`。
+- **`PutCommit` 存在性检查。** 增加与 `PutBlob`、`PutTree` 相同的
+  `os.Stat` 提前返回机制，避免不必要的重复写入。
+
+---
 
 ### 新功能
 
