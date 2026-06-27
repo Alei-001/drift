@@ -85,22 +85,20 @@ func (w *Worktree) WriteBlob(blob core.BlobEntry) (core.IndexEntry, error) {
 	if info, err := os.Stat(fullPath); err == nil {
 		blobSize, sizeErr := w.Store.GetBlobSize(blob.Hash)
 		if sizeErr == nil && info.Size() == blobSize {
-			if !(runtime.GOOS == "windows" && w.AutoCRLF == "true") {
-				fileHash, hashErr := core.CalculateHashFromFile(fullPath)
-				if hashErr == nil && fileHash == blob.Hash {
+			fileHash, hashErr := core.CalculateHashFromFile(fullPath)
+			if hashErr == nil && fileHash == blob.Hash {
 					_ = os.Chmod(fullPath, perm)
 					info, err := os.Stat(fullPath)
 					if err != nil {
 						return core.IndexEntry{}, fmt.Errorf("failed to stat %s: %w", blob.Path, err)
 					}
-					return core.IndexEntry{
-						Path:       blob.Path,
-						Hash:       blob.Hash,
-						ModifiedAt: info.ModTime(),
-						Size:       info.Size(),
-						Mode:       blob.Mode,
-					}, nil
-				}
+				return core.IndexEntry{
+					Path:       blob.Path,
+					Hash:       blob.Hash,
+					ModifiedAt: info.ModTime(),
+					Size:       info.Size(),
+					Mode:       blob.Mode,
+				}, nil
 			}
 		}
 	}
@@ -115,7 +113,7 @@ func (w *Worktree) WriteBlob(blob core.BlobEntry) (core.IndexEntry, error) {
 	}
 
 	var writer io.Writer = f
-	if runtime.GOOS == "windows" && w.AutoCRLF == "true" {
+	if runtime.GOOS == "windows" {
 		writer = core.NewCRLFWriter(f)
 	}
 
@@ -188,8 +186,7 @@ func (w *Worktree) CleanEmptyDirs(deletedPaths []string) {
 // (modified tracked files, deleted tracked files, or untracked files).
 // If filters is non-empty, only paths matching the filters are checked.
 func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filters []string) (bool, error) {
-	// Build the set of tracked paths from both index and commit.
-	tracked := make(map[string]string) // path → expected hash (index preferred)
+	tracked := make(map[string]string)
 	for _, e := range idx.Entries {
 		if PathMatchesAny(e.Path, filters) {
 			tracked[e.Path] = e.Hash
@@ -216,18 +213,16 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 		}
 	}
 
-	// Check each tracked file: does worktree match the expected hash?
 	for path, expectedHash := range tracked {
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
 		info, err := os.Lstat(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return true, nil // tracked file deleted
+				return true, nil
 			}
 			continue
 		}
 
-		// Symlink: compare target string.
 		if info.Mode()&os.ModeSymlink != 0 {
 			target, err := os.Readlink(fullPath)
 			if err != nil {
@@ -243,22 +238,14 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 			continue
 		}
 
-		// Fast path: size comparison. Skip when autocrlf may cause
-		// size mismatch between LF blob and CRLF worktree file.
-		if !(runtime.GOOS == "windows" && w.AutoCRLF == "true") {
+		if runtime.GOOS != "windows" {
 			blobSize, sizeErr := w.Store.GetBlobSize(expectedHash)
 			if sizeErr == nil && info.Size() != blobSize {
 				return true, nil
 			}
 		}
 
-		var fileHash string
-		var hashErr error
-		if runtime.GOOS == "windows" && w.AutoCRLF == "true" {
-			fileHash, hashErr = core.CalculateHashFromFileLF(fullPath)
-		} else {
-			fileHash, hashErr = core.CalculateHashFromFile(fullPath)
-		}
+		fileHash, hashErr := core.CalculateHashFromFile(fullPath)
 		if hashErr != nil {
 			continue
 		}
@@ -267,7 +254,6 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 		}
 	}
 
-	// Check for untracked files (not in index, not in commit).
 	walkErr := core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
 		if _, isTracked := tracked[path]; isTracked {
 			return nil
@@ -601,10 +587,6 @@ func (w *Worktree) StageWorktreeChanges(idx *core.Index) error {
 }
 
 func (w *Worktree) PutBlobForAdd(path string) (string, error) {
-	if w.AutoCRLF == "" {
-		return w.Store.PutBlobFromFile(path)
-	}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
