@@ -67,12 +67,22 @@ jobs:
           $en = Get-Content docs/CHANGELOG.md -Raw
           $zh = Get-Content docs/CHANGELOG_zh-CN.md -Raw
 
-          $blocks = $en -split '\r?\n(?=## v)'
-          $notes = ($blocks | Where-Object { $_ -match "^## v$ver\b" }) -join ''
+          function extract-section($content, $version) {
+            $lines = $content -split '\r?\n'
+            $in = $false
+            $out = @()
+            foreach ($line in $lines) {
+              if ($line -match "^## v$version\b") { $in = $true }
+              elseif ($line -match "^## v") { $in = $false }
+              if ($in) { $out += $line }
+            }
+            return ($out -join "`n")
+          }
+
+          $notes = extract-section $en $ver
           if (-not $notes) { $notes = "Drift v$ver" }
 
-          $zhBlocks = $zh -split '\r?\n(?=## v)'
-          $zn = ($zhBlocks | Where-Object { $_ -match "^## v$ver\b" }) -join ''
+          $zn = extract-section $zh $ver
           if ($zn) { $notes += "`n`n---`n`n$zn" }
 
           $notes | Out-File -FilePath release-notes.md -Encoding UTF8
