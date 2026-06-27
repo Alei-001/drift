@@ -63,17 +63,17 @@ jobs:
       - name: Extract release notes from changelog
         shell: pwsh
         run: |
+          $ver = $env:DRIFT_VERSION
           $en = Get-Content docs/CHANGELOG.md -Raw
           $zh = Get-Content docs/CHANGELOG_zh-CN.md -Raw
-          $pattern = "## v$($env:DRIFT_VERSION) .*"
 
-          if ($en -match "(?s)($pattern.*)`$") {
+          if ($en -match "(?s)(## v$ver .*?)(?=\r?\n## v|\z)") {
             $notes = $matches[1]
           } else {
-            $notes = "Drift v$env:DRIFT_VERSION"
+            $notes = "Drift v$ver"
           }
 
-          if ($zh -match "(?s)($pattern.*)`$") {
+          if ($zh -match "(?s)(## v$ver .*?)(?=\r?\n## v|\z)") {
             $notes += "`n`n---`n`n" + $matches[1]
           }
 
