@@ -10,7 +10,10 @@ import (
 // computes a hash, and sets ID to the hash prefix.
 func TestNewCommit_AssignsFields(t *testing.T) {
 	author := Signature{Name: "alice", Email: "alice@example.com"}
-	c := NewCommit("msg", "", "main", "treehash", author)
+	c, err := NewCommit("msg", "", "main", "treehash", author)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if c.Message != "msg" || c.Branch != "main" || c.TreeHash != "treehash" {
 		t.Fatalf("fields not assigned: %+v", c)
 	}
@@ -30,15 +33,24 @@ func TestNewCommit_AssignsFields(t *testing.T) {
 
 // TestCommit_isRoot verifies root detection logic.
 func TestCommit_isRoot(t *testing.T) {
-	root := NewCommit("m", "", "main", "t", Signature{})
+	root, err := NewCommit("m", "", "main", "t", Signature{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !root.isRoot() {
 		t.Fatal("commit with empty parent should be root")
 	}
-	nullParent := NewCommit("m", nullHash, "main", "t", Signature{})
+	nullParent, err := NewCommit("m", nullHash, "main", "t", Signature{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !nullParent.isRoot() {
 		t.Fatal("commit with null-hash parent should be root")
 	}
-	nonRoot := NewCommit("m", "abcd", "main", "t", Signature{})
+	nonRoot, err := NewCommit("m", "abcd", "main", "t", Signature{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if nonRoot.isRoot() {
 		t.Fatal("commit with non-empty parent should not be root")
 	}
@@ -47,7 +59,10 @@ func TestCommit_isRoot(t *testing.T) {
 // TestCommit_MarshalUnmarshal_RoundTrip verifies DCMT round trip preserves all fields.
 func TestCommit_MarshalUnmarshal_RoundTrip(t *testing.T) {
 	author := Signature{Name: "alice", Email: "alice@example.com"}
-	c := NewCommit("hello world", "", "main", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", author)
+	c, err := NewCommit("hello world", "", "main", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", author)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Pin timestamp for deterministic comparison.
 	c.Timestamp = time.UnixMilli(1700000000000)
 	c.Hash = c.calculateHash()
@@ -85,7 +100,10 @@ func TestCommit_MarshalUnmarshal_RoundTrip(t *testing.T) {
 // TestCommit_MarshalUnmarshal_NonRoot verifies that a non-root commit's parent survives round trip.
 func TestCommit_MarshalUnmarshal_NonRoot(t *testing.T) {
 	parent := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
-	c := NewCommit("msg", parent, "feature", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Signature{Name: "bob", Email: "bob@example.com"})
+	c, err := NewCommit("msg", parent, "feature", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Signature{Name: "bob", Email: "bob@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.Timestamp = time.UnixMilli(1700000000123)
 	c.Hash = c.calculateHash()
 	c.ID = c.Hash[:CommitIDLen]
@@ -125,7 +143,10 @@ func TestCommit_Unmarshal_BadVersion(t *testing.T) {
 
 // TestCommit_Unmarshal_HashMismatch verifies that tampered commit data is rejected.
 func TestCommit_Unmarshal_HashMismatch(t *testing.T) {
-	c := NewCommit("msg", "", "main", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Signature{Name: "a", Email: "b"})
+	c, err := NewCommit("msg", "", "main", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", Signature{Name: "a", Email: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.Timestamp = time.UnixMilli(1700000000000)
 	c.Hash = c.calculateHash()
 	c.ID = c.Hash[:CommitIDLen]

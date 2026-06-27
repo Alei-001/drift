@@ -116,12 +116,10 @@ func (a *App) Restore(version string, filters []string, force bool) (*RestoreRes
 		if currentHash != commit.Hash && currentHash != "" {
 			if currentCommit, err := a.findCommitByHash(currentHash); err == nil {
 				if t, err := a.store.GetTree(currentCommit.TreeHash); err == nil {
-					prevBlobsList, err := reader.ListBlobs(t, "")
-					if err != nil {
-						return nil, fmt.Errorf("failed to list blobs from current branch tree: %w", err)
-					}
-					for _, b := range prevBlobsList {
-						prevBlobs[b.Path] = b.Hash
+					if prevBlobsList, err := reader.ListBlobs(t, ""); err == nil {
+						for _, b := range prevBlobsList {
+							prevBlobs[b.Path] = b.Hash
+						}
 					}
 				}
 			}

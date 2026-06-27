@@ -37,11 +37,12 @@ func (a *App) IsInitialized() bool {
 }
 
 func (a *App) Chdir(dir string) error {
-	a.store = storage.NewStore(dir)
-	cfg, err := config.LoadConfig(a.store.DriftDir())
+	newStore := storage.NewStore(dir)
+	cfg, err := config.LoadConfig(newStore.DriftDir())
 	if err != nil {
 		return err
 	}
+	a.store = newStore
 	a.config = cfg
 	autoCRLF := ""
 	if cfg != nil {

@@ -100,7 +100,10 @@ func makeCommit(t *testing.T, store *storage.Store, msg, parent string) (commitH
 		t.Fatal(err)
 	}
 
-	commit := core.NewCommit(msg, parent, "main", tree.Hash, core.Signature{Name: "test", Email: "t@t.com"})
+	commit, err := core.NewCommit(msg, parent, "main", tree.Hash, core.Signature{Name: "test", Email: "t@t.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := store.PutCommit(commit); err != nil {
 		t.Fatal(err)
 	}

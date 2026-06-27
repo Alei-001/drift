@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 
+	"github.com/drift/drift/internal/core"
 	"github.com/fatih/color"
 )
 
@@ -12,7 +13,7 @@ import (
 //   - the NO_COLOR environment variable is set (https://no-color.org/)
 //   - stdout is not a terminal (e.g. piped to a file or another command)
 func useColor() bool {
-	if globalNoColor {
+	if noColor {
 		return false
 	}
 	if _, ok := os.LookupEnv("NO_COLOR"); ok {
@@ -66,4 +67,27 @@ func colorGray(s string) string {
 		return s
 	}
 	return color.New(color.FgHiBlack).Sprint(s)
+}
+
+// colorStatus returns the colored status code: A=green, M=yellow, D=red.
+func colorStatus(s core.StatusCode) string {
+	switch s {
+	case core.Added:
+		return colorGreen(string(s))
+	case core.Modified:
+		return colorYellow(string(s))
+	case core.Deleted:
+		return colorRed(string(s))
+	default:
+		return string(s)
+	}
+}
+
+// shortHash returns the first 8 characters of a hash, or the full string
+// if it is shorter than 8 characters. Prevents index-out-of-range panics.
+func shortHash(hash string) string {
+	if len(hash) > 8 {
+		return hash[:8]
+	}
+	return hash
 }

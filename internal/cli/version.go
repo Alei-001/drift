@@ -15,7 +15,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show drift version",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Printf("drift %s\n", version)
+		fmt.Printf("%s %s\n", colorCyan("drift"), colorGreen(version))
 		return nil
 	},
 }

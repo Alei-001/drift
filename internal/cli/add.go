@@ -20,13 +20,13 @@ func NewAddCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			for _, p := range result.Skipped {
-				fmt.Printf("Skipped (unsupported type): %s\n", p)
+				fmt.Printf("Skipped (unsupported type): %s\n", colorYellow(p))
 			}
 			for _, p := range result.Added {
-				fmt.Printf("Added: %s\n", p)
+				fmt.Printf("Added: %s\n", colorGreen(p))
 			}
 
-			fmt.Printf("Added %d file(s)\n", len(result.Added))
+			fmt.Println(colorGreen(fmt.Sprintf("Added %d file(s)", len(result.Added))))
 			return nil
 		},
 	}

@@ -25,10 +25,10 @@ func NewCloneCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Cloned %s to %s (%d file(s))\n", remoteName, destDir, count)
+			fmt.Println(colorGray(fmt.Sprintf("Cloned %s to %s (%d file(s))", remoteName, destDir, count)))
 			fmt.Println("\nNext steps:")
-			fmt.Println("  cd " + destDir)
-			fmt.Println("  drift history --all   # view history")
+			fmt.Println(colorGray("  cd " + destDir))
+			fmt.Println(colorGray("  drift log --all       # view history"))
 			return nil
 		},
 	}

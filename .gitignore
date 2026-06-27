@@ -48,3 +48,10 @@ docs/refactoring/
 
 # Refactoring archive (old code preserved during transition)
 .wastebasket/
+
+# TRAE competition files
+trae-competition/
+
+# Cross-compile output
+dist/linux/
+dist/darwin/

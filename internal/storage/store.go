@@ -101,12 +101,12 @@ func (s *Store) Init() error {
 }
 
 // lock acquires an OS-level exclusive file lock on .drift/lock.
-// Returns an unlock function and an error. If err is non-nil, the lock was not acquired.
+// Returns an unlock function and an error. On error, unlock is nil.
 func (s *Store) lock() (func(), error) {
 	lockPath := filepath.Join(s.DriftDir(), lockFile)
 	fl, err := acquireFileLock(lockPath)
 	if err != nil {
-		return func() {}, fmt.Errorf("could not acquire lock (another drift process running?): %w", err)
+		return nil, fmt.Errorf("could not acquire lock (another drift process running?): %w", err)
 	}
 	return fl.release, nil
 }
@@ -318,12 +318,12 @@ func (s *Store) GetBlobSize(hash string) (int64, error) {
 	header := make([]byte, compressedHeaderSz)
 	n, err := io.ReadFull(f, header)
 	if err != nil {
-		return 0, ErrCorruptedObject
+		return 0, ErrObjectCorrupted
 	}
 	header = header[:n]
 
 	if n < compressedHeaderSz || string(header[:4]) != compressedMagic {
-		return 0, ErrCorruptedObject
+		return 0, ErrObjectCorrupted
 	}
 
 	return int64(binary.LittleEndian.Uint64(header[5:13])), nil
@@ -490,6 +490,7 @@ func (s *Store) GetTree(hash string) (*core.Tree, error) {
 		return nil, ErrObjectCorrupted
 	}
 
+	t.Hash = hash
 	s.treeCache.Store(hash, t)
 	return t, nil
 }
@@ -699,7 +700,10 @@ func (s *Store) ListRefs() (map[string]string, error) {
 
 		commitHash, err := s.GetRef(refName)
 		if err != nil {
-			return nil
+			if errors.Is(err, ErrObjectNotFound) {
+				return nil
+			}
+			return err
 		}
 		refs[refName] = commitHash
 		return nil
@@ -726,6 +730,18 @@ func (s *Store) DeleteRef(name string) error {
 		return err
 	}
 	defer unlock()
+
+	// If HEAD points at the branch being deleted, clear it so HEAD
+	// doesn't dangle. Read HEAD directly (lock is already held).
+	headPath := filepath.Join(s.DriftDir(), refsDir, "HEAD.ref")
+	if headData, err := os.ReadFile(headPath); err == nil {
+		headRef := strings.TrimSpace(string(headData))
+		if headRef == name || headRef == "ref: "+name {
+			tmp := headPath + ".tmp"
+			_ = os.WriteFile(tmp, []byte("\n"), 0644)
+			_ = os.Rename(tmp, headPath)
+		}
+	}
 
 	path := filepath.Join(s.DriftDir(), refsDir, name+refExt)
 	if err := os.Remove(path); err != nil {

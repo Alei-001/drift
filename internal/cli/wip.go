@@ -32,12 +32,12 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 				}
 
 				if len(branches) == 0 {
-					fmt.Println("No work in progress")
+					fmt.Println(colorGray("No work in progress"))
 					return nil
 				}
 
 				for _, b := range branches {
-					fmt.Println(b)
+					fmt.Println(colorCyan(b))
 				}
 				return nil
 			}
@@ -49,7 +49,7 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if len(entries) == 0 {
-				fmt.Printf("No work in progress for branch %s\n", branch)
+				fmt.Println(colorGray(fmt.Sprintf("No work in progress for branch %s", branch)))
 				return nil
 			}
 
@@ -58,7 +58,7 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 				if len(h) > 8 {
 					h = h[:8]
 				}
-				fmt.Printf("%s %s\n", e.Path, h)
+				fmt.Printf("%s %s\n", e.Path, colorYellow(h))
 			}
 			return nil
 		},
@@ -75,10 +75,10 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 			if count == 0 {
-				fmt.Println("Nothing to save")
+				fmt.Println(colorGray("Nothing to save"))
 				return nil
 			}
-			fmt.Printf("Saved work in progress for branch %s (%d file(s))\n", branch, count)
+			fmt.Println(colorGreen(fmt.Sprintf("Saved work in progress for branch %s (%d file(s))", branch, count)))
 			return nil
 		},
 	}
@@ -99,10 +99,10 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if count == 0 {
-				fmt.Printf("No work in progress for branch %s\n", branch)
+				fmt.Println(colorGray(fmt.Sprintf("No work in progress for branch %s", branch)))
 				return nil
 			}
-			fmt.Printf("Restored %d file(s) from work in progress for branch %s\n", count, branch)
+			fmt.Println(colorGreen(fmt.Sprintf("Restored %d file(s) from work in progress for branch %s", count, branch)))
 			return nil
 		},
 	}
@@ -118,7 +118,7 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if !confirmAction(false, fmt.Sprintf("Drop work in progress for branch %s?", branch), nil) {
-				fmt.Println("Aborted")
+				fmt.Println(colorRed("Aborted"))
 				return nil
 			}
 
@@ -126,7 +126,7 @@ func NewWIPCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Dropped work in progress for branch %s\n", branch)
+			fmt.Println(colorGreen(fmt.Sprintf("Dropped work in progress for branch %s", branch)))
 			return nil
 		},
 	}

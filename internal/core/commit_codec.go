@@ -30,6 +30,9 @@ func (c *Commit) Marshal() ([]byte, error) {
 		return nil, err
 	}
 
+	if len(c.Hash) != 64 {
+		return nil, fmt.Errorf("invalid commit hash length: got %d, want 64", len(c.Hash))
+	}
 	hashBytes, err := hex.DecodeString(c.Hash)
 	if err != nil {
 		return nil, err
@@ -38,6 +41,9 @@ func (c *Commit) Marshal() ([]byte, error) {
 		return nil, err
 	}
 
+	if len(c.TreeHash) != 64 {
+		return nil, fmt.Errorf("invalid tree hash length: got %d, want 64", len(c.TreeHash))
+	}
 	treeHashBytes, err := hex.DecodeString(c.TreeHash)
 	if err != nil {
 		return nil, err

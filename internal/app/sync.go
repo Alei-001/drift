@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/drift/drift/internal/config"
@@ -45,6 +46,9 @@ func (a *App) SyncEnable() error {
 	if !a.IsInitialized() {
 		return fmt.Errorf("not a drift repository")
 	}
+	if a.config == nil {
+		return fmt.Errorf("repository config is not initialized")
+	}
 
 	gcfg, err := config.LoadGlobalConfig()
 	if err != nil {
@@ -72,6 +76,9 @@ func (a *App) SyncEnable() error {
 func (a *App) SyncDisable() error {
 	if !a.IsInitialized() {
 		return fmt.Errorf("not a drift repository")
+	}
+	if a.config == nil {
+		return fmt.Errorf("repository config is not initialized")
 	}
 
 	a.config.Sync.Enabled = false
@@ -142,7 +149,10 @@ func (a *App) Pull(branch string) (*PullStats, error) {
 	if err := a.store.LoadIndex(&idx); err != nil {
 		return nil, err
 	}
-	currentCommit, _ := a.currentCommit()
+	currentCommit, err := a.currentCommit()
+	if err != nil {
+		return nil, fmt.Errorf("get current commit: %w", err)
+	}
 	dirty, err := a.wt.HasModifications(currentCommit, &idx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("check modifications: %w", err)
@@ -451,16 +461,29 @@ func (a *App) Clone(remoteName, destDir string) (int, error) {
 
 	// Restore all files from the commit tree into the working directory.
 	for _, b := range blobs {
-		data, err := destStore.GetBlob(b.Hash)
-		if err != nil {
-			return 0, fmt.Errorf("read blob %s: %w", b.Path, err)
+		if err := core.ValidateTreePath(b.Path); err != nil {
+			return 0, fmt.Errorf("unsafe path from remote %q: %w", b.Path, err)
 		}
 		targetPath := filepath.Join(destDir, filepath.FromSlash(b.Path))
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 			return 0, err
 		}
-		if err := os.WriteFile(targetPath, data, os.FileMode(b.Mode)); err != nil {
-			return 0, err
+		if b.Mode == core.ModeSymlink {
+			data, err := destStore.GetBlob(b.Hash)
+			if err != nil {
+				return 0, fmt.Errorf("read symlink %s: %w", b.Path, err)
+			}
+			if err := os.Symlink(string(data), targetPath); err != nil {
+				return 0, err
+			}
+		} else {
+			data, err := destStore.GetBlob(b.Hash)
+			if err != nil {
+				return 0, fmt.Errorf("read blob %s: %w", b.Path, err)
+			}
+			if err := os.WriteFile(targetPath, data, os.FileMode(core.ToOSFileMode(b.Mode))); err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -489,15 +512,11 @@ func getRefByPrefix(store localStore, prefix string) string {
 		return ""
 	}
 	for name, hash := range refs {
-		if stringHasPrefix(name, prefix) {
+		if strings.HasPrefix(name, prefix) {
 			return hash
 		}
 	}
 	return ""
-}
-
-func stringHasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 // localStore mirrors sync's localStore for compile-time compatibility.

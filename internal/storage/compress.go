@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
-	"errors"
 	"io"
 	"os"
 )
@@ -21,9 +20,9 @@ const (
 	compressedHeaderSz = 4 + 1 + 8 // magic + version + size
 )
 
-// ErrCorruptedObject is returned when an object file cannot be parsed
-// as either compressed or raw format.
-var ErrCorruptedObject = errors.New("corrupted object file")
+// ErrObjectCorrupted is defined in store.go. Decompression failures use
+// the same sentinel so callers can use errors.Is(err, ErrObjectCorrupted)
+// uniformly for both integrity and decompression errors.
 
 // compressBytes compresses data using zlib with the DRZL header.
 func compressBytes(data []byte) ([]byte, error) {
@@ -57,17 +56,17 @@ func compressBytes(data []byte) ([]byte, error) {
 // decompressBytes decompresses data with the DRZL header.
 func decompressBytes(data []byte) ([]byte, error) {
 	if len(data) < compressedHeaderSz {
-		return nil, ErrCorruptedObject
+		return nil, ErrObjectCorrupted
 	}
 
 	if string(data[:4]) != compressedMagic {
-		return nil, ErrCorruptedObject
+		return nil, ErrObjectCorrupted
 	}
 
 	// Parse header.
 	version := data[4]
 	if version != compressedVersion {
-		return nil, ErrCorruptedObject
+		return nil, ErrObjectCorrupted
 	}
 
 	origSize := binary.LittleEndian.Uint64(data[5:13])
@@ -134,16 +133,16 @@ func streamingDecompressReader(r io.Reader) (io.ReadCloser, error) {
 	header := make([]byte, compressedHeaderSz)
 	n, err := io.ReadFull(r, header)
 	if err != nil {
-		return nil, ErrCorruptedObject
+		return nil, ErrObjectCorrupted
 	}
 	if n < compressedHeaderSz || string(header[:4]) != compressedMagic {
-		return nil, ErrCorruptedObject
+		return nil, ErrObjectCorrupted
 	}
 
 	// Parse compressed header.
 	version := header[4]
 	if version != compressedVersion {
-		return nil, ErrCorruptedObject
+		return nil, ErrObjectCorrupted
 	}
 
 	zr, err := zlib.NewReader(r)

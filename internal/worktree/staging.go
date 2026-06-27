@@ -91,7 +91,7 @@ func (w *Worktree) StageWorktreeChanges(idx *core.Index) error {
 		return fmt.Errorf("failed to load parent tree hashes: %w", err)
 	}
 
-	return core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
+	if err := core.WalkWorkingDir(w.Root, func(path string, info os.FileInfo) error {
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
 
 		mode, err := core.NormalizeModeForPath(info.Mode(), path)
@@ -131,7 +131,23 @@ func (w *Worktree) StageWorktreeChanges(idx *core.Index) error {
 			Mode:       mode,
 		}
 		return idx.Add(entry)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Remove index entries for files deleted from the worktree.
+	var deleted []string
+	for _, entry := range idx.Entries {
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(entry.Path))
+		if _, err := os.Lstat(fullPath); os.IsNotExist(err) {
+			deleted = append(deleted, entry.Path)
+		}
+	}
+	for _, path := range deleted {
+		idx.Remove(path)
+	}
+
+	return nil
 }
 
 // PutBlobForAdd stores a blob from a file, applying LF normalization when
@@ -302,6 +318,9 @@ func ExpandAddPaths(rootDir string, args []string) ([]string, error) {
 					return nil, fmt.Errorf("cannot resolve relative path %q: %w", m, err)
 				}
 				rel = filepath.ToSlash(rel)
+				if err := core.ValidateTreePath(rel); err != nil {
+					return nil, fmt.Errorf("unsafe path %q: %w", m, err)
+				}
 				if !seen[rel] {
 					seen[rel] = true
 					result = append(result, rel)
@@ -320,6 +339,9 @@ func ExpandAddPaths(rootDir string, args []string) ([]string, error) {
 				return nil, fmt.Errorf("cannot resolve relative path %q: %w", arg, err)
 			}
 			rel = filepath.ToSlash(rel)
+			if err := core.ValidateTreePath(rel); err != nil {
+				return nil, fmt.Errorf("unsafe path %q: %w", arg, err)
+			}
 			if !seen[rel] {
 				seen[rel] = true
 				result = append(result, rel)

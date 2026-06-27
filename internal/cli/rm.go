@@ -34,13 +34,13 @@ func NewRmCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if len(toRemove) == 0 {
-				fmt.Println("No files to remove")
+				fmt.Println(colorGray("No files to remove"))
 				return nil
 			}
 
 			// Global --dry-run: print what would be removed and exit.
 			if globalDryRun {
-				fmt.Printf("Would remove %d file(s):\n", len(toRemove))
+				fmt.Println(colorYellow(fmt.Sprintf("Would remove %d file(s):", len(toRemove))))
 				for _, p := range toRemove {
 					fmt.Printf("  %s\n", p)
 				}
@@ -51,7 +51,7 @@ func NewRmCmd(application *apppkg.App) *cobra.Command {
 			// --cached only modifies the index, so no confirmation is needed
 			if !cached {
 				if !confirmAction(force, fmt.Sprintf("Delete %d file(s)?", len(toRemove)), toRemove) {
-					fmt.Println("Aborted")
+					fmt.Println(colorRed("Aborted"))
 					return nil
 				}
 			}
@@ -67,7 +67,7 @@ func NewRmCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			for _, p := range removed {
-				fmt.Printf("Removed: %s\n", p)
+				fmt.Printf("Removed: %s\n", colorGreen(p))
 			}
 
 			return nil

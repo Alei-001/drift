@@ -29,7 +29,7 @@ func NewMvCmd(application *apppkg.App) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Would move %d file(s):\n", len(moved))
+				fmt.Println(colorYellow(fmt.Sprintf("Would move %d file(s):", len(moved))))
 				for _, p := range moved {
 					fmt.Printf("  %s\n", p)
 				}
@@ -44,9 +44,9 @@ func NewMvCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			for _, p := range moved {
-				fmt.Printf("Moved: %s\n", p)
+				fmt.Printf("Moved: %s\n", colorGreen(p))
 			}
-			fmt.Printf("Moved %d file(s)\n", len(moved))
+			fmt.Println(colorGreen(fmt.Sprintf("Moved %d file(s)", len(moved))))
 			return nil
 		},
 	}

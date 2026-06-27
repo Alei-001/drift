@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/drift/drift/internal/core"
+	"github.com/drift/drift/internal/storage"
 	"github.com/drift/drift/internal/worktree"
 )
 
@@ -77,8 +78,10 @@ func (a *App) Switch(branch string, opts SwitchOptions) (*SwitchResult, error) {
 		if !opts.Create {
 			return nil, fmt.Errorf("branch not found: %s", branch)
 		}
-		// Best-effort: parent hash for new branch creation.
-		parentHash, _ := a.store.GetRef(currentBranch)
+		parentHash, err := a.store.GetRef(currentBranch)
+		if err != nil && !errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, fmt.Errorf("failed to read current branch %q: %w", currentBranch, err)
+		}
 		if err := a.store.SaveRef(branch, parentHash); err != nil {
 			return nil, fmt.Errorf("failed to create branch: %w", err)
 		}

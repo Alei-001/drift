@@ -242,14 +242,23 @@ func (w *Worktree) HasModifications(commit *core.Commit, idx *core.Index, filter
 			continue
 		}
 
-		// Fast path: size comparison.
-		blobSize, sizeErr := w.Store.GetBlobSize(expectedHash)
-		if sizeErr == nil && info.Size() != blobSize {
-			return true, nil
+		// Fast path: size comparison. Skip when autocrlf may cause
+		// size mismatch between LF blob and CRLF worktree file.
+		if !(runtime.GOOS == "windows" && w.AutoCRLF == "true") {
+			blobSize, sizeErr := w.Store.GetBlobSize(expectedHash)
+			if sizeErr == nil && info.Size() != blobSize {
+				return true, nil
+			}
 		}
 
-		fileHash, err := core.CalculateHashFromFile(fullPath)
-		if err != nil {
+		var fileHash string
+		var hashErr error
+		if runtime.GOOS == "windows" && w.AutoCRLF == "true" {
+			fileHash, hashErr = core.CalculateHashFromFileLF(fullPath)
+		} else {
+			fileHash, hashErr = core.CalculateHashFromFile(fullPath)
+		}
+		if hashErr != nil {
 			continue
 		}
 		if fileHash != expectedHash {
@@ -286,6 +295,9 @@ func (w *Worktree) LoadParentTreeBlobs() ([]core.BlobEntry, error) {
 			return nil, err
 		}
 		branch = "main"
+	}
+	if branch == "" {
+		return nil, nil
 	}
 	commitHash, err := w.Store.GetRef(branch)
 	if err != nil {

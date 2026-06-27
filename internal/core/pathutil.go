@@ -86,7 +86,7 @@ func ValidateTreePath(p string) error {
 		if IsDotGitName(part) || IsHFSDotGit(part) || IsNTFSDotGit(part) {
 			return fmt.Errorf("%w component: %q (metadata disguise)", ErrInvalidPath, p)
 		}
-		if isDriftMetaName(part) {
+		if isDriftMetaName(part) || IsHFSDot(part, "drift") || IsNTFSDotDrift(part) {
 			return fmt.Errorf("%w component: %q (drift metadata)", ErrInvalidPath, p)
 		}
 	}
@@ -188,6 +188,43 @@ func IsNTFSDotGit(part string) bool {
 		asciiToLower(part[2]) == 't' &&
 		part[3] == '~' && part[4] == '1':
 		i = 5
+	default:
+		return false
+	}
+
+	for ; i < len(part); i++ {
+		c := part[i]
+		if c == ':' {
+			return true
+		}
+		if c != '.' && c != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+// IsNTFSDotDrift detects path components that NTFS would resolve to ".drift":
+// the canonical name itself and its 8.3 short-name alias "drift~1", each
+// followed by any number of trailing spaces or periods and an optional ADS suffix.
+func IsNTFSDotDrift(part string) bool {
+	var i int
+	switch {
+	case len(part) >= 6 && part[0] == '.' &&
+		asciiToLower(part[1]) == 'd' &&
+		asciiToLower(part[2]) == 'r' &&
+		asciiToLower(part[3]) == 'i' &&
+		asciiToLower(part[4]) == 'f' &&
+		asciiToLower(part[5]) == 't':
+		i = 6
+	case len(part) >= 7 &&
+		asciiToLower(part[0]) == 'd' &&
+		asciiToLower(part[1]) == 'r' &&
+		asciiToLower(part[2]) == 'i' &&
+		asciiToLower(part[3]) == 'f' &&
+		asciiToLower(part[4]) == 't' &&
+		part[5] == '~' && part[6] == '1':
+		i = 7
 	default:
 		return false
 	}

@@ -30,18 +30,18 @@ func NewSwitchCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if result.AlreadyOnBranch {
-				fmt.Printf("Already on branch %s\n", result.Branch)
+				fmt.Println(colorGray(fmt.Sprintf("Already on branch %s", result.Branch)))
 				return nil
 			}
 
 			if result.WIPSaved {
-				fmt.Println("Saved work in progress")
+				fmt.Println(colorYellow("Saved work in progress"))
 			}
 
 			if result.Created {
-				fmt.Printf("Created and switched to branch %s\n", result.Branch)
+				fmt.Printf("Created and switched to branch %s\n", colorGreen(result.Branch))
 			} else {
-				fmt.Printf("Switched to branch %s\n", result.Branch)
+				fmt.Printf("Switched to branch %s\n", colorGreen(result.Branch))
 			}
 
 			return nil

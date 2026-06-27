@@ -51,14 +51,14 @@ func NewStatusCmd(application *apppkg.App) *cobra.Command {
 func printStatus(s core.Status, branch, version, tag string) {
 	if branch != "" && version != "" {
 		if tag != "" {
-			fmt.Printf("On branch %s, version %s (%s)\n\n", branch, version, tag)
+			fmt.Printf("On branch %s, version %s (%s)\n\n", colorCyan(branch), colorGreen(version), colorYellow(tag))
 		} else {
-			fmt.Printf("On branch %s, version %s\n\n", branch, version)
+			fmt.Printf("On branch %s, version %s\n\n", colorCyan(branch), colorGreen(version))
 		}
 	}
 
 	if s.IsClean() {
-		fmt.Println("Nothing to commit, working tree clean")
+		fmt.Println(colorGreen("Nothing to commit, working tree clean"))
 		return
 	}
 
@@ -74,18 +74,18 @@ func printStatus(s core.Status, branch, version, tag string) {
 	for _, path := range paths {
 		fs := s[path]
 		if fs.Staging != core.Unmodified && fs.Staging != core.Untracked {
-			staged = append(staged, fmt.Sprintf("  %s %s", fs.Staging, path))
+			staged = append(staged, fmt.Sprintf("  %s %s", colorStatus(fs.Staging), path))
 		}
 		if fs.Worktree != core.Unmodified && fs.Worktree != core.Untracked {
-			unstaged = append(unstaged, fmt.Sprintf("  %s %s", fs.Worktree, path))
+			unstaged = append(unstaged, fmt.Sprintf("  %s %s", colorStatus(fs.Worktree), path))
 		}
 		if fs.Worktree == core.Untracked {
-			untracked = append(untracked, "  "+path)
+			untracked = append(untracked, "  "+colorGray(path))
 		}
 	}
 
 	if len(staged) > 0 {
-		fmt.Println("Staged changes:")
+		fmt.Println(colorCyan("Staged changes:"))
 		for _, line := range staged {
 			fmt.Println(line)
 		}
@@ -93,7 +93,7 @@ func printStatus(s core.Status, branch, version, tag string) {
 	}
 
 	if len(unstaged) > 0 {
-		fmt.Println("Unstaged changes:")
+		fmt.Println(colorCyan("Unstaged changes:"))
 		for _, line := range unstaged {
 			fmt.Println(line)
 		}
@@ -101,7 +101,7 @@ func printStatus(s core.Status, branch, version, tag string) {
 	}
 
 	if len(untracked) > 0 {
-		fmt.Println("Untracked files:")
+		fmt.Println(colorCyan("Untracked files:"))
 		for _, line := range untracked {
 			fmt.Println(line)
 		}

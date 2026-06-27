@@ -22,7 +22,7 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 				if err := application.TagDelete(deleteTag); err != nil {
 					return err
 				}
-				fmt.Printf("Deleted tag %s\n", deleteTag)
+				fmt.Printf("Deleted tag %s\n", colorGreen(deleteTag))
 				return nil
 			}
 
@@ -34,15 +34,15 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 				}
 
 				if len(entries) == 0 {
-					fmt.Println("No tags defined")
+					fmt.Println(colorGray("No tags defined"))
 					return nil
 				}
 
 				for _, e := range entries {
 					if e.ID != "" {
-						fmt.Printf("%-20s %s %s\n", e.Label, e.ID, e.Message)
+						fmt.Printf("%-20s %s %s\n", colorGreen(e.Label), colorYellow(e.ID), e.Message)
 					} else {
-						fmt.Printf("%-20s %s\n", e.Label, e.Hash[:8])
+						fmt.Printf("%-20s %s\n", colorGreen(e.Label), colorYellow(shortHash(e.Hash)))
 					}
 				}
 				return nil
@@ -55,7 +55,7 @@ func NewTagCmd(application *apppkg.App) *cobra.Command {
 				if err := application.TagAdd(version, label); err != nil {
 					return err
 				}
-				fmt.Printf("Tagged %s as '%s'\n", version, label)
+				fmt.Printf("Tagged %s as '%s'\n", version, colorGreen(label))
 				return nil
 			}
 

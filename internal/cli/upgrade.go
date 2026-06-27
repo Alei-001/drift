@@ -61,21 +61,21 @@ func runUpgrade(targetVer string, checkOnly bool) error {
 	relVer := strings.TrimPrefix(rel.TagName, "v")
 
 	if relVer == version {
-		fmt.Printf("already at %s\n", rel.TagName)
+		fmt.Println(colorGreen(fmt.Sprintf("already at %s", rel.TagName)))
 		return nil
 	}
 
 	if checkOnly {
 		if !versionLess(version, relVer) {
-			fmt.Printf("%s → %s (downgrade)\n", version, rel.TagName)
+			fmt.Printf("%s → %s (downgrade)\n", colorYellow(version), colorYellow(rel.TagName))
 		} else {
-			fmt.Printf("%s → %s\n", version, rel.TagName)
+			fmt.Printf("%s → %s\n", colorGreen(version), colorGreen(rel.TagName))
 		}
 		return nil
 	}
 
 	if !versionLess(version, relVer) {
-		fmt.Printf("warning: %s is newer than %s, downgrading\n", version, relVer)
+		fmt.Printf("%s: %s is newer than %s, downgrading\n", colorYellow("warning"), version, relVer)
 	}
 
 	assetURL := findAsset(rel.Assets)
@@ -103,7 +103,7 @@ func runUpgrade(targetVer string, checkOnly bool) error {
 		return err
 	}
 
-	fmt.Printf("upgraded to %s — restart drift\n", rel.TagName)
+	fmt.Println(colorGreen(fmt.Sprintf("upgraded to %s — restart drift", rel.TagName)))
 	return nil
 }
 
@@ -211,18 +211,18 @@ type progressReader struct {
 func (pr *progressReader) Read(p []byte) (int, error) {
 	n, err := pr.reader.Read(p)
 	pr.current += int64(n)
-	if pr.total > 0 {
-		pct := int(pr.current * 100 / pr.total)
-		if pct != pr.lastPct {
-			fmt.Printf("\r  downloading %s  %d%% (%s / %s)    ", pr.label, pct, formatSize(pr.current), formatSize(pr.total))
-			pr.lastPct = pct
+		if pr.total > 0 {
+			pct := int(pr.current * 100 / pr.total)
+			if pct != pr.lastPct {
+				fmt.Printf("\r  %s  %d%% (%s / %s)    ", colorCyan("downloading "+pr.label), pct, formatSize(pr.current), formatSize(pr.total))
+				pr.lastPct = pct
+			}
+		} else {
+			if pr.lastPct == 0 {
+				fmt.Printf("\r  %s... ", colorCyan("downloading "+pr.label))
+				pr.lastPct = -1
+			}
 		}
-	} else {
-		if pr.lastPct == 0 {
-			fmt.Printf("\r  downloading %s... ", pr.label)
-			pr.lastPct = -1
-		}
-	}
 	return n, err
 }
 

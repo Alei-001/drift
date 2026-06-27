@@ -22,11 +22,11 @@ func NewUndoCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			undone := number - result.RemainingCount
-			fmt.Printf("Undid %d operation(s)\n", undone)
-			fmt.Printf("  %s: %s\n", result.Entry.Op, result.Entry.Desc)
+			fmt.Println(colorGreen(fmt.Sprintf("Undid %d operation(s)", undone)))
+			fmt.Printf("  %s: %s\n", colorYellow(string(result.Entry.Op)), result.Entry.Desc)
 
 			if result.Warning != "" {
-				fmt.Fprintf(os.Stderr, "Warning: %s\n", result.Warning)
+				fmt.Fprintf(os.Stderr, "%s: %s\n", colorYellow("Warning"), result.Warning)
 			}
 
 			return nil

@@ -26,7 +26,11 @@ func NormalizePathFilters(rootDir string, args []string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cannot resolve relative path %q: %w", f, err)
 		}
-		filters = append(filters, strings.TrimSuffix(filepath.ToSlash(rel), "/"))
+		rel = filepath.ToSlash(rel)
+		if err := core.ValidateTreePath(rel); err != nil {
+			return nil, fmt.Errorf("unsafe path %q: %w", f, err)
+		}
+		filters = append(filters, strings.TrimSuffix(rel, "/"))
 	}
 	return filters, nil
 }

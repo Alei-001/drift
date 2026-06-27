@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -49,7 +50,10 @@ func confirmAction(force bool, prompt string, files []string) bool {
 
 	fmt.Printf("%s [y/N]: ", prompt)
 	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
+	line, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false
+	}
 	answer := strings.TrimSpace(strings.ToLower(line))
 	return answer == "y" || answer == "yes"
 }

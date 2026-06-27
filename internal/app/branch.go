@@ -69,7 +69,9 @@ func (a *App) BranchCreate(name string) error {
 	currentBranch := a.CurrentBranch()
 	commitHash, err := a.store.GetRef(currentBranch)
 	if err != nil {
-		commitHash = ""
+		if !errors.Is(err, storage.ErrObjectNotFound) {
+			return fmt.Errorf("failed to read current branch %q: %w", currentBranch, err)
+		}
 	}
 
 	if err := a.store.SaveRef(name, commitHash); err != nil {

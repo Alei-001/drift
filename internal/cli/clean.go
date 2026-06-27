@@ -19,6 +19,11 @@ func NewCleanCmd(application *apppkg.App) *cobra.Command {
 		Use:   "clean",
 		Short: "Remove untracked files from the working tree",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check the persistent --dry-run flag as well as the local one.
+			if globalDryRun, _ := cmd.Flags().GetBool("dry-run"); globalDryRun {
+				dryRun = true
+			}
+
 			// First, get list of files that would be cleaned (dry run)
 			cleaned, err := application.Clean(apppkg.CleanOptions{
 				Dirs:   dirs,
@@ -29,13 +34,13 @@ func NewCleanCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if len(cleaned) == 0 {
-				fmt.Println("Nothing to clean")
+				fmt.Println(colorGray("Nothing to clean"))
 				return nil
 			}
 
 			// Show what would be cleaned
 			if dryRun {
-				fmt.Printf("Would clean %d file(s):\n", len(cleaned))
+				fmt.Println(colorYellow(fmt.Sprintf("Would clean %d file(s):", len(cleaned))))
 				for _, f := range cleaned {
 					fmt.Printf("  %s\n", f)
 				}
@@ -44,7 +49,7 @@ func NewCleanCmd(application *apppkg.App) *cobra.Command {
 
 			// Confirm before cleaning
 			if !confirmAction(force, fmt.Sprintf("Clean %d file(s)?", len(cleaned)), cleaned) {
-				fmt.Println("Aborted")
+				fmt.Println(colorRed("Aborted"))
 				return nil
 			}
 
@@ -57,7 +62,7 @@ func NewCleanCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Cleaned %d file(s)\n", len(cleaned))
+			fmt.Println(colorGreen(fmt.Sprintf("Cleaned %d file(s)", len(cleaned))))
 			return nil
 		},
 	}

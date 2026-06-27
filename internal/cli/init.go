@@ -20,7 +20,7 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 		Short: "Initialize a Drift project",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if application.IsInitialized() {
-				fmt.Println("Drift project already exists")
+				fmt.Println(colorYellow("Drift project already exists"))
 				return nil
 			}
 
@@ -28,16 +28,16 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 				return fmt.Errorf("init failed: %w", err)
 			}
 
-			fmt.Println("Drift project initialized")
+			fmt.Println(colorGreen("Drift project initialized"))
 
 			// Load existing global user info as defaults for the prompt.
 			defaultName, err := application.ConfigGet(apppkg.GlobalScope, "user.name")
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not read global config: %v\n", err)
+				fmt.Fprintf(os.Stderr, "%s: could not read global config: %v\n", colorYellow("Warning"), err)
 			}
 			defaultEmail, err := application.ConfigGet(apppkg.GlobalScope, "user.email")
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not read global config: %v\n", err)
+				fmt.Fprintf(os.Stderr, "%s: could not read global config: %v\n", colorYellow("Warning"), err)
 			}
 
 			if defaultName != "" && defaultEmail != "" {
@@ -47,23 +47,23 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 
 				if name != "" {
 					if err := application.ConfigSet(apppkg.GlobalScope, "user.name", name); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+						fmt.Fprintf(os.Stderr, "%s: failed to save global config: %v\n", colorYellow("Warning"), err)
 					}
 				}
 				if email != "" {
 					if err := application.ConfigSet(apppkg.GlobalScope, "user.email", email); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to save global config: %v\n", err)
+						fmt.Fprintf(os.Stderr, "%s: failed to save global config: %v\n", colorYellow("Warning"), err)
 					}
 				}
 				if name != "" || email != "" {
-					fmt.Println("Saved your name and email globally for all projects.")
+					fmt.Println(colorGreen("Saved your name and email globally for all projects."))
 				}
 			}
 
 			fmt.Println("\nNext steps:")
-			fmt.Println("  drift add .       # stage your files")
-			fmt.Println("  drift save -m \"first version\"")
-			fmt.Println("  drift history --all   # view history")
+			fmt.Println(colorGray("  drift add .       # stage your files"))
+			fmt.Println(colorGray("  drift save -m \"first version\""))
+			fmt.Println(colorGray("  drift log --all       # view history"))
 			return nil
 		},
 	}
@@ -105,7 +105,7 @@ func promptUserInfoNew(defaultName, defaultEmail string) (name, email string) {
 
 	if input != "" {
 		for !emailRegex.MatchString(input) {
-			fmt.Println("Invalid email format, please try again.")
+			fmt.Println(colorRed("Invalid email format, please try again."))
 			if defaultEmail != "" {
 				fmt.Printf("Your email [%s]: ", defaultEmail)
 			} else {

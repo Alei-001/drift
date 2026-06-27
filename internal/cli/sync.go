@@ -26,7 +26,7 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Push complete: %d new object(s) pushed to %s\n", stats.Pushed, stats.Branch)
+			fmt.Println(colorGreen(fmt.Sprintf("Push complete: %d new object(s) pushed to %s", stats.Pushed, stats.Branch)))
 			return nil
 		},
 	}
@@ -44,9 +44,9 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 			if stats.Pulled == 0 {
-				fmt.Println("Already up to date.")
+				fmt.Println(colorGray("Already up to date."))
 			} else {
-				fmt.Printf("Pull complete: %d new object(s) pulled from %s\n", stats.Pulled, stats.Branch)
+				fmt.Println(colorGreen(fmt.Sprintf("Pull complete: %d new object(s) pulled from %s", stats.Pulled, stats.Branch)))
 			}
 			return nil
 		},
@@ -61,9 +61,9 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 				return err
 			}
 			if stats.Pushed == 0 && stats.Pulled == 0 {
-				fmt.Println("Already up to date.")
+				fmt.Println(colorGray("Already up to date."))
 			} else {
-				fmt.Printf("Sync complete: %d pushed, %d pulled\n", stats.Pushed, stats.Pulled)
+				fmt.Println(colorGreen(fmt.Sprintf("Sync complete: %d pushed, %d pulled", stats.Pushed, stats.Pulled)))
 			}
 			return nil
 		},
@@ -103,9 +103,9 @@ func NewSyncCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if status.Enabled {
-				fmt.Println("Sync is enabled")
+				fmt.Println(colorGreen("Sync is enabled"))
 			} else {
-				fmt.Println("Sync is disabled")
+				fmt.Println(colorYellow("Sync is disabled"))
 			}
 
 			if status.RemoteName != "" {

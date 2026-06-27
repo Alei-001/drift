@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/drift/drift/internal/core"
 )
@@ -56,6 +57,14 @@ func trackingRef(branch string) string {
 	return "remotes/origin/" + branch
 }
 
+// shortHash returns the first 8 chars of a hash, or the full string if shorter.
+func shortHash(hash string) string {
+	if len(hash) > 8 {
+		return hash[:8]
+	}
+	return hash
+}
+
 // Push uploads objects reachable from the local branch that the remote does
 // not yet have, then updates the remote ref.
 //
@@ -71,7 +80,12 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 		return nil, fmt.Errorf("branch %s has no commits", branch)
 	}
 
-	trackingHash, _ := e.store.GetRef(trackingRef(refName))
+	trackingHash, err := e.store.GetRef(trackingRef(refName))
+	if err != nil {
+		if !strings.Contains(err.Error(), "not found") {
+			return nil, fmt.Errorf("read tracking ref: %w", err)
+		}
+	}
 
 	remoteHash, err := e.transport.GetRef(refName)
 	if err != nil {
@@ -82,7 +96,7 @@ func (e *Engine) Push(branch string) (*PushResult, error) {
 			"remote branch %s has diverged (someone else pushed since your last sync)\n"+
 				"  local tracking: %s\n  remote:         %s\n"+
 				"  Run 'drift pull %s' first",
-			branch, trackingHash[:8], remoteHash[:8], branch)
+			branch, shortHash(trackingHash), shortHash(remoteHash), branch)
 	}
 
 	// Collect objects reachable from localHash but not from trackingHash.
@@ -139,7 +153,12 @@ func (e *Engine) Fetch(branch string) (*FetchResult, error) {
 		return nil, fmt.Errorf("branch %s not found on remote", branch)
 	}
 
-	trackingHash, _ := e.store.GetRef(trackingRef(refName))
+	trackingHash, err := e.store.GetRef(trackingRef(refName))
+	if err != nil {
+		if !strings.Contains(err.Error(), "not found") {
+			return nil, fmt.Errorf("read tracking ref: %w", err)
+		}
+	}
 	if remoteHash == trackingHash {
 		return &FetchResult{Branch: branch, Fetched: 0}, nil
 	}
@@ -170,7 +189,10 @@ func (e *Engine) Pull(branch string) (*PullResult, error) {
 		return &PullResult{Branch: branch, Pulled: 0}, nil
 	}
 
-	remoteHash, _ := e.transport.GetRef(refName)
+	remoteHash, err := e.transport.GetRef(refName)
+	if err != nil {
+		return nil, fmt.Errorf("verify remote ref after fetch: %w", err)
+	}
 	if err := e.store.SaveRef(branch, remoteHash); err != nil {
 		return nil, fmt.Errorf("update local ref %s: %w", branch, err)
 	}
@@ -219,20 +241,20 @@ func (e *Engine) fetchChain(startHash, stopHash string) (int, error) {
 		// Download the commit if not present.
 		if !e.store.HasObject(hash) {
 			if err := e.saveRemoteObject(hash, "commit"); err != nil {
-				return fetched, fmt.Errorf("download commit %s: %w", hash[:8], err)
+				return fetched, fmt.Errorf("download commit %s: %w", shortHash(hash), err)
 			}
 			fetched++
 		}
 
 		c, err := e.store.GetCommit(hash)
 		if err != nil {
-			return fetched, fmt.Errorf("get commit %s: %w", hash[:8], err)
+			return fetched, fmt.Errorf("get commit %s: %w", shortHash(hash), err)
 		}
 
 		// Download the tree if not present.
 		if !e.store.HasObject(c.TreeHash) {
 			if err := e.saveRemoteObject(c.TreeHash, "tree"); err != nil {
-				return fetched, fmt.Errorf("download tree %s: %w", c.TreeHash[:8], err)
+				return fetched, fmt.Errorf("download tree %s: %w", shortHash(c.TreeHash), err)
 			}
 			fetched++
 		}
@@ -240,7 +262,7 @@ func (e *Engine) fetchChain(startHash, stopHash string) (int, error) {
 		// Walk the tree and download all blobs and subtrees.
 		tree, err := e.store.GetTree(c.TreeHash)
 		if err != nil {
-			return fetched, fmt.Errorf("get tree %s: %w", c.TreeHash[:8], err)
+			return fetched, fmt.Errorf("get tree %s: %w", shortHash(c.TreeHash), err)
 		}
 		n, err := e.fetchTree(tree)
 		if err != nil {
@@ -262,20 +284,20 @@ func (e *Engine) fetchTree(tree *core.Tree) (int, error) {
 		case core.BlobObject:
 			if !e.store.HasObject(entry.Hash) {
 				if err := e.saveRemoteObject(entry.Hash, "blob"); err != nil {
-					return fetched, fmt.Errorf("download blob %s: %w", entry.Hash[:8], err)
+					return fetched, fmt.Errorf("download blob %s: %w", shortHash(entry.Hash), err)
 				}
 				fetched++
 			}
 		case core.TreeObject:
 			if !e.store.HasObject(entry.Hash) {
 				if err := e.saveRemoteObject(entry.Hash, "tree"); err != nil {
-					return fetched, fmt.Errorf("download tree %s: %w", entry.Hash[:8], err)
+					return fetched, fmt.Errorf("download tree %s: %w", shortHash(entry.Hash), err)
 				}
 				fetched++
 			}
 			subTree, err := e.store.GetTree(entry.Hash)
 			if err != nil {
-				return fetched, fmt.Errorf("get subtree %s: %w", entry.Hash[:8], err)
+				return fetched, fmt.Errorf("get subtree %s: %w", shortHash(entry.Hash), err)
 			}
 			n, err := e.fetchTree(subTree)
 			if err != nil {

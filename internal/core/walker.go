@@ -16,8 +16,14 @@ func WalkWorkingDir(root string, fn WalkFunc) error {
 // This allows adding a subdirectory while still respecting the project-root .driftignore.
 func WalkWorkingDirWithIgnore(walkRoot, ignoreRoot string, fn WalkFunc) error {
 	ignore := LoadDriftIgnore(ignoreRoot)
-	walkAbs, _ := filepath.Abs(walkRoot)
-	ignoreAbs, _ := filepath.Abs(ignoreRoot)
+	walkAbs, err := filepath.Abs(walkRoot)
+	if err != nil {
+		return err
+	}
+	ignoreAbs, err := filepath.Abs(ignoreRoot)
+	if err != nil {
+		return err
+	}
 
 	return filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

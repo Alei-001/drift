@@ -17,7 +17,6 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 		globalVerbose  bool
 		globalQuiet    bool
 		globalDryRun   bool
-		globalNoColor  bool
 	)
 
 	root := &cobra.Command{
@@ -78,7 +77,7 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	root.PersistentFlags().BoolVarP(&globalVerbose, "verbose", "v", false, "Verbose output")
 	root.PersistentFlags().BoolVarP(&globalQuiet, "quiet", "q", false, "Quiet output (errors only)")
 	root.PersistentFlags().BoolVar(&globalDryRun, "dry-run", false, "Preview without executing")
-	root.PersistentFlags().BoolVar(&globalNoColor, "no-color", false, "Disable color output")
+	root.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable color output")
 
 	// Register version command (reuses old versionCmd variable from version.go)
 	root.AddCommand(versionCmd)

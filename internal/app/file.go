@@ -215,8 +215,14 @@ func (a *App) Move(sources []string, dest string, opts MoveOptions) ([]string, e
 
 	var planned []plannedMove
 	for _, src := range sources {
-		absSrc, _ := filepath.Abs(src)
-		srcRel, _ := filepath.Rel(a.dir, absSrc)
+		absSrc, err := filepath.Abs(src)
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve source %q: %w", src, err)
+		}
+		srcRel, err := filepath.Rel(a.dir, absSrc)
+		if err != nil {
+			return nil, fmt.Errorf("cannot make %q relative to worktree: %w", src, err)
+		}
 		srcRel = filepath.ToSlash(srcRel)
 		if !tracked[srcRel] {
 			return nil, fmt.Errorf("source '%s' is not tracked (use 'drift add' first)", srcRel)

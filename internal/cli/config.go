@@ -34,7 +34,7 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 				if err := application.ConfigUnset(scope, unset); err != nil {
 					return err
 				}
-				fmt.Printf("Unset %s\n", unset)
+				fmt.Printf("Unset %s\n", colorYellow(unset))
 				return nil
 			}
 
@@ -55,7 +55,7 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 				if err := application.ConfigSet(scope, key, value); err != nil {
 					return err
 				}
-				fmt.Printf("Set %s = %s\n", key, value)
+				fmt.Printf("Set %s = %s\n", colorYellow(key), value)
 				return nil
 			}
 
@@ -112,7 +112,7 @@ func NewConfigCmd(application *apppkg.App) *cobra.Command {
 				if err := application.SyncRemoteUnset(); err != nil {
 					return err
 				}
-				fmt.Println("Remote configuration removed")
+				fmt.Println(colorGreen("Remote configuration removed"))
 				return nil
 			}
 
@@ -157,10 +157,10 @@ func formatConfigList(entries []apppkg.ConfigEntry) {
 				keyWidth = len(name)
 			}
 		}
-		fmt.Printf("[%s]\n", sec)
+		fmt.Printf("[%s]\n", colorCyan(sec))
 		for _, e := range group {
 			_, name, _ := strings.Cut(e.Key, ".")
-			fmt.Printf("  %-*s = %s\n", keyWidth, name, e.Value)
+			fmt.Printf("  %-*s = %s\n", keyWidth, colorYellow(name), e.Value)
 		}
 	}
 }

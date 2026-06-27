@@ -24,7 +24,7 @@ func NewBranchCmd(application *apppkg.App) *cobra.Command {
 				if err := application.BranchDelete(deleteBranch); err != nil {
 					return err
 				}
-				fmt.Printf("Deleted branch %s\n", deleteBranch)
+				fmt.Printf("Deleted branch %s\n", colorCyan(deleteBranch))
 				return nil
 			}
 
@@ -37,7 +37,7 @@ func NewBranchCmd(application *apppkg.App) *cobra.Command {
 				if err := application.BranchRename(moveBranch, newName); err != nil {
 					return err
 				}
-				fmt.Printf("Renamed branch %s to %s\n", moveBranch, newName)
+				fmt.Printf("Renamed branch %s to %s\n", colorCyan(moveBranch), colorCyan(newName))
 				return nil
 			}
 
@@ -51,7 +51,7 @@ func NewBranchCmd(application *apppkg.App) *cobra.Command {
 				currentBranch := application.CurrentBranch()
 				for _, b := range branches {
 					if b == currentBranch {
-						fmt.Printf("* %s\n", b)
+						fmt.Printf("* %s\n", colorGreen(b))
 					} else {
 						fmt.Printf("  %s\n", b)
 					}
@@ -65,7 +65,7 @@ func NewBranchCmd(application *apppkg.App) *cobra.Command {
 			if err := application.BranchCreate(name); err != nil {
 				return err
 			}
-			fmt.Printf("Created branch %s\n", name)
+			fmt.Printf("Created branch %s\n", colorGreen(name))
 			return nil
 		},
 	}

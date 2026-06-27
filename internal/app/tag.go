@@ -1,9 +1,12 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/drift/drift/internal/storage"
 )
 
 type TagEntry struct {
@@ -53,7 +56,11 @@ func (a *App) TagAdd(version, label string) error {
 	refName := "tags/" + label
 
 	// Refuse to overwrite an existing tag (mirrors git tag behavior).
-	if existing, err := a.store.GetRef(refName); err == nil && existing != "" {
+	existing, err := a.store.GetRef(refName)
+	if err != nil && !errors.Is(err, storage.ErrObjectNotFound) {
+		return fmt.Errorf("failed to check tag existence: %w", err)
+	}
+	if existing != "" {
 		return fmt.Errorf("tag %q already exists (delete it first with 'drift tag --delete %s')", label, label)
 	}
 

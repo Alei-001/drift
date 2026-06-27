@@ -1,11 +1,13 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 
 	"github.com/drift/drift/internal/core"
+	"github.com/drift/drift/internal/storage"
 )
 
 type SaveOptions struct {
@@ -76,7 +78,10 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	if branchCommitCount > 0 && branchCommits[0].TreeHash != "" {
 		// Reuse unchanged subtrees from the parent commit's tree.
 		parentTree, parentErr := a.store.GetTree(branchCommits[0].TreeHash)
-		if parentErr == nil {
+		if parentErr != nil && !errors.Is(parentErr, storage.ErrObjectNotFound) {
+			return nil, fmt.Errorf("failed to load parent tree: %w", parentErr)
+		}
+		if parentTree != nil {
 			tree, err = builder.BuildFromIndexWithBase(&idx, parentTree, a.store)
 		}
 	}
@@ -127,7 +132,10 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		}
 		parentHash = lastCommit.Parent
 
-		commit := core.NewCommit(message, parentHash, branch, tree.Hash, author)
+		commit, err := core.NewCommit(message, parentHash, branch, tree.Hash, author)
+		if err != nil {
+			return nil, fmt.Errorf("cannot create commit: %w", err)
+		}
 
 		prevBranchHash := lastCommit.Hash
 		if err := a.store.SaveCommitTransaction(commit, branch, &idx); err != nil {
@@ -178,7 +186,10 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		}, nil
 	}
 
-	commit := core.NewCommit(msg, parentHash, branch, tree.Hash, author)
+	commit, err := core.NewCommit(msg, parentHash, branch, tree.Hash, author)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create commit: %w", err)
+	}
 
 	prevBranchHash := ""
 	if branchCommitCount > 0 {

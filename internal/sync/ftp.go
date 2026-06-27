@@ -148,7 +148,7 @@ func (t *FTPTransport) walkRefs(absDir, relDir string, refs map[string]string) e
 
 func (t *FTPTransport) mkdirAll(absDir string) error {
 	parts := strings.Split(strings.TrimPrefix(absDir, "/"), "/")
-	current := t.basePath
+	current := "/"
 	for _, part := range parts {
 		if part == "" {
 			continue

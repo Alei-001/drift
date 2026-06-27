@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"hash"
@@ -26,6 +27,17 @@ func CalculateHashFromFile(path string) (string, error) {
 	}
 
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// CalculateHashFromFileLF reads the file at path, normalizes CRLF→LF line
+// endings, and returns the SHA-256 hash. Used for comparing working-tree
+// files against LF-normalized blobs on Windows with autocrlf enabled.
+func CalculateHashFromFileLF(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return CalculateHash(bytes.ReplaceAll(data, []byte{'\r', '\n'}, []byte{'\n'})), nil
 }
 
 // NewHasher returns a new SHA-256 hasher implementing hash.Hash.

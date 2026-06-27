@@ -17,7 +17,7 @@ func NewUnstageCmd(application *apppkg.App) *cobra.Command {
 				if err := application.ClearStaging(); err != nil {
 					return err
 				}
-				fmt.Println("Staging area cleared")
+				fmt.Println(colorGreen("Staging area cleared"))
 				return nil
 			}
 
@@ -27,10 +27,10 @@ func NewUnstageCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			for _, p := range unstaged {
-				fmt.Printf("Unstaged: %s\n", p)
+				fmt.Printf("Unstaged: %s\n", colorGreen(p))
 			}
 			for _, p := range notFound {
-				fmt.Printf("%s is not staged\n", p)
+				fmt.Println(colorYellow(fmt.Sprintf("%s is not staged", p)))
 			}
 			return nil
 		},

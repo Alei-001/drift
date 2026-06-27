@@ -57,6 +57,9 @@ func NewLogCmd(application *apppkg.App) *cobra.Command {
 // formatCommits displays commits in human-readable format.
 func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneline bool) {
 	if oneline {
+		const versionWidth = 8
+		const sep = "    "
+
 		msgWidth := 20
 		for _, c := range commits {
 			if len(c.Message) > msgWidth {
@@ -67,7 +70,12 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 			msgWidth = 60
 		}
 
-		fmt.Printf("%-8s  %-*s  %s\n", "VERSION", msgWidth, "MESSAGE", "TAG")
+		fmt.Printf("%s%s%s%s%s\n",
+			colorCyan(fmt.Sprintf("%-*s", versionWidth, "VERSION")),
+			sep,
+			colorCyan(fmt.Sprintf("%-*s", msgWidth, "MESSAGE")),
+			sep,
+			colorCyan("TAG"))
 		for _, c := range commits {
 			id := c.ID
 			if len(id) > 8 {
@@ -79,16 +87,21 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 			if len(msg) > msgWidth {
 				msg = msg[:msgWidth-3] + "..."
 			}
-			fmt.Printf("%-8s  %-*s  %s\n", id, msgWidth, msg, tag)
+			fmt.Printf("%s%s%s%s%s\n",
+				colorYellow(fmt.Sprintf("%-*s", versionWidth, id)),
+				sep,
+				fmt.Sprintf("%-*s", msgWidth, msg),
+				sep,
+				colorGreen(tag))
 		}
 		return
 	}
 
 	for _, c := range commits {
 		tags := tagsByHash[c.Hash]
-		fmt.Printf("commit %s\n", c.ID)
+		fmt.Printf("commit %s\n", colorYellow(c.ID))
 		if len(tags) > 0 {
-			fmt.Printf("Tags:    %s\n", strings.Join(tags, ", "))
+			fmt.Printf("Tags:    %s\n", colorGreen(strings.Join(tags, ", ")))
 		}
 		if c.Author.Email != "" {
 			fmt.Printf("Author:  %s <%s>\n", c.Author.Name, c.Author.Email)

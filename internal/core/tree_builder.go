@@ -2,6 +2,7 @@ package core
 
 import (
 	"path"
+	"sort"
 	"strings"
 )
 
@@ -110,8 +111,11 @@ func (b *TreeBuilder) buildTree(treePath string, baseTree *Tree, reader StoreRea
 	// Marshal + CalculateHash + PutTree for unchanged directories.
 	if baseTree != nil && reader != nil {
 		if oldSub, err := findBaseSubtree(baseTree, reader, treePath); err == nil && oldSub != nil {
+			sort.Slice(t.Entries, func(i, j int) bool {
+				return treeEntrySortName(&t.Entries[i]) < treeEntrySortName(&t.Entries[j])
+			})
 			if treeEntriesEqual(t.Entries, oldSub.Entries) {
-				result := &Tree{Hash: oldSub.Hash, Entries: t.Entries}
+				result := &Tree{Hash: oldSub.Hash, Entries: oldSub.Entries}
 				if b.store != nil {
 					if err := b.store(result); err != nil {
 						return nil, err
@@ -165,8 +169,8 @@ func findBaseSubtree(baseTree *Tree, reader StoreReader, treePath string) (*Tree
 }
 
 // treeEntriesEqual reports whether two entry slices are identical
-// in name, type, hash, and mode (sorted). Uses the same sort order
-// as treeEntrySortName.
+// in name, type, hash, and mode when sorted by treeEntrySortName.
+// Both slices must be pre-sorted before calling.
 func treeEntriesEqual(a, b []TreeEntry) bool {
 	if len(a) != len(b) {
 		return false

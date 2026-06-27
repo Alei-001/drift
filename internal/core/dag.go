@@ -94,10 +94,6 @@ func CollectReachable(store CommitTreeStore, startHashes []string) map[string]Ob
 		if hash == "" {
 			continue
 		}
-		// Best-effort: skip commits that can't be found.
-		if _, err := store.GetCommit(hash); err != nil {
-			continue
-		}
 		objs, err := ReachableObjects(store, hash, "")
 		if err != nil {
 			continue

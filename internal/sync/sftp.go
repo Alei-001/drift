@@ -13,6 +13,7 @@ import (
 	"github.com/drift/drift/internal/config"
 	sftplib "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // SFTPTransport implements the Transport interface over SFTP.
@@ -26,6 +27,11 @@ type SFTPTransport struct {
 func NewSFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*SFTPTransport, error) {
 	addr := net.JoinHostPort(gcfg.Host, fmt.Sprintf("%d", EffectivePort(gcfg)))
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+
 	authMethods := []ssh.AuthMethod{}
 	if gcfg.Password != "" {
 		authMethods = append(authMethods, ssh.Password(gcfg.Password))
@@ -33,8 +39,9 @@ func NewSFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*SFTPTransp
 	if gcfg.KeyPath != "" {
 		keyPath := gcfg.KeyPath
 		if strings.HasPrefix(keyPath, "~/") {
-			home, _ := os.UserHomeDir()
-			keyPath = filepath.Join(home, keyPath[2:])
+			if home != "" {
+				keyPath = filepath.Join(home, keyPath[2:])
+			}
 		}
 		key, err := os.ReadFile(keyPath)
 		if err != nil {
@@ -48,10 +55,30 @@ func NewSFTPTransport(gcfg *config.GlobalConfig, remoteName string) (*SFTPTransp
 	}
 
 	sshConfig := &ssh.ClientConfig{
-		User:            gcfg.Username,
-		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         30 * time.Second,
+		User:    gcfg.Username,
+		Auth:    authMethods,
+		Timeout: 30 * time.Second,
+	}
+
+	if gcfg.InsecureSkipVerify {
+		sshConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
+	} else {
+		if home == "" {
+			return nil, fmt.Errorf("cannot determine home directory for known_hosts; set insecure_skip_verify to true to bypass host key verification")
+		}
+		knownHostsPath := filepath.Join(home, ".ssh", "known_hosts")
+		if _, err := os.Stat(knownHostsPath); os.IsNotExist(err) {
+			return nil, fmt.Errorf(
+				"host key verification required but %s not found\n"+
+					"  Option 1: Create the known_hosts file (e.g. ssh-keyscan %s >> %s)\n"+
+					"  Option 2: Set insecure_skip_verify to true in drift config",
+				knownHostsPath, gcfg.Host, knownHostsPath)
+		}
+		cb, err := knownhosts.New(knownHostsPath)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read known_hosts %s: %w", knownHostsPath, err)
+		}
+		sshConfig.HostKeyCallback = cb
 	}
 
 	conn, err := ssh.Dial("tcp", addr, sshConfig)

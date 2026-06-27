@@ -390,6 +390,87 @@ func TestSave_AmendTag_AlreadyPointsToAmendedCommit(t *testing.T) {
 	}
 }
 
+// TestSave_PreservesUnchangedSubdirFiles verifies that after add + save,
+// unchanged files in subdirectories remain in the commit tree and the
+// status shows clean (no spurious staged additions).
+func TestSave_PreservesUnchangedSubdirFiles(t *testing.T) {
+	a := newTestApp(t)
+
+	// Seed initial commit with root-level and subdirectory files.
+	writeFile(t, a.dir, "cesho.md", "cesho")
+	writeFile(t, a.dir, "g.txt", "g")
+	writeFile(t, a.dir, "v.md", "v")
+	writeFile(t, a.dir, "2/w.txt", "w")
+	writeFile(t, a.dir, "zc/ji.ts", "ji")
+	writeFile(t, a.dir, "zc/lj.txt", "lj")
+	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Verify status is clean.
+	s, err := a.Status()
+	if err != nil {
+		t.Fatalf("Status after init failed: %v", err)
+	}
+	if !s.IsClean() {
+		t.Errorf("expected clean status after init save, got %d entries", len(*s))
+	}
+
+	// Make changes: modify cesho.md, delete g.txt, modify v.md, add ces.txt.
+	writeFile(t, a.dir, "cesho.md", "cesho-modified")
+	deleteFile(t, a.dir, "g.txt")
+	writeFile(t, a.dir, "v.md", "v-modified")
+	writeFile(t, a.dir, "ces.txt", "ces")
+
+	// Stage all changes (drift add .)
+	if _, err := a.Add([]string{"."}); err != nil {
+		t.Fatalf("Add . failed: %v", err)
+	}
+
+	// Save
+	res, err := a.Save("test color", SaveOptions{})
+	if err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Verify the commit tree contains all expected files.
+	commit, err := a.ResolveCommit(res.ID)
+	if err != nil {
+		t.Fatalf("ResolveCommit failed: %v", err)
+	}
+	tree, err := a.store.GetTree(commit.TreeHash)
+	if err != nil {
+		t.Fatalf("GetTree failed: %v", err)
+	}
+	blobs, err := core.NewTreeReader(a.store).ListBlobs(tree, "")
+	if err != nil {
+		t.Fatalf("ListBlobs failed: %v", err)
+	}
+	have := make(map[string]bool, len(blobs))
+	for _, b := range blobs {
+		have[b.Path] = true
+	}
+	for _, want := range []string{"2/w.txt", "zc/ji.ts", "zc/lj.txt", "cesho.md", "v.md", "ces.txt"} {
+		if !have[want] {
+			t.Errorf("commit %s lost file %s", res.ID, want)
+		}
+	}
+
+	// Status must be clean — no spurious staged additions.
+	s, err = a.Status()
+	if err != nil {
+		t.Fatalf("Status after save failed: %v", err)
+	}
+	if !s.IsClean() {
+		for p, fs := range *s {
+			if fs.Staging != core.Unmodified {
+				t.Errorf("unexpected staged change: %s=%q worktree=%q", p, fs.Staging, fs.Worktree)
+			}
+		}
+		t.Fatalf("expected clean status after save, got %d entries", len(*s))
+	}
+}
+
 // TestSave_AmendTag_NewTagOnAmend allows adding a brand-new tag on amend.
 func TestSave_AmendTag_NewTagOnAmend(t *testing.T) {
 	a := newTestApp(t)

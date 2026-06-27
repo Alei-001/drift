@@ -47,6 +47,9 @@ func NewReflogCmd(application *apppkg.App) *cobra.Command {
 // formatOperations displays operations in human-readable format.
 func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
 	const maxMsgLen = 40
+	const dateWidth = 19     // "2006-01-02 15:04:05"
+	const opWidth = 8        // longest op: "restore"
+	const sep = "    "       // spacing between columns
 
 	descs := make([]string, len(operations))
 	for i, op := range operations {
@@ -63,19 +66,31 @@ func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
 		descWidth = 60
 	}
 
-	fmt.Printf("%-19s  %-14s  %-*s\n", "DATE", "OP", descWidth, "DESCRIPTION")
+	// Header: format plain text at correct width, then colorize.
+	fmt.Printf("%s%s%s%s%s\n",
+		colorCyan(fmt.Sprintf("%-*s", dateWidth, "DATE")),
+		sep,
+		colorCyan(fmt.Sprintf("%-*s", opWidth, "OP")),
+		sep,
+		colorCyan(fmt.Sprintf("%-*s", descWidth, "DESCRIPTION")))
+
 	for i, op := range operations {
 		desc := descs[i]
 		if len(desc) > descWidth {
 			desc = desc[:descWidth-3] + "..."
 		}
-		fmt.Printf("%-19s  %-14s  %s\n", op.Timestamp.Format("2006-01-02 15:04:05"), op.Op, desc)
+		fmt.Printf("%s%s%s%s%s\n",
+			fmt.Sprintf("%-*s", dateWidth, op.Timestamp.Format("2006-01-02 15:04:05")),
+			sep,
+			colorYellow(fmt.Sprintf("%-*s", opWidth, string(op.Op))),
+			sep,
+			fmt.Sprintf("%-*s", descWidth, desc))
 		if verbose {
 			for _, change := range op.RefChanges {
-				fmt.Printf("  %s: %s → %s\n", change.Ref, shortRef(change.Before), shortRef(change.After))
+				fmt.Printf("  %s: %s → %s\n", colorGray(change.Ref), colorGray(shortRef(change.Before)), colorGray(shortRef(change.After)))
 			}
 			for _, e := range op.IndexSnapshot {
-				fmt.Printf("  %s %s\n", e.Path, e.Hash[:8])
+				fmt.Printf("  %s %s\n", colorGray(e.Path), colorGray(shortHash(e.Hash)))
 			}
 		}
 	}

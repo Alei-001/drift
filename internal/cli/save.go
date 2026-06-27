@@ -30,13 +30,13 @@ func NewSaveCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if result.Amended {
-				fmt.Printf("Amended: %s (%s)\n", result.ID, result.Message)
+				fmt.Printf("Amended: %s (%s)\n", colorYellow(result.ID), result.Message)
 			} else {
-				fmt.Printf("Saved: %s (%s)\n", result.ID, result.Message)
+				fmt.Printf("Saved: %s (%s)\n", colorGreen(result.ID), result.Message)
 			}
 
 			if len(result.ChangedPaths) > 0 {
-				fmt.Printf("Changed %d file(s)\n", len(result.ChangedPaths))
+				fmt.Println(colorGreen(fmt.Sprintf("Changed %d file(s)", len(result.ChangedPaths))))
 			}
 
 			return nil

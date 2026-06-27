@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -55,9 +57,14 @@ func acquireFileLock(lockPath string) (*fileLock, error) {
 			f.Close()
 			return nil, err
 		}
-		// Re-read PID inside the loop: the holding process may change
-		// during polling.
 		holderPID = readLockPID(f)
+		if holderPID > 0 && !pidExists(holderPID) {
+			clearLockPID(f)
+			if err := platformTryLock(f); err == nil {
+				writeLockPID(f)
+				return &fileLock{file: f}, nil
+			}
+		}
 	}
 
 	f.Close()
@@ -65,6 +72,20 @@ func acquireFileLock(lockPath string) (*fileLock, error) {
 		return nil, fmt.Errorf("%w (held by PID %d)", ErrLockTimeout, holderPID)
 	}
 	return nil, ErrLockTimeout
+}
+
+// pidExists reports whether a process with the given PID is still running.
+// On Unix this uses signal 0; on Windows it is best-effort (returns true
+// since the OS releases LockFileEx on process exit).
+func pidExists(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func (fl *fileLock) release() {

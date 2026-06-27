@@ -70,7 +70,7 @@ func (a *App) findCommitByHash(hash string) (*core.Commit, error) {
 	c, err := a.store.GetCommit(hash)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotFound) {
-			return nil, fmt.Errorf("commit not found: %s", hash)
+			return nil, fmt.Errorf("commit not found: %s: %w", hash, err)
 		}
 		return nil, err
 	}
@@ -103,7 +103,12 @@ func (a *App) ResolveCommit(version string) (*core.Commit, error) {
 	}
 
 	if hash, err := a.store.GetRef(version); err == nil && hash != "" {
-		if commit, err := a.findCommitByHash(hash); err == nil && commit != nil {
+		commit, err := a.findCommitByHash(hash)
+		if err != nil {
+			if !errors.Is(err, storage.ErrObjectNotFound) {
+				return nil, fmt.Errorf("failed to resolve %q: %w", version, err)
+			}
+		} else {
 			return commit, nil
 		}
 	} else if err != nil && !errors.Is(err, storage.ErrObjectNotFound) {

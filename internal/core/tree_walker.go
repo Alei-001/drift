@@ -107,7 +107,7 @@ func (r *TreeReader) DiffTrees(oldTree, newTree *Tree) (deleted, added, modified
 	for path, oldEntry := range oldMap {
 		if newEntry, exists := newMap[path]; !exists {
 			deleted = append(deleted, oldEntry)
-		} else if oldEntry.Hash != newEntry.Hash {
+		} else if oldEntry.Hash != newEntry.Hash || oldEntry.Mode != newEntry.Mode {
 			modified = append(modified, newEntry)
 		}
 	}
@@ -193,7 +193,7 @@ func (r *TreeReader) lazyDiff(prefix string, oldTree, newTree *Tree, changes *[]
 				}
 			} else if oldEntries[oi].Type == BlobObject && newEntries[ni].Type == BlobObject {
 				be := BlobEntry{Path: entryPath, Hash: newEntries[ni].Hash, Mode: newEntries[ni].Mode}
-				if oldEntries[oi].Hash != newEntries[ni].Hash {
+				if oldEntries[oi].Hash != newEntries[ni].Hash || oldEntries[oi].Mode != newEntries[ni].Mode {
 					obe := BlobEntry{Path: entryPath, Hash: oldEntries[oi].Hash, Mode: oldEntries[oi].Mode}
 					*changes = append(*changes, DiffChange{
 						Path: entryPath,

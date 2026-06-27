@@ -258,7 +258,7 @@ func TestStore_GetTree_NotFound(t *testing.T) {
 // TestStore_PutCommit_GetCommit verifies commit storage and retrieval.
 func TestStore_PutCommit_GetCommit(t *testing.T) {
 	s := newTestStore(t)
-	c := core.NewCommit("msg", "", "main",
+	c, err := core.NewCommit("msg", "", "main",
 		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		core.Signature{Name: "alice", Email: "a@b.c"})
 	if err := s.PutCommit(c); err != nil {
@@ -287,14 +287,20 @@ func TestStore_GetCommit_NotFound(t *testing.T) {
 func TestStore_ListCommits_OrderedByTimestamp(t *testing.T) {
 	s := newTestStore(t)
 	treeHash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	older := core.NewCommit("old", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	older, err := core.NewCommit("old", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.PutCommit(older); err != nil {
 		t.Fatal(err)
 	}
 
 	// Sleep to ensure newer commit has a strictly later timestamp.
 	time.Sleep(2 * time.Millisecond)
-	newer := core.NewCommit("new", older.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	newer, err := core.NewCommit("new", older.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.PutCommit(newer); err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +776,10 @@ func TestStore_RenameRef_SameName(t *testing.T) {
 func TestStore_SaveCommitTransaction(t *testing.T) {
 	s := newTestStore(t)
 	treeHash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	c := core.NewCommit("test commit", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	c, err := core.NewCommit("test commit", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	idx := &core.Index{}
 	idx.Add(core.IndexEntry{
@@ -821,12 +830,18 @@ func TestStore_ListBranchCommits(t *testing.T) {
 	s := newTestStore(t)
 	treeHash := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-	c1 := core.NewCommit("first", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	c1, err := core.NewCommit("first", "", "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	_ = s.PutCommit(c1)
 	_ = s.SaveRef("main", c1.Hash)
 
 	time.Sleep(2 * time.Millisecond)
-	c2 := core.NewCommit("second", c1.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	c2, err := core.NewCommit("second", c1.Hash, "main", treeHash, core.Signature{Name: "a", Email: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	_ = s.PutCommit(c2)
 	_ = s.SaveRef("main", c2.Hash)
 

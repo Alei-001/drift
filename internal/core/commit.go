@@ -1,7 +1,9 @@
 package core
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,7 +32,18 @@ type Commit struct {
 // NewCommit creates a commit with an abbreviated-hash ID derived from
 // the commit's content hash. The ID is the first CommitIDLen hex
 // characters of Hash, similar to Git's short hash.
-func NewCommit(message, parent, branch, treeHash string, author Signature) *Commit {
+// Returns an error if any string field contains NUL bytes, which would
+// corrupt the hash computation.
+func NewCommit(message, parent, branch, treeHash string, author Signature) (*Commit, error) {
+	if strings.Contains(message, "\x00") ||
+		strings.Contains(parent, "\x00") ||
+		strings.Contains(branch, "\x00") ||
+		strings.Contains(treeHash, "\x00") ||
+		strings.Contains(author.Name, "\x00") ||
+		strings.Contains(author.Email, "\x00") {
+		return nil, fmt.Errorf("commit fields must not contain NUL bytes")
+	}
+
 	c := &Commit{
 		Message:   message,
 		Timestamp: time.Now(),
@@ -41,7 +54,7 @@ func NewCommit(message, parent, branch, treeHash string, author Signature) *Comm
 	}
 	c.Hash = c.calculateHash()
 	c.ID = c.Hash[:CommitIDLen]
-	return c
+	return c, nil
 }
 
 const nullHash = "0000000000000000000000000000000000000000000000000000000000000000"

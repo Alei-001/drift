@@ -37,12 +37,12 @@ that 'drift undo' continues to work.`,
 			}
 
 			if dryRun {
-				fmt.Printf("Would remove %d object(s) (%d bytes)\n", result.ObjectsRemoved, result.BytesFreed)
+				fmt.Println(colorYellow(fmt.Sprintf("Would remove %d object(s) (%d bytes)", result.ObjectsRemoved, result.BytesFreed)))
 			} else {
 				if result.ObjectsRemoved == 0 {
-					fmt.Println("Nothing to clean up.")
+					fmt.Println(colorGray("Nothing to clean up."))
 				} else {
-					fmt.Printf("Removed %d object(s) (%d bytes freed)\n", result.ObjectsRemoved, result.BytesFreed)
+					fmt.Println(colorGreen(fmt.Sprintf("Removed %d object(s) (%d bytes freed)", result.ObjectsRemoved, result.BytesFreed)))
 				}
 			}
 			return nil

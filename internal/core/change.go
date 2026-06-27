@@ -92,6 +92,19 @@ func ComputeStatus(commitTree *Tree, idx *Index, workDir string, store StoreRead
 				continue
 			}
 
+			// Symlink: compare target string via Readlink, not file hash.
+			if info.Mode()&os.ModeSymlink != 0 {
+				target, err := os.Readlink(fullPath)
+				if err != nil {
+					continue
+				}
+				targetHash := CalculateHash([]byte(target))
+				if targetHash != entry.Hash {
+					s.File(entry.Path).Worktree = Modified
+				}
+				continue
+			}
+
 			hash, err := CalculateHashFromFile(fullPath)
 			if err != nil {
 				continue

@@ -37,7 +37,7 @@ func NewExportCmd(application *apppkg.App) *cobra.Command {
 			if actualOutput, err := application.Export(version, output, exportFormat, filters); err != nil {
 				return err
 			} else {
-				fmt.Printf("Exported %s to %s\n", version, actualOutput)
+				fmt.Println(colorGreen(fmt.Sprintf("Exported %s to %s", version, actualOutput)))
 			}
 			return nil
 		},

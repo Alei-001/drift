@@ -60,18 +60,18 @@ func NewDiffCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			if len(result.Entries) == 0 {
-				fmt.Println("No changes")
+				fmt.Println(colorGray("No changes"))
 				return nil
 			}
 
 			// --patch or --output: produce unified diff format.
 			if patch || output != "" {
-				patchOutput := formatPatch(result.Entries)
+				patchOutput := formatPatch(result.Entries, output == "")
 				if output != "" {
 					if err := os.WriteFile(output, []byte(patchOutput), 0644); err != nil {
 						return fmt.Errorf("failed to write patch file: %w", err)
 					}
-					fmt.Printf("Patch written to %s (%d file(s))\n", output, len(result.Entries))
+					fmt.Println(colorGreen(fmt.Sprintf("Patch written to %s (%d file(s))", output, len(result.Entries))))
 				} else {
 					fmt.Print(patchOutput)
 				}
@@ -79,15 +79,15 @@ func NewDiffCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			// Default: summary listing
-			fmt.Printf("Changed %d file(s):\n", len(result.Entries))
+			fmt.Println(colorCyan(fmt.Sprintf("Changed %d file(s):", len(result.Entries))))
 			for _, e := range result.Entries {
 				switch e.Status {
 				case "added":
-						fmt.Printf("  A %s\n", e.Path)
-					case "modified":
-						fmt.Printf("  M %s\n", e.Path)
-					case "deleted":
-						fmt.Printf("  D %s\n", e.Path)
+					fmt.Printf("  %s %s\n", colorGreen("A"), e.Path)
+				case "modified":
+					fmt.Printf("  %s %s\n", colorYellow("M"), e.Path)
+				case "deleted":
+					fmt.Printf("  %s %s\n", colorRed("D"), e.Path)
 				default:
 					fmt.Printf("  %s %s\n", e.Status, e.Path)
 				}
@@ -106,12 +106,17 @@ func NewDiffCmd(application *apppkg.App) *cobra.Command {
 }
 
 // formatPatch produces a unified diff format string from diff entries.
-func formatPatch(entries []apppkg.DiffEntry) string {
+// When colorize is true, +/- lines are wrapped with ANSI color codes.
+func formatPatch(entries []apppkg.DiffEntry, colorize bool) string {
 	var buf strings.Builder
 
 	for _, e := range entries {
 		if e.IsBinary {
-			fmt.Fprintf(&buf, "Binary files differ: %s\n\n", e.Path)
+			s := fmt.Sprintf("Binary files differ: %s\n\n", e.Path)
+			if colorize {
+				s = colorYellow(s)
+			}
+			buf.WriteString(s)
 			continue
 		}
 
@@ -122,7 +127,11 @@ func formatPatch(entries []apppkg.DiffEntry) string {
 			for _, edit := range e.Edits {
 				switch edit.Op {
 				case core.DiffInsert:
-					fmt.Fprintf(&buf, "+%s\n", edit.Line)
+					line := fmt.Sprintf("+%s\n", edit.Line)
+					if colorize {
+						line = colorGreen(line)
+					}
+					buf.WriteString(line)
 				case core.DiffKeep:
 					fmt.Fprintf(&buf, " %s\n", edit.Line)
 				}
@@ -133,7 +142,11 @@ func formatPatch(entries []apppkg.DiffEntry) string {
 			for _, edit := range e.Edits {
 				switch edit.Op {
 				case core.DiffDelete:
-					fmt.Fprintf(&buf, "-%s\n", edit.Line)
+					line := fmt.Sprintf("-%s\n", edit.Line)
+					if colorize {
+						line = colorRed(line)
+					}
+					buf.WriteString(line)
 				case core.DiffKeep:
 					fmt.Fprintf(&buf, " %s\n", edit.Line)
 				}
@@ -146,9 +159,17 @@ func formatPatch(entries []apppkg.DiffEntry) string {
 				case core.DiffKeep:
 					fmt.Fprintf(&buf, " %s\n", edit.Line)
 				case core.DiffDelete:
-					fmt.Fprintf(&buf, "-%s\n", edit.Line)
+					line := fmt.Sprintf("-%s\n", edit.Line)
+					if colorize {
+						line = colorRed(line)
+					}
+					buf.WriteString(line)
 				case core.DiffInsert:
-					fmt.Fprintf(&buf, "+%s\n", edit.Line)
+					line := fmt.Sprintf("+%s\n", edit.Line)
+					if colorize {
+						line = colorGreen(line)
+					}
+					buf.WriteString(line)
 				}
 			}
 		}
