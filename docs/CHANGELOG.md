@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.1.0 (2026-06-27)
+
+### New Features
+
+- `drift gc` removes unreachable objects to reclaim disk space. Objects
+  reachable from any branch, tag, HEAD, or reflog entry are preserved.
+- `drift upgrade [<version>]` self-upgrades drift by downloading the
+  specified (or latest) binary from GitHub Releases. `--check` previews
+  without downloading.
+- `gc.auto` config key controls automatic GC threshold (default 1000 loose
+  objects, set to 0 to disable). GC runs after `drift save` and
+  `drift branch delete`.
+- `gc.reflogExpire` config key (default 90 days) limits reflog-based object
+  retention: entries older than the cutoff are ignored during GC, allowing
+  objects from ancient amended commits to be reclaimed.
+
+### Bug Fixes
+
+- `drift diff` default summary now uses A / D (not + / -) for added and
+  deleted files, matching `drift status` labels.
+- `drift diff --patch` now correctly shows content changes for empty files
+  and new files (previously produced empty diff bodies).
+
+### Improvements
+
+- Diff performance: LazyDiffTrees integrated across all diff paths, index
+  mtime fast-path avoids re-reading unchanged files, and the tree builder
+  reuses subtrees from the base tree when computing new commits.
+
+---
+
 ## v1.0.0 (2026-06-26)
 
 ### New Features
@@ -41,6 +72,33 @@
 ---
 
 # 更新日志
+
+## v1.1.0 (2026-06-27)
+
+### 新功能
+
+- `drift gc` 移除不可达对象以回收磁盘空间。从任何分支、tag、HEAD 或
+  reflog 条目可达的对象均会被保留。
+- `drift upgrade [<version>]` 从 GitHub Releases 下载指定版本（或最新版）
+  的自升级命令。`--check` 仅预览不下载。
+- `gc.auto` 配置项控制自动 GC 阈值（默认 1000 个松散对象，设为 0 禁用）。
+  自动 GC 在 `drift save` 和 `drift branch delete` 之后触发。
+- `gc.reflogExpire` 配置项（默认 90 天）限制基于 reflog 的对象保留期：
+  超过期限的条目在 GC 时被忽略，使旧 amend 提交的对象可被回收。
+
+### Bug 修复
+
+- `drift diff` 默认摘要输出现使用 A / D（而非 + / -）标记新增和删除的
+  文件，与 `drift status` 的标记风格一致。
+- `drift diff --patch` 现可正确显示空文件和新文件的内容变更（此前输出
+  空 diff 体）。
+
+### 改进
+
+- Diff 性能：LazyDiffTrees 集成到所有 diff 路径，index mtime 快径避免
+  重复读取未修改的文件，树构建器复用基树中的子树以加速新 commit 计算。
+
+---
 
 ## v1.0.0 (2026-06-26)
 
