@@ -484,6 +484,13 @@ func (w *Worktree) BuildChangedIndex(parentTree *core.Tree) (*core.Index, []stri
 			if info, statErr := os.Lstat(fullPath); statErr == nil {
 				entry.ModifiedAt = info.ModTime()
 				entry.Size = info.Size()
+				if info.Mode()&os.ModeSymlink != 0 {
+					entry.Mode = core.ModeSymlink
+				} else if info.Mode()&0111 != 0 {
+					entry.Mode = core.ModeExecutable
+				} else {
+					entry.Mode = core.ModeRegular
+				}
 			}
 			if addErr := idx.Add(entry); addErr != nil {
 				return nil, nil, fmt.Errorf("failed to update %s in index: %w", entry.Path, addErr)

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/drift/drift/internal/core"
@@ -66,6 +68,37 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 
 	if len(changedPaths) == 0 {
 		return nil, fmt.Errorf("nothing changed since last version")
+	}
+
+	for _, path := range changedPaths {
+		entry, entryErr := idx.Entry(path)
+		if entryErr != nil {
+			continue
+		}
+		if a.store.HasObject(entry.Hash) {
+			continue
+		}
+		fullPath := filepath.Join(a.dir, filepath.FromSlash(path))
+		if entry.Mode == core.ModeSymlink {
+			target, readErr := os.Readlink(fullPath)
+			if readErr != nil {
+				continue
+			}
+			if _, putErr := a.store.PutBlob([]byte(target)); putErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to store blob for %s: %v\n", path, putErr)
+			}
+		} else {
+			data, readErr := os.ReadFile(fullPath)
+			if readErr != nil {
+				continue
+			}
+			if !bytes.Contains(data, []byte{0}) {
+				data = bytes.ReplaceAll(data, []byte{'\r', '\n'}, []byte{'\n'})
+			}
+			if _, putErr := a.store.PutBlob(data); putErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to store blob for %s: %v\n", path, putErr)
+			}
+		}
 	}
 
 	builder := core.NewTreeBuilder(func(t *core.Tree) error {
