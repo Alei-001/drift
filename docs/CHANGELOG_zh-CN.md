@@ -1,6 +1,46 @@
 # 更新日志
 
-## v1.1.1 (2026-06-27)
+## v2.0.0 (2026-06-27)
+
+### 破坏性变更
+
+- **`drift init` → `drift start`**。原命令不再可用。
+- **`drift log` → `drift history`**。`--oneline` → `--brief`。
+- **`drift restore` → `drift back`**。支持无参形式（恢复到最新版本）。
+- **`drift mv` → `drift move`**。`drift rm` → `drift remove`。
+- **删除 `drift switch`**。合并到 `drift branch switch <名称>`。
+- **`drift branch` 标志删除**。`-d` → `branch remove`，`-m` → `branch rename`。
+- **`drift tag --delete` → `drift tag remove`**。标签列表改为 `drift tag list`。
+- **删除 `drift config`**。拆分到 `whoami` / `remote` / `backup` / `ignore`。
+- **`drift sync` → `drift backup`**。子命令：`on`/`off`/`now`/`status`/`log`。
+- **删除 `drift add` / `drift unstage`**。无暂存区——`drift save` 自动检测所有改动。
+- **`drift wip` / `drift reflog` 移出 CLI**。WIP 完全自动化；reflog 内部使用。
+
+### 新增命令
+
+- `drift ignore <模式>` — 添加 .driftignore 规则。
+- `drift whoami` / `drift whoami set <姓名> <邮箱>` — 身份管理。
+- `drift remote {setup|show|remove}` — 交互式远程配置。
+- `drift backup {on|off|now|status|log}` — 远程备份管理。
+
+### 新功能
+
+- **取消暂存区。** `drift save` 自动检测所有工作区变更（修改、新增、删除）。`.driftignore` 规则自动生效。
+- **CRLF→LF 自动处理。** 所有文本文件保存时自动归一化为 LF 后计算哈希，二进制文件原样存储。无需 `core.autocrlf` 配置。
+- **`save --tag` 标志。** 保存时直接打标签。标签冲突仅 warning，不影响 save。
+- **密码加密。** `~/.drift/global.json` 中的密码以 AES-256-GCM 加密存储，密钥在 `~/.drift/.key`（权限 0600）。也支持 `DRIFT_REMOTE_PASSWORD` 环境变量。
+- **中文 tag/分支名。** 标签和分支名支持 Unicode（中文、日文、emoji）。
+- **`drift remote setup` 交互式配置。** 分步向导，不再需要记 `--protocol` 等 10 个标志。
+- **`drift backup log` 备份历史。** 展示最近备份记录。
+
+### Bug 修复
+
+- **新 save 流程缺少 blob 存储。** 旧流程通过 staging 自动存储 blob；新流程无 staging，需显式存储。在 `Save()` 中为所有变更文件增加 blob 持久化循环，使用 CRLF 归一化内容匹配哈希计算。
+- **BuildChangedIndex 遍历中修改 slice。** `range idx.Entries` 内调用了 `idx.Remove`，导致元素跳过。修复为先收集删除列表，循环结束后再移除。
+- **符号链接被跳过。** `BuildChangedIndex` 此前跳过了非普通文件，符号链接全部丢失。现通过 `os.Readlink` 检测并正确跟踪。
+- **文件类型变更时 mode 未更新。** 当文件类型变化（普通↔符号链接、普通↔可执行），索引中 mode 保持旧值。修复为在差异遍历时同步更新 mode。
+
+---
 
 ### Bug 修复
 

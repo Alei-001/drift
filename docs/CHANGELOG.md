@@ -1,6 +1,47 @@
 # Changelog
 
-## v1.1.1 (2026-06-27)
+## v2.0.0 (2026-06-27)
+
+### Breaking Changes
+
+- **`drift init` → `drift start`**. Removed: bare `drift init` no longer works.
+- **`drift log` → `drift history`**. Flag `--oneline` → `--brief`.
+- **`drift restore` → `drift back`**. Accepts no-arg form (restore to latest version).
+- **`drift mv` → `drift move`**. `drift rm` → `drift remove`.
+- **`drift switch` removed**. Merged into `drift branch switch <name>`.
+- **`drift branch` flags removed**. `branch -d` → `branch remove`, `branch -m` → `branch rename`.
+- **`drift tag --delete` → `drift tag remove`**. Tag listing changed from bare `drift tag` to `drift tag list`.
+- **`drift config` removed**. Split into `drift whoami`, `drift remote`, `drift backup`, `drift ignore`.
+- **`drift sync` → `drift backup`**. Commands: `on`/`off`/`now`/`status`/`log`.
+- **`drift add` / `drift unstage` removed**. No staging area — `drift save` auto-detects all changes.
+- **`drift wip` / `drift reflog` removed from CLI**. WIP is now fully automatic; reflog is internal.
+
+### New Commands
+
+- `drift ignore <pattern>` — add to `.driftignore` without manual file editing.
+- `drift whoami` / `drift whoami set <name> <email>` — identity management.
+- `drift remote {setup|show|remove}` — interactive remote configuration.
+- `drift backup {on|off|now|status|log}` — remote backup management.
+
+### New Features
+
+- **No staging area.** `drift save` automatically detects all working tree changes (modified, added, deleted). Files matching `.driftignore` are excluded. No need for `drift add` / `drift unstage`.
+- **CRLF→LF now automatic.** All text files are normalized to LF before hashing. Binary files (detected by NUL byte) are stored as-is. No `core.autocrlf` config needed.
+- **`save --tag` flag.** Tags can be created inline with a save. If the tag already exists, a warning is shown but the save succeeds.
+- **Password encryption.** Remote passwords are encrypted with AES-256-GCM at rest in `~/.drift/global.json`. The encryption key lives in `~/.drift/.key` (0600). Also supports the `DRIFT_REMOTE_PASSWORD` environment variable.
+- **CJK tag/branch names.** Tags and branch names now support Unicode characters including Chinese, Japanese, and emoji.
+- **`drift remote setup`** — interactive, multi-step remote configuration (no more remembering flag names).
+- **`drift backup log`** — displays recent backup history.
+
+### Bug Fixes
+
+- **Blob storage regression (v2.0.0-dev).** The new save flow no longer relies on staging, so blob objects must be explicitly stored. Added a blob persistence loop in `Save()` for all changed entries, matching the CRLF-normalized hash computation.
+- **Slice mutation during range in BuildChangedIndex.** `idx.Remove()` was called inside a `range idx.Entries` loop, causing skipped entries. Fixed by collecting deletions first, then applying after the loop.
+- **Symlinks now tracked.** `BuildChangedIndex` previously skipped all non-regular files. Symlinks are now detected via `os.Readlink` and tracked correctly.
+- **Mode not updated on type change.** When a file changed type (regular↔symlink, regular↔executable), the index retained the old mode. Fixed by reading `os.Lstat` mode during the diff pass.
+- **`whoami set` / `remote` subcommands work outside a project.** The `PersistentPreRunE` whitelist was checking the leaf command's name instead of its parent, causing "not a drift repository" errors for these commands.
+
+---
 
 ### Bug Fixes
 
