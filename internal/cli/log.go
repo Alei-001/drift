@@ -57,74 +57,79 @@ func NewLogCmd(application *apppkg.App) *cobra.Command {
 // formatCommits displays commits in human-readable format.
 func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneline, allBranches bool) {
 	if oneline {
-		const versionWidth = 8
-		const branchWidth = 8
+		const maxCol = 40
 		const sep = "    "
+		const colSep = ""
 
-		msgWidth := 20
-		for _, c := range commits {
-			if len(c.Message) > msgWidth {
-				msgWidth = len(c.Message)
-			}
-		}
-		if msgWidth > 60 {
-			msgWidth = 60
-		}
+		cw := newColWidths(4) // version, branch(/msg), msg, tag
 
+		cw.feed(0, "VERSION")
 		if allBranches {
-			fmt.Printf("%s%s%s%s%s%s%s\n",
-				colorCyan(fmt.Sprintf("%-*s", versionWidth, "VERSION")),
-				sep,
-				colorCyan(fmt.Sprintf("%-*s", branchWidth, "BRANCH")),
-				sep,
-				colorCyan(fmt.Sprintf("%-*s", msgWidth, "MESSAGE")),
-				sep,
-				colorCyan("TAG"))
-			for _, c := range commits {
-				id := c.ID
-				if len(id) > 8 {
-					id = id[:8]
-				}
-				tags := tagsByHash[c.Hash]
-				tag := strings.Join(tags, ", ")
-				msg := c.Message
-				if len(msg) > msgWidth {
-					msg = msg[:msgWidth-3] + "..."
-				}
-				fmt.Printf("%s%s%s%s%s%s%s\n",
-					colorYellow(fmt.Sprintf("%-*s", versionWidth, id)),
-					sep,
-					colorCyan(fmt.Sprintf("%-*s", branchWidth, c.Branch)),
-					sep,
-					fmt.Sprintf("%-*s", msgWidth, msg),
-					sep,
-					colorGreen(tag))
-			}
+			cw.feed(1, "BRANCH")
+			cw.feed(2, "MESSAGE")
 		} else {
-			fmt.Printf("%s%s%s%s%s\n",
-				colorCyan(fmt.Sprintf("%-*s", versionWidth, "VERSION")),
-				sep,
-				colorCyan(fmt.Sprintf("%-*s", msgWidth, "MESSAGE")),
-				sep,
-				colorCyan("TAG"))
-			for _, c := range commits {
-				id := c.ID
-				if len(id) > 8 {
-					id = id[:8]
-				}
-				tags := tagsByHash[c.Hash]
-				tag := strings.Join(tags, ", ")
-				msg := c.Message
-				if len(msg) > msgWidth {
-					msg = msg[:msgWidth-3] + "..."
-				}
-				fmt.Printf("%s%s%s%s%s\n",
-					colorYellow(fmt.Sprintf("%-*s", versionWidth, id)),
-					sep,
-					fmt.Sprintf("%-*s", msgWidth, msg),
-					sep,
-					colorGreen(tag))
+			cw.feed(1, "MESSAGE")
+		}
+		cw.feed(3, "TAG")
+
+		for _, c := range commits {
+			id := c.ID
+			if len(id) > 8 {
+				id = id[:8]
 			}
+			cw.feed(0, id)
+			if allBranches {
+				cw.feed(1, c.Branch)
+				cw.feed(2, truncateByWidth(c.Message, maxCol))
+			} else {
+				cw.feed(1, truncateByWidth(c.Message, maxCol))
+			}
+			cw.feed(3, strings.Join(tagsByHash[c.Hash], ", "))
+		}
+
+		cw.capAll(maxCol)
+
+		wVer := cw.v[0]
+		wBch := cw.v[1]
+		wMsg := cw.v[1]
+		if allBranches {
+			wMsg = cw.v[2]
+		}
+		wTag := cw.v[3]
+
+		hdrs := []interface{}{
+			colorCyan(fmt.Sprintf("%-*s", wVer, "VERSION")),
+		}
+		if allBranches {
+			hdrs = append(hdrs,
+				colorCyan(fmt.Sprintf("%-*s", wBch, "BRANCH")),
+				colorCyan(fmt.Sprintf("%-*s", wMsg, "MESSAGE")))
+		} else {
+			hdrs = append(hdrs, colorCyan(fmt.Sprintf("%-*s", wMsg, "MESSAGE")))
+		}
+		hdrs = append(hdrs, colorCyan(fmt.Sprintf("%-*s", wTag, "TAG")))
+		fmt.Print(joinRow(hdrs, sep, colSep), "\n")
+
+		for _, c := range commits {
+			id := c.ID
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			tag := strings.Join(tagsByHash[c.Hash], ", ")
+			msg := truncateByWidth(c.Message, wMsg)
+
+			row := []interface{}{
+				colorYellow(fmt.Sprintf("%-*s", wVer, id)),
+			}
+			if allBranches {
+				row = append(row,
+					colorCyan(fmt.Sprintf("%-*s", wBch, c.Branch)),
+					fmt.Sprintf("%-*s", wMsg, msg))
+			} else {
+				row = append(row, fmt.Sprintf("%-*s", wMsg, msg))
+			}
+			row = append(row, colorGreen(fmt.Sprintf("%-*s", wTag, tag)))
+			fmt.Print(joinRow(row, sep, colSep), "\n")
 		}
 		return
 	}
@@ -147,6 +152,20 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 		fmt.Printf("Message: %s\n", c.Message)
 		fmt.Println()
 	}
+}
+
+// joinRow joins row values with sep between adjacent columns, and appends
+// colSep after the last column. All values are already strings.
+func joinRow(row []interface{}, sep, colSep string) string {
+	var b strings.Builder
+	for i, v := range row {
+		if i > 0 {
+			b.WriteString(sep)
+		}
+		b.WriteString(v.(string))
+	}
+	b.WriteString(colSep)
+	return b.String()
 }
 
 // formatCommitsPorcelain displays commits in machine-readable format.

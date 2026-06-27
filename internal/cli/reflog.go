@@ -47,44 +47,47 @@ func NewReflogCmd(application *apppkg.App) *cobra.Command {
 // formatOperations displays operations in human-readable format.
 func formatOperations(operations []apppkg.OperationEntry, verbose bool) {
 	const maxMsgLen = 40
-	const dateWidth = 19     // "2006-01-02 15:04:05"
-	const opWidth = 8        // longest op: "restore"
-	const sep = "    "       // spacing between columns
+	const maxWidth = 60
+	const sep = "    "
+	const colSep = ""
 
 	descs := make([]string, len(operations))
 	for i, op := range operations {
 		descs[i] = truncateParensMessage(op.Desc, maxMsgLen)
 	}
 
-	descWidth := 20
-	for _, d := range descs {
-		if len(d) > descWidth {
-			descWidth = len(d)
-		}
-	}
-	if descWidth > 60 {
-		descWidth = 60
-	}
-
-	// Header: format plain text at correct width, then colorize.
-	fmt.Printf("%s%s%s%s%s\n",
-		colorCyan(fmt.Sprintf("%-*s", dateWidth, "DATE")),
-		sep,
-		colorCyan(fmt.Sprintf("%-*s", opWidth, "OP")),
-		sep,
-		colorCyan(fmt.Sprintf("%-*s", descWidth, "DESCRIPTION")))
+	cw := newColWidths(3) // date, op, desc
+	cw.feed(0, "DATE")
+	cw.feed(1, "OP")
+	cw.feed(2, "DESCRIPTION")
 
 	for i, op := range operations {
-		desc := descs[i]
-		if len(desc) > descWidth {
-			desc = desc[:descWidth-3] + "..."
-		}
-		fmt.Printf("%s%s%s%s%s\n",
-			fmt.Sprintf("%-*s", dateWidth, op.Timestamp.Format("2006-01-02 15:04:05")),
-			sep,
-			colorYellow(fmt.Sprintf("%-*s", opWidth, string(op.Op))),
-			sep,
-			fmt.Sprintf("%-*s", descWidth, desc))
+		cw.feed(0, op.Timestamp.Format("2006-01-02 15:04:05"))
+		cw.feed(1, string(op.Op))
+		cw.feed(2, descs[i])
+	}
+	if cw.v[2] > maxWidth {
+		cw.v[2] = maxWidth
+	}
+
+	wDate := cw.v[0]
+	wOp := cw.v[1]
+	wDesc := cw.v[2]
+
+	// Header: format plain text at correct width, then colorize.
+	fmt.Print(
+		colorCyan(fmt.Sprintf("%-*s", wDate, "DATE")), sep,
+		colorCyan(fmt.Sprintf("%-*s", wOp, "OP")), sep,
+		colorCyan(fmt.Sprintf("%-*s", wDesc, "DESCRIPTION")), colSep,
+		"\n")
+
+	for i, op := range operations {
+		desc := truncateByWidth(descs[i], wDesc)
+		fmt.Print(
+			fmt.Sprintf("%-*s", wDate, op.Timestamp.Format("2006-01-02 15:04:05")), sep,
+			colorYellow(fmt.Sprintf("%-*s", wOp, string(op.Op))), sep,
+			fmt.Sprintf("%-*s", wDesc, desc), colSep,
+			"\n")
 		if verbose {
 			for _, change := range op.RefChanges {
 				fmt.Printf("  %s: %s → %s\n", colorGray(change.Ref), colorGray(shortRef(change.Before)), colorGray(shortRef(change.After)))
