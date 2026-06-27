@@ -154,7 +154,7 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 		} else {
 			fmt.Printf("Author:  %s\n", c.Author.Name)
 		}
-		fmt.Printf("Date:    %s\n", c.Timestamp.Format("Mon Jan 2 15:04:05 2006 -0700"))
+		fmt.Printf("Date:    %s\n", c.Timestamp.Format("06-01-02 15:04"))
 		fmt.Printf("Message: %s\n", c.Message)
 		fmt.Println()
 	}
