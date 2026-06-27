@@ -23,7 +23,7 @@ func CalculateHashFromFile(path string) (string, error) {
 
 	head := make([]byte, 8192)
 	n, readErr := io.ReadFull(f, head)
-	if readErr != nil && readErr != io.ErrUnexpectedEOF {
+	if readErr != nil && readErr != io.ErrUnexpectedEOF && readErr != io.EOF {
 		return "", readErr
 	}
 	head = head[:n]

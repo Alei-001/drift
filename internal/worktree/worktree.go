@@ -617,7 +617,7 @@ func (w *Worktree) PutBlobForAdd(path string) (string, error) {
 	}
 	head := (*headBuf)[:8192]
 	n, err := io.ReadFull(f, head)
-	if err != nil && err != io.ErrUnexpectedEOF {
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 		core.PutByteSlice(headBuf)
 		return "", err
 	}
