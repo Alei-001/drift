@@ -21,12 +21,28 @@ func CalculateHashFromFile(path string) (string, error) {
 	}
 	defer f.Close()
 
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
+	head := make([]byte, 8192)
+	n, readErr := io.ReadFull(f, head)
+	if readErr != nil && readErr != io.ErrUnexpectedEOF {
+		return "", readErr
+	}
+	head = head[:n]
+
+	if bytes.Contains(head, []byte{0}) {
+		r := io.MultiReader(bytes.NewReader(head), f)
+		h := sha256.New()
+		if _, err := io.Copy(h, r); err != nil {
+			return "", err
+		}
+		return hex.EncodeToString(h.Sum(nil)), nil
 	}
 
-	return hex.EncodeToString(h.Sum(nil)), nil
+	rest, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	data := append(head, rest...)
+	return CalculateHash(bytes.ReplaceAll(data, []byte{'\r', '\n'}, []byte{'\n'})), nil
 }
 
 // CalculateHashFromFileLF reads the file at path, normalizes CRLF→LF line

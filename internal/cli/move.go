@@ -7,12 +7,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewMvCmd creates the mv subcommand.
-func NewMvCmd(application *apppkg.App) *cobra.Command {
+// NewMoveCmd creates the move subcommand.
+func NewMoveCmd(application *apppkg.App) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "mv <source> [<source>...] <dest>",
+		Use:   "move <source> [<source>...] <dest>",
 		Short: "Move or rename files",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {

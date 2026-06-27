@@ -11,17 +11,15 @@ import (
 )
 
 type SaveOptions struct {
-	Amend bool
-	All   bool
-	Tag   string
+	Tag string
 }
 
 type SaveResult struct {
-	ID          string
-	Message     string
-	Branch      string
+	ID           string
+	Message      string
+	Branch       string
 	ChangedPaths []string
-	Amended     bool
+	TagWarning   error
 }
 
 func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
@@ -29,31 +27,9 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 		return nil, fmt.Errorf("repository config is not initialized")
 	}
 
-	if opts.All {
-		var idx core.Index
-		if err := a.store.LoadIndex(&idx); err != nil {
-			return nil, fmt.Errorf("failed to load index: %w", err)
-		}
-		if _, _, err := a.wt.StageAll(&idx); err != nil {
-			return nil, fmt.Errorf("failed to stage changes: %w", err)
-		}
-		if err := a.store.SaveIndex(&idx); err != nil {
-			return nil, fmt.Errorf("failed to save index: %w", err)
-		}
-	}
-
-	var idx core.Index
-	if err := a.store.LoadIndex(&idx); err != nil {
-		return nil, fmt.Errorf("failed to load index: %w", err)
-	}
-
-	if len(idx.Entries) == 0 {
-		return nil, fmt.Errorf("nothing to save (use 'drift add' first, or 'drift save --all')")
-	}
-
 	if opts.Tag != "" {
 		if err := validateTagLabel(opts.Tag); err != nil {
-			return nil, fmt.Errorf("failed to tag version: %w", err)
+			return nil, fmt.Errorf("invalid tag %q: %w", opts.Tag, err)
 		}
 	}
 
@@ -70,122 +46,43 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	}
 	branchCommitCount := len(branchCommits)
 
+	var parentTree *core.Tree
+	var parentHash string
+	if branchCommitCount > 0 {
+		parentHash = branchCommits[0].Hash
+		if branchCommits[0].TreeHash != "" {
+			t, treeErr := a.store.GetTree(branchCommits[0].TreeHash)
+			if treeErr != nil && !errors.Is(treeErr, storage.ErrObjectNotFound) {
+				return nil, fmt.Errorf("failed to load parent tree: %w", treeErr)
+			}
+			parentTree = t
+		}
+	}
+
+	idx, changedPaths, err := a.wt.BuildChangedIndex(parentTree)
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect changes: %w", err)
+	}
+
+	if len(changedPaths) == 0 {
+		return nil, fmt.Errorf("nothing changed since last version")
+	}
+
 	builder := core.NewTreeBuilder(func(t *core.Tree) error {
 		return a.store.PutTree(t)
 	})
 
 	var tree *core.Tree
-	if branchCommitCount > 0 && branchCommits[0].TreeHash != "" {
-		// Reuse unchanged subtrees from the parent commit's tree.
-		parentTree, parentErr := a.store.GetTree(branchCommits[0].TreeHash)
-		if parentErr != nil && !errors.Is(parentErr, storage.ErrObjectNotFound) {
-			return nil, fmt.Errorf("failed to load parent tree: %w", parentErr)
-		}
-		if parentTree != nil {
-			tree, err = builder.BuildFromIndexWithBase(&idx, parentTree, a.store)
-		}
-	}
-	if tree == nil {
-		tree, err = builder.BuildFromIndex(&idx)
+	if parentTree != nil {
+		tree, err = builder.BuildFromIndexWithBase(idx, parentTree, a.store)
+	} else {
+		tree, err = builder.BuildFromIndex(idx)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to build tree: %w", err)
 	}
 
-	parentHash := ""
-	if branchCommitCount > 0 {
-		parentHash = branchCommits[0].Hash
-		if branchCommits[0].TreeHash == tree.Hash {
-			if opts.Amend {
-				return nil, fmt.Errorf("nothing to amend (stage changes first with 'drift add')")
-			}
-			return nil, fmt.Errorf("nothing changed since last version (use 'drift add' after modifying files)")
-		}
-	}
-
-	// Check tag uniqueness BEFORE any persistence so that a tag conflict
-	// does not leave a half-written commit + branch ref behind.
-	if opts.Tag != "" {
-		tagRef := "tags/" + opts.Tag
-		existing, err := a.store.GetRef(tagRef)
-		if err == nil && existing != "" {
-			// Amend: allow overwriting when the tag already points to the
-			// commit being amended (it will be moved forward). A tag
-			// pointing elsewhere is a real conflict.
-			if !opts.Amend || branchCommitCount == 0 || existing != branchCommits[0].Hash {
-				return nil, fmt.Errorf("tag %q already exists", opts.Tag)
-			}
-		}
-	}
-
-	stagedPaths := a.computeChangedPaths(tree, branchCommits)
 	author := a.Author()
-
-	if opts.Amend {
-		if branchCommitCount == 0 {
-			return nil, fmt.Errorf("no version to amend (create one first with 'drift save')")
-		}
-		lastCommit := branchCommits[0]
-		message := msg
-		if message == "" {
-			message = lastCommit.Message
-		}
-		parentHash = lastCommit.Parent
-
-		commit, err := core.NewCommit(message, parentHash, branch, tree.Hash, author)
-		if err != nil {
-			return nil, fmt.Errorf("cannot create commit: %w", err)
-		}
-
-		prevBranchHash := lastCommit.Hash
-		if err := a.store.SaveCommitTransaction(commit, branch, &idx); err != nil {
-			return nil, fmt.Errorf("failed to save amended commit: %w", err)
-		}
-
-		changes := []RefChange{
-			{Ref: branch, Before: prevBranchHash, After: commit.Hash},
-		}
-
-		// Update existing tags that point to the old commit so they
-		// follow the amended commit.
-		oldTags := a.TagsByHash()
-		if labels, ok := oldTags[prevBranchHash]; ok {
-			for _, label := range labels {
-				tagRef := "tags/" + label
-				if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
-					return nil, fmt.Errorf("failed to update tag %q: %w", label, err)
-				}
-				changes = append(changes, RefChange{Ref: tagRef, Before: prevBranchHash, After: commit.Hash})
-			}
-		}
-
-		if opts.Tag != "" {
-			tagRef := "tags/" + opts.Tag
-			if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
-				return nil, fmt.Errorf("failed to save tag: %w", err)
-			}
-			changes = append(changes, RefChange{Ref: tagRef, Before: "", After: commit.Hash})
-		}
-		if err := a.recordOperation(OpSave, fmt.Sprintf("amend %s on %s", commit.ID, branch), changes); err != nil {
-			return nil, err
-		}
-
-		// AutoSync after amend (best-effort, non-fatal).
-		if err := a.AutoSync(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: sync failed: %v\n", err)
-		}
-
-		a.autoGC()
-
-		return &SaveResult{
-			ID:          commit.ID,
-			Message:     message,
-			Branch:      branch,
-			ChangedPaths: stagedPaths,
-			Amended:      true,
-		}, nil
-	}
-
 	commit, err := core.NewCommit(msg, parentHash, branch, tree.Hash, author)
 	if err != nil {
 		return nil, fmt.Errorf("cannot create commit: %w", err)
@@ -195,7 +92,7 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	if branchCommitCount > 0 {
 		prevBranchHash = branchCommits[0].Hash
 	}
-	if err := a.store.SaveCommitTransaction(commit, branch, &idx); err != nil {
+	if err := a.store.SaveCommitTransaction(commit, branch, idx); err != nil {
 		return nil, fmt.Errorf("failed to save commit: %w", err)
 	}
 
@@ -206,18 +103,24 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	changes := []RefChange{
 		{Ref: branch, Before: prevBranchHash, After: commit.Hash},
 	}
+	var tagWarning error
 	if opts.Tag != "" {
 		tagRef := "tags/" + opts.Tag
-		if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
-			return nil, fmt.Errorf("failed to save tag: %w", err)
+		existing, tagErr := a.store.GetRef(tagRef)
+		if tagErr == nil && existing != "" {
+			tagWarning = fmt.Errorf("tag %q already exists", opts.Tag)
+		} else {
+			if err := a.store.SaveRef(tagRef, commit.Hash); err != nil {
+				tagWarning = fmt.Errorf("failed to save tag: %w", err)
+			} else {
+				changes = append(changes, RefChange{Ref: tagRef, Before: "", After: commit.Hash})
+			}
 		}
-		changes = append(changes, RefChange{Ref: tagRef, Before: "", After: commit.Hash})
 	}
 	if err := a.recordOperation(OpSave, desc, changes); err != nil {
 		return nil, err
 	}
 
-	// AutoSync after save (best-effort, non-fatal).
 	if err := a.AutoSync(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: sync failed: %v\n", err)
 	}
@@ -225,10 +128,11 @@ func (a *App) Save(msg string, opts SaveOptions) (*SaveResult, error) {
 	a.autoGC()
 
 	return &SaveResult{
-		ID:          commit.ID,
-		Message:     msg,
-		Branch:      branch,
-		ChangedPaths: stagedPaths,
+		ID:           commit.ID,
+		Message:      msg,
+		Branch:       branch,
+		ChangedPaths: changedPaths,
+		TagWarning:   tagWarning,
 	}, nil
 }
 

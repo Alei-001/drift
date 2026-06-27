@@ -2,68 +2,64 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	apppkg "github.com/drift/drift/internal/app"
 	"github.com/spf13/cobra"
 )
 
-// NewTagCmd creates the tag subcommand.
+// NewTagCmd creates the tag subcommand group.
 func NewTagCmd(application *apppkg.App) *cobra.Command {
-	var (
-		deleteTag string
-	)
-
 	cmd := &cobra.Command{
-		Use:   "tag [<version>] [<label>]",
-		Short: "Manage tags for commits",
+		Use:   "tag <subcommand>",
+		Short: "Manage version tags",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Delete tag
-			if deleteTag != "" {
-				if err := application.TagDelete(deleteTag); err != nil {
-					return err
-				}
-				fmt.Printf("Deleted tag %s\n", colorGreen(deleteTag))
-				return nil
-			}
-
-			// List tags: drift tag (no args), or drift tag list
-			if len(args) == 0 || (len(args) == 1 && args[0] == "list") {
-				entries, err := application.TagList()
-				if err != nil {
-					return err
-				}
-
-				if len(entries) == 0 {
-					fmt.Println(colorGray("No tags defined"))
-					return nil
-				}
-
-				for _, e := range entries {
-					if e.ID != "" {
-						fmt.Printf("%-20s %s %s\n", colorGreen(e.Label), colorYellow(e.ID), e.Message)
-					} else {
-						fmt.Printf("%-20s %s\n", colorGreen(e.Label), colorYellow(shortHash(e.Hash)))
-					}
-				}
-				return nil
-			}
-
-			// Add tag
-			if len(args) == 2 {
-				version := args[0]
-				label := args[1]
-				if err := application.TagAdd(version, label); err != nil {
-					return err
-				}
-				fmt.Printf("Tagged %s as '%s'\n", version, colorGreen(label))
-				return nil
-			}
-
-			return fmt.Errorf("usage: drift tag <version> <label> or drift tag [list]")
+			return fmt.Errorf("use 'drift tag list', 'drift tag add <version> <name>', or 'drift tag remove <name>'")
 		},
 	}
 
-	cmd.Flags().StringVar(&deleteTag, "delete", "", "Delete a tag")
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all tags",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			entries, err := application.TagList()
+			if err != nil {
+				return err
+			}
+			for _, e := range entries {
+				msg := strings.SplitN(e.Message, "\n", 2)[0]
+				fmt.Printf("%s  → %s  %s\n", colorYellow(e.Label), colorGreen(e.ID), msg)
+			}
+			return nil
+		},
+	}
 
+	addCmd := &cobra.Command{
+		Use:   "add <version> <name>",
+		Short: "Add a tag to a version",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := application.TagAdd(args[0], args[1]); err != nil {
+				return err
+			}
+			fmt.Printf("Tagged %s as '%s'\n", args[0], colorGreen(args[1]))
+			return nil
+		},
+	}
+
+	removeCmd := &cobra.Command{
+		Use:   "remove <name>",
+		Short: "Remove a tag",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := application.TagDelete(args[0]); err != nil {
+				return err
+			}
+			fmt.Printf("Deleted tag %s\n", colorGreen(args[0]))
+			return nil
+		},
+	}
+
+	cmd.AddCommand(listCmd, addCmd, removeCmd)
 	return cmd
 }

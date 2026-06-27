@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/drift/drift/internal/config"
@@ -91,7 +90,7 @@ func TestUnstageAll_PreservesFullSnapshot(t *testing.T) {
 	writeFile(t, a.dir, "ml/gv.doc", "gv")
 	writeFile(t, a.dir, "ml/mc.ai", "mc")
 	writeFile(t, a.dir, "p.txt", "p")
-	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+	if _, err := a.Save("init", SaveOptions{}); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
@@ -156,7 +155,7 @@ func TestUnstageAll_ThenSave_NoDataLoss(t *testing.T) {
 	writeFile(t, a.dir, "keep2.txt", "k2")
 	writeFile(t, a.dir, "del.txt", "d")
 	writeFile(t, a.dir, "mod.txt", "m")
-	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+	if _, err := a.Save("init", SaveOptions{}); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
@@ -210,7 +209,7 @@ func TestUnstagePath_RestoresCommittedState(t *testing.T) {
 	a := newTestApp(t)
 	writeFile(t, a.dir, "a.txt", "a")
 	writeFile(t, a.dir, "b.txt", "b")
-	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+	if _, err := a.Save("init", SaveOptions{}); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
@@ -270,7 +269,7 @@ func TestUnstagePath_RestoresCommittedState(t *testing.T) {
 func TestUnstagePath_NewlyStagedAdd_BecomesUntracked(t *testing.T) {
 	a := newTestApp(t)
 	writeFile(t, a.dir, "a.txt", "a")
-	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+	if _, err := a.Save("init", SaveOptions{}); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
@@ -320,7 +319,7 @@ func TestBuildIndexFromCommit_KeepsUnchangedFiles(t *testing.T) {
 	a := newTestApp(t)
 	writeFile(t, a.dir, "a.txt", "a")
 	writeFile(t, a.dir, "ml/b.txt", "b")
-	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+	if _, err := a.Save("init", SaveOptions{}); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 	idx, err := a.wt.BuildIndexFromCommit()
@@ -336,57 +335,74 @@ func TestBuildIndexFromCommit_KeepsUnchangedFiles(t *testing.T) {
 	}
 }
 
-// TestSave_TagConflict_BeforePersistence verifies that a tag conflict is
-// detected before any commit/branch-ref is persisted, so a retry with a
-// different tag does not produce "nothing changed since last version".
+// TestSave_TagConflict_BeforePersistence verifies that a tag conflict produces
+// a TagWarning but does not prevent the save. A retry with a different tag
+// should succeed.
 func TestSave_TagConflict_BeforePersistence(t *testing.T) {
 	a := newTestApp(t)
 	writeFile(t, a.dir, "a.txt", "a")
-	res, err := a.Save("init", SaveOptions{All: true, Tag: "v1"})
+	res, err := a.Save("init", SaveOptions{Tag: "v1"})
 	if err != nil {
 		t.Fatalf("first Save failed: %v", err)
 	}
 
 	writeFile(t, a.dir, "a.txt", "a-modified")
-	addPath(t, a, "a.txt")
 
-	_, err = a.Save("second", SaveOptions{Tag: "v1"})
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("expected tag conflict error, got: %v", err)
+	res2, err := a.Save("second", SaveOptions{Tag: "v1"})
+	if err != nil {
+		t.Fatalf("second Save (duplicate tag) failed: %v", err)
+	}
+	if res2.TagWarning == nil {
+		t.Fatalf("expected TagWarning for duplicate tag, got nil")
 	}
 
-	// The commit must NOT have been persisted — retry with a new tag should
-	// succeed, not "nothing changed since last version".
-	res2, err := a.Save("second", SaveOptions{Tag: "v2"})
+	// Retry with a new tag should succeed without warning.
+	writeFile(t, a.dir, "a.txt", "a-modified3")
+	res3, err := a.Save("third", SaveOptions{Tag: "v2"})
 	if err != nil {
 		t.Fatalf("retry Save with different tag failed: %v", err)
 	}
-	if res2.ID == res.ID {
-		t.Errorf("retry saved new commit ID %s, expected different from %s", res2.ID, res.ID)
+	if res3.TagWarning != nil {
+		t.Errorf("unexpected TagWarning: %v", res3.TagWarning)
+	}
+	if res3.ID == res.ID {
+		t.Errorf("retry saved new commit ID %s, expected different from %s", res3.ID, res.ID)
 	}
 }
 
-// TestSave_AmendTag_AlreadyPointsToAmendedCommit allows overwriting a tag
-// that points to the commit being amended (it will be moved forward).
-func TestSave_AmendTag_AlreadyPointsToAmendedCommit(t *testing.T) {
+// TestSave_TagConflict_NonFatal verifies that a duplicate tag produces a
+// TagWarning on the SaveResult but does not fail the save.
+func TestSave_TagConflict_NonFatal(t *testing.T) {
 	a := newTestApp(t)
 	writeFile(t, a.dir, "a.txt", "a")
-	if _, err := a.Save("init", SaveOptions{All: true, Tag: "v1"}); err != nil {
-		t.Fatalf("initial Save failed: %v", err)
+	res, err := a.Save("init", SaveOptions{Tag: "v1"})
+	if err != nil {
+		t.Fatalf("first Save failed: %v", err)
+	}
+	if res.TagWarning != nil {
+		t.Fatalf("unexpected TagWarning on first save: %v", res.TagWarning)
 	}
 
-	writeFile(t, a.dir, "a.txt", "a2")
-	addPath(t, a, "a.txt")
-	res, err := a.Save("amended", SaveOptions{Amend: true, Tag: "v1"})
+	writeFile(t, a.dir, "a.txt", "a-modified")
+
+	res2, err := a.Save("second", SaveOptions{Tag: "v1"})
 	if err != nil {
-		t.Fatalf("amend with same tag failed: %v", err)
+		t.Fatalf("second Save failed: %v", err)
 	}
-	if !res.Amended {
-		t.Errorf("expected Amended=true")
+	if res2.TagWarning == nil {
+		t.Errorf("expected TagWarning for duplicate tag, got nil")
 	}
-	hash, err := a.store.GetRef("tags/v1")
-	if err != nil || hash == "" {
-		t.Fatalf("tag v1 should exist after amend")
+	if res2.ID == res.ID {
+		t.Errorf("second save produced same commit ID %s", res2.ID)
+	}
+
+	writeFile(t, a.dir, "a.txt", "a-modified2")
+	res3, err := a.Save("third", SaveOptions{Tag: "v2"})
+	if err != nil {
+		t.Fatalf("third Save failed: %v", err)
+	}
+	if res3.TagWarning != nil {
+		t.Errorf("unexpected TagWarning: %v", res3.TagWarning)
 	}
 }
 
@@ -403,7 +419,7 @@ func TestSave_PreservesUnchangedSubdirFiles(t *testing.T) {
 	writeFile(t, a.dir, "2/w.txt", "w")
 	writeFile(t, a.dir, "zc/ji.ts", "ji")
 	writeFile(t, a.dir, "zc/lj.txt", "lj")
-	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+	if _, err := a.Save("init", SaveOptions{}); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
@@ -456,37 +472,27 @@ func TestSave_PreservesUnchangedSubdirFiles(t *testing.T) {
 		}
 	}
 
-	// Status must be clean — no spurious staged additions.
-	s, err = a.Status()
-	if err != nil {
-		t.Fatalf("Status after save failed: %v", err)
-	}
-	if !s.IsClean() {
-		for p, fs := range *s {
-			if fs.Staging != core.Unmodified {
-				t.Errorf("unexpected staged change: %s=%q worktree=%q", p, fs.Staging, fs.Worktree)
-			}
-		}
-		t.Fatalf("expected clean status after save, got %d entries", len(*s))
+	// Deleted g.txt must not appear in the new commit.
+	if have["g.txt"] {
+		t.Errorf("commit %s still contains deleted file g.txt", res.ID)
 	}
 }
 
-// TestSave_AmendTag_NewTagOnAmend allows adding a brand-new tag on amend.
-func TestSave_AmendTag_NewTagOnAmend(t *testing.T) {
+// TestSave_TagNewTag verifies that a new tag is successfully created on save.
+func TestSave_TagNewTag(t *testing.T) {
 	a := newTestApp(t)
 	writeFile(t, a.dir, "a.txt", "a")
-	if _, err := a.Save("init", SaveOptions{All: true}); err != nil {
+	if _, err := a.Save("init", SaveOptions{}); err != nil {
 		t.Fatalf("initial Save failed: %v", err)
 	}
 
 	writeFile(t, a.dir, "a.txt", "a2")
-	addPath(t, a, "a.txt")
-	res, err := a.Save("amended", SaveOptions{Amend: true, Tag: "v1"})
+	res, err := a.Save("updated", SaveOptions{Tag: "v1"})
 	if err != nil {
-		t.Fatalf("amend with new tag failed: %v", err)
+		t.Fatalf("Save with new tag failed: %v", err)
 	}
 	hash, err := a.store.GetRef("tags/v1")
 	if err != nil || hash == "" {
-		t.Fatalf("tag v1 should exist after amend with new tag, res=%+v", res)
+		t.Fatalf("tag v1 should exist after Save with new tag, res=%+v", res)
 	}
 }

@@ -23,21 +23,16 @@ func validateTagLabel(label string) error {
 	if len(label) > 100 {
 		return fmt.Errorf("tag too long (max 100 characters)")
 	}
-	if strings.ContainsAny(label, `/\`) {
-		return fmt.Errorf("tag cannot contain path separators")
-	}
 	if label == "." || label == ".." {
 		return fmt.Errorf("tag cannot be '.' or '..'")
 	}
 	for _, c := range label {
-		if c == 0 || c < 0x20 {
-			return fmt.Errorf("tag cannot contain null bytes or control characters")
+		if c <= 0x1F || c == 0x7F {
+			return fmt.Errorf("tag cannot contain control characters")
 		}
-	}
-	for _, c := range label {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-			(c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-') {
-			return fmt.Errorf("tag can only contain letters, digits, '.', '_', and '-'")
+		switch c {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			return fmt.Errorf("tag cannot contain character: %q", c)
 		}
 	}
 	return nil

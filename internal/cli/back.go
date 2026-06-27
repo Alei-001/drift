@@ -7,17 +7,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewRestoreCmd creates the restore subcommand.
-func NewRestoreCmd(application *apppkg.App) *cobra.Command {
+// NewBackCmd creates the back subcommand.
+func NewBackCmd(application *apppkg.App) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "restore <version> [<path>...]",
+		Use:   "back [<version>] [<path>...]",
 		Short: "Restore working tree to a specific version",
-		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			version := args[0]
-			filters := args[1:]
+			version := ""
+			var filters []string
+			if len(args) > 0 {
+				version = args[0]
+				filters = args[1:]
+			} else {
+				version = application.CurrentBranch()
+			}
+
+			if !force {
+				status, err := application.Status()
+				if err != nil {
+					return err
+				}
+				if !status.IsClean() {
+					return fmt.Errorf("You have unsaved changes. Save them first with 'drift save' or use --force to discard.")
+				}
+			}
 
 			result, err := application.Restore(version, filters, force)
 			if err != nil {

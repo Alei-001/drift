@@ -55,8 +55,9 @@ func validateHash(hash string) error {
 	return nil
 }
 
-// validateRefName checks that name only contains [A-Za-z0-9._-/] and does
-// not contain "..". This prevents path traversal via crafted ref names.
+// validateRefName blocks control characters, filesystem-dangerous characters
+// (\, :, *, ?, ", <, >, |) and ".." to prevent path traversal. Allows all
+// other Unicode characters including CJK.
 func validateRefName(name string) error {
 	if name == "" {
 		return fmt.Errorf("%w: empty ref name", ErrInvalidRefName)
@@ -65,8 +66,11 @@ func validateRefName(name string) error {
 		return fmt.Errorf("%w: %q contains '..'", ErrInvalidRefName, name)
 	}
 	for _, c := range name {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-			(c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '/') {
+		if c <= 0x1F || c == 0x7F {
+			return fmt.Errorf("%w: %q contains control character %q", ErrInvalidRefName, name, c)
+		}
+		switch c {
+		case '\\', ':', '*', '?', '"', '<', '>', '|':
 			return fmt.Errorf("%w: %q contains invalid character %q", ErrInvalidRefName, name, c)
 		}
 	}

@@ -423,3 +423,86 @@ func (w *Worktree) CleanUntracked(includeDirs bool, dryRun bool) ([]string, erro
 
 	return untracked, nil
 }
+
+// BuildChangedIndex scans the working directory and builds an index reflecting
+// all current file state, comparing against the parent tree. It auto-detects
+// modified, added (respecting .driftignore), and deleted files.
+// Returns the complete index and the list of paths that changed.
+func (w *Worktree) BuildChangedIndex(parentTree *core.Tree) (*core.Index, []string, error) {
+	idx, err := w.BuildIndexFromCommit()
+	if err != nil {
+		return nil, nil, err
+	}
+	if idx == nil {
+		idx = &core.Index{}
+	}
+
+	currentFiles := make(map[string]string)
+
+	err = core.WalkWorkingDirWithIgnore(w.Root, w.Root, func(path string, info os.FileInfo) error {
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
+		fileHash, hashErr := core.CalculateHashFromFile(fullPath)
+		if hashErr != nil {
+			return nil
+		}
+		currentFiles[path] = fileHash
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var changed []string
+
+	for _, entry := range idx.Entries {
+		newHash, onDisk := currentFiles[entry.Path]
+		if !onDisk {
+			changed = append(changed, entry.Path)
+			idx.Remove(entry.Path)
+			continue
+		}
+		if entry.Hash != newHash {
+			changed = append(changed, entry.Path)
+			entry.Hash = newHash
+			fullPath := filepath.Join(w.Root, filepath.FromSlash(entry.Path))
+			if info, statErr := os.Lstat(fullPath); statErr == nil {
+				entry.ModifiedAt = info.ModTime()
+				entry.Size = info.Size()
+			}
+			if addErr := idx.Add(entry); addErr != nil {
+				return nil, nil, fmt.Errorf("failed to update %s in index: %w", entry.Path, addErr)
+			}
+		}
+	}
+
+	for path, hash := range currentFiles {
+		if idx.Has(path) {
+			continue
+		}
+		changed = append(changed, path)
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
+		info, statErr := os.Lstat(fullPath)
+		mode := uint32(core.ModeRegular)
+		if statErr == nil && info.Mode()&0111 != 0 {
+			mode = core.ModeExecutable
+		}
+		entry := core.IndexEntry{
+			Path: path,
+			Hash: hash,
+			Mode: mode,
+		}
+		if statErr == nil {
+			entry.ModifiedAt = info.ModTime()
+			entry.Size = info.Size()
+		}
+		if addErr := idx.Add(entry); addErr != nil {
+			return nil, nil, fmt.Errorf("failed to add %s to index: %w", path, addErr)
+		}
+	}
+
+	sort.Strings(changed)
+	return idx, changed, nil
+}

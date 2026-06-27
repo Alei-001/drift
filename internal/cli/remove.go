@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewRmCmd creates the rm subcommand.
-func NewRmCmd(application *apppkg.App) *cobra.Command {
+// NewRemoveCmd creates the remove subcommand.
+func NewRemoveCmd(application *apppkg.App) *cobra.Command {
 	var (
 		cached    bool
 		recursive bool
@@ -16,7 +16,7 @@ func NewRmCmd(application *apppkg.App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "rm <path> [<path>...]",
+		Use:   "remove <path> [<path>...]",
 		Short: "Remove files from the working tree and staging area",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

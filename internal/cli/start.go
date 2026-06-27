@@ -13,10 +13,10 @@ import (
 
 var emailRegex = regexp.MustCompile(`^[\w.!#$%&'*+/=?^_` + "`" + `{|}~-]+@[\w.-]+\.[a-zA-Z]{2,}$`)
 
-// NewInitCmd creates the init subcommand.
-func NewInitCmd(application *apppkg.App) *cobra.Command {
+// NewStartCmd creates the start subcommand.
+func NewStartCmd(application *apppkg.App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "init",
+		Use:   "start",
 		Short: "Initialize a Drift project",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if application.IsInitialized() {
@@ -30,7 +30,6 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 
 			fmt.Println(colorGreen("Drift project initialized"))
 
-			// Load existing global user info as defaults for the prompt.
 			defaultName, err := application.ConfigGet(apppkg.GlobalScope, "user.name")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s: could not read global config: %v\n", colorYellow("Warning"), err)
@@ -61,22 +60,17 @@ func NewInitCmd(application *apppkg.App) *cobra.Command {
 			}
 
 			fmt.Println("\nNext steps:")
-			fmt.Println(colorGray("  drift add .       # stage your files"))
 			fmt.Println(colorGray("  drift save -m \"first version\""))
-			fmt.Println(colorGray("  drift log --all       # view history"))
+			fmt.Println(colorGray("  drift history         # view history"))
 			return nil
 		},
 	}
 }
 
 // promptUserInfoNew asks the user for their name and email via stdin.
-// If defaults are provided, they are shown in the prompt. Returns the
-// defaults (if user presses Enter) or the entered values. Returns empty
-// strings if stdin is not interactive.
 func promptUserInfoNew(defaultName, defaultEmail string) (name, email string) {
 	info, err := os.Stdin.Stat()
 	if err != nil || (info.Mode()&os.ModeCharDevice) == 0 {
-		// Non-interactive stdin (e.g. piped input).
 		return "", ""
 	}
 

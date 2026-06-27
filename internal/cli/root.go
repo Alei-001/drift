@@ -56,17 +56,15 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 			// MAINTENANCE: when adding a new command that works without
 			// an initialized repository, add its case here.
 			// See docs/refactoring/03-phase3-cli-framework.md.
-			switch cmd.Name() {
-			case "drift", "init", "help", "version", "clone", "upgrade":
-				return nil
-		case "config":
-			// Config subcommands handle init at the app layer
-			// (e.g. config remote works globally, config user.name needs a repo).
+		switch cmd.Name() {
+		case "drift", "start", "help", "version", "clone", "upgrade":
 			return nil
-			}
+		case "remote", "whoami":
+			return nil
+		}
 
 			if !application.IsInitialized() {
-				return fmt.Errorf("not a drift repository (run 'drift init')")
+				return fmt.Errorf("not a drift repository (run 'drift start')")
 			}
 			return nil
 		},
@@ -82,32 +80,25 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	// Register version command (reuses old versionCmd variable from version.go)
 	root.AddCommand(versionCmd)
 
-	// Register all new commands
-	root.AddCommand(NewInitCmd(application))
-	root.AddCommand(NewAddCmd(application))
-	root.AddCommand(NewUnstageCmd(application))
+	// Register all commands
+	root.AddCommand(NewStartCmd(application))
 	root.AddCommand(NewSaveCmd(application))
-	root.AddCommand(NewLogCmd(application))
+	root.AddCommand(NewHistoryCmd(application))
 	root.AddCommand(NewUndoCmd(application))
-	root.AddCommand(NewReflogCmd(application))
 	root.AddCommand(NewStatusCmd(application))
 	root.AddCommand(NewDiffCmd(application))
 	root.AddCommand(NewExportCmd(application))
-	root.AddCommand(NewRestoreCmd(application))
-	root.AddCommand(NewSwitchCmd(application))
+	root.AddCommand(NewBackCmd(application))
 	root.AddCommand(NewBranchCmd(application))
 	root.AddCommand(NewTagCmd(application))
-	root.AddCommand(NewRmCmd(application))
-	root.AddCommand(NewMvCmd(application))
-	root.AddCommand(NewWIPCmd(application))
+	root.AddCommand(NewRemoveCmd(application))
+	root.AddCommand(NewMoveCmd(application))
+	root.AddCommand(NewIgnoreCmd(application))
+	root.AddCommand(NewWhoamiCmd(application))
+	root.AddCommand(NewRemoteCmd(application))
+	root.AddCommand(NewBackupCmd(application))
 	root.AddCommand(NewUpgradeCmd())
 	root.AddCommand(NewCleanCmd(application))
-	// Sync and Clone are disabled in v1.0.0 pending integration testing
-	// with real remote servers. The sync engine and transports remain in the
-	// codebase and are covered by unit tests.
-	// root.AddCommand(NewCloneCmd(application))
-	root.AddCommand(NewConfigCmd(application))
-	// root.AddCommand(NewSyncCmd(application))
 	root.AddCommand(NewGCCmd(application))
 
 	return root

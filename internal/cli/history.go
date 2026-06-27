@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewLogCmd creates the log subcommand (commit history).
-func NewLogCmd(application *apppkg.App) *cobra.Command {
+// NewHistoryCmd creates the history subcommand (commit history).
+func NewHistoryCmd(application *apppkg.App) *cobra.Command {
 	var (
 		allBranches bool
 		oneline     bool
@@ -19,7 +19,7 @@ func NewLogCmd(application *apppkg.App) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "log [<branch>]",
+		Use:   "history [<branch>]",
 		Short: "Show commit history",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			branch := ""
@@ -47,7 +47,7 @@ func NewLogCmd(application *apppkg.App) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&allBranches, "all", false, "Show all branches")
-	cmd.Flags().BoolVar(&oneline, "oneline", false, "Show one line per commit")
+	cmd.Flags().BoolVar(&oneline, "brief", false, "Show one line per commit")
 	cmd.Flags().IntVarP(&number, "number", "n", 0, "Limit number of commits (0 = all)")
 	cmd.Flags().BoolVar(&porcelain, "porcelain", false, "Machine-readable output")
 

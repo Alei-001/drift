@@ -601,3 +601,15 @@ func isASCIIPunct(ch byte) bool {
 		(ch >= '[' && ch <= '`') ||
 		(ch >= '{' && ch <= '~')
 }
+
+func NewIgnoreMatcherFromPatterns(rawPatterns []string) *IgnoreMatcher {
+	m := &IgnoreMatcher{}
+	for _, p := range rawPatterns {
+		p = strings.TrimSpace(p)
+		if p == "" || strings.HasPrefix(p, "#") {
+			continue
+		}
+		m.patterns = append(m.patterns, ParseDriftPattern(p))
+	}
+	return m
+}

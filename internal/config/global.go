@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // GlobalConfig stores drift-wide settings that apply across all projects.
@@ -60,6 +61,21 @@ func LoadGlobalConfig() (*GlobalConfig, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("invalid global config: %w", err)
 	}
+	if strings.HasPrefix(cfg.Password, "$aes$") {
+		pc, err := NewPasswordCrypto()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "drift: cannot initialize password crypto: %v\n", err)
+			cfg.Password = ""
+			return cfg, nil
+		}
+		plaintext, err := pc.DecryptPassword(cfg.Password)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "drift: cannot decrypt stored password, run 'drift remote setup' to re-enter it\n")
+			cfg.Password = ""
+		} else {
+			cfg.Password = plaintext
+		}
+	}
 	return cfg, nil
 }
 
@@ -72,6 +88,17 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("cannot create %s: %w", dir, err)
+	}
+	if cfg.Password != "" && !strings.HasPrefix(cfg.Password, "$aes$") {
+		pc, err := NewPasswordCrypto()
+		if err != nil {
+			return fmt.Errorf("cannot initialize password crypto: %w", err)
+		}
+		encrypted, err := pc.EncryptPassword(cfg.Password)
+		if err != nil {
+			return fmt.Errorf("cannot encrypt password: %w", err)
+		}
+		cfg.Password = encrypted
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

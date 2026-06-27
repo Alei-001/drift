@@ -85,7 +85,7 @@ func printStatus(s core.Status, branch, version, tag string) {
 	}
 
 	if len(staged) > 0 {
-		fmt.Println(colorCyan("Staged changes:"))
+		fmt.Println(colorCyan("Unsaved changes:"))
 		for _, line := range staged {
 			fmt.Println(line)
 		}
@@ -93,7 +93,6 @@ func printStatus(s core.Status, branch, version, tag string) {
 	}
 
 	if len(unstaged) > 0 {
-		fmt.Println(colorCyan("Unstaged changes:"))
 		for _, line := range unstaged {
 			fmt.Println(line)
 		}
@@ -101,7 +100,7 @@ func printStatus(s core.Status, branch, version, tag string) {
 	}
 
 	if len(untracked) > 0 {
-		fmt.Println(colorCyan("Untracked files:"))
+		fmt.Println(colorCyan("New files (not yet saved):"))
 		for _, line := range untracked {
 			fmt.Println(line)
 		}
