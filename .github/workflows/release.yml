@@ -67,15 +67,13 @@ jobs:
           $en = Get-Content docs/CHANGELOG.md -Raw
           $zh = Get-Content docs/CHANGELOG_zh-CN.md -Raw
 
-          if ($en -match "(?s)(## v$ver .*?)(?=\r?\n## v|\z)") {
-            $notes = $matches[1]
-          } else {
-            $notes = "Drift v$ver"
-          }
+          $blocks = $en -split '\r?\n(?=## v)'
+          $notes = ($blocks | Where-Object { $_ -match "^## v$ver\b" }) -join ''
+          if (-not $notes) { $notes = "Drift v$ver" }
 
-          if ($zh -match "(?s)(## v$ver .*?)(?=\r?\n## v|\z)") {
-            $notes += "`n`n---`n`n" + $matches[1]
-          }
+          $zhBlocks = $zh -split '\r?\n(?=## v)'
+          $zn = ($zhBlocks | Where-Object { $_ -match "^## v$ver\b" }) -join ''
+          if ($zn) { $notes += "`n`n---`n`n$zn" }
 
           $notes | Out-File -FilePath release-notes.md -Encoding UTF8
           Write-Host "Release notes: $($notes.Length) chars"
