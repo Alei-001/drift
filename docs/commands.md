@@ -188,9 +188,9 @@ Changed 2 file(s):
 导出指定版本到文件系统。
 
 ```bash
-drift export a1b2c3d4 --to ./交付客户
-drift export a1b2c3d4 --to ./交付.zip --format zip
-drift export v1 --to ./draft 章节/
+drift export a1b2c3d4 -o ./交付客户
+drift export a1b2c3d4 -o ./交付.zip --format zip
+drift export v1 -o ./draft 章节/
 ```
 
 **参数：**

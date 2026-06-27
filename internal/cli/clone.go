@@ -15,7 +15,7 @@ func NewCloneCmd(application *apppkg.App) *cobra.Command {
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			remoteName := args[0]
-			destDir := "."
+			destDir := args[0]
 			if len(args) > 1 {
 				destDir = args[1]
 			}
@@ -28,7 +28,7 @@ func NewCloneCmd(application *apppkg.App) *cobra.Command {
 			fmt.Println(colorGray(fmt.Sprintf("Cloned %s to %s (%d file(s))", remoteName, destDir, count)))
 			fmt.Println("\nNext steps:")
 			fmt.Println(colorGray("  cd " + destDir))
-			fmt.Println(colorGray("  drift log --all       # view history"))
+			fmt.Println(colorGray("  drift history --brief  # view history"))
 			return nil
 		},
 	}
