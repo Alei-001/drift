@@ -59,8 +59,13 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 		switch cmd.Name() {
 		case "drift", "start", "help", "version", "clone", "upgrade":
 			return nil
-		case "remote", "whoami":
-			return nil
+		}
+
+		if parent := cmd.Parent(); parent != nil {
+			switch parent.Name() {
+			case "whoami", "remote":
+				return nil
+			}
 		}
 
 			if !application.IsInitialized() {

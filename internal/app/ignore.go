@@ -20,6 +20,10 @@ func (a *App) AddIgnorePattern(pattern string) error {
 				return fmt.Errorf("pattern %q already in .driftignore", pattern)
 			}
 		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			f.Close()
+			return fmt.Errorf("failed to read .driftignore: %w", scanErr)
+		}
 		f.Close()
 	}
 

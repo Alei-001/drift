@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/drift/drift/internal/config"
+	"golang.org/x/term"
 )
 
 func (a *App) RemoteSetup() error {
@@ -56,8 +57,12 @@ func (a *App) RemoteSetup() error {
 	}
 
 	fmt.Print("Password: ")
-	pass, _ := reader.ReadString('\n')
-	pass = strings.TrimSpace(pass)
+	passBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Println()
+	var pass string
+	if err == nil {
+		pass = strings.TrimSpace(string(passBytes))
+	}
 	if pass != "" {
 		gcfg.Password = pass
 	}

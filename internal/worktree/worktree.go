@@ -440,10 +440,22 @@ func (w *Worktree) BuildChangedIndex(parentTree *core.Tree) (*core.Index, []stri
 	currentFiles := make(map[string]string)
 
 	err = core.WalkWorkingDirWithIgnore(w.Root, w.Root, func(path string, info os.FileInfo) error {
-		if !info.Mode().IsRegular() {
+		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
+		mode := info.Mode()
+
+		if !mode.IsRegular() && mode&os.ModeSymlink == 0 {
 			return nil
 		}
-		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
+
+		if mode&os.ModeSymlink != 0 {
+			target, readErr := os.Readlink(fullPath)
+			if readErr != nil {
+				return nil
+			}
+			currentFiles[path] = core.CalculateHash([]byte(target))
+			return nil
+		}
+
 		fileHash, hashErr := core.CalculateHashFromFile(fullPath)
 		if hashErr != nil {
 			return nil
@@ -456,12 +468,13 @@ func (w *Worktree) BuildChangedIndex(parentTree *core.Tree) (*core.Index, []stri
 	}
 
 	var changed []string
+	var deleted []string
 
 	for _, entry := range idx.Entries {
 		newHash, onDisk := currentFiles[entry.Path]
 		if !onDisk {
 			changed = append(changed, entry.Path)
-			idx.Remove(entry.Path)
+			deleted = append(deleted, entry.Path)
 			continue
 		}
 		if entry.Hash != newHash {
@@ -478,6 +491,10 @@ func (w *Worktree) BuildChangedIndex(parentTree *core.Tree) (*core.Index, []stri
 		}
 	}
 
+	for _, path := range deleted {
+		idx.Remove(path)
+	}
+
 	for path, hash := range currentFiles {
 		if idx.Has(path) {
 			continue
@@ -486,8 +503,12 @@ func (w *Worktree) BuildChangedIndex(parentTree *core.Tree) (*core.Index, []stri
 		fullPath := filepath.Join(w.Root, filepath.FromSlash(path))
 		info, statErr := os.Lstat(fullPath)
 		mode := uint32(core.ModeRegular)
-		if statErr == nil && info.Mode()&0111 != 0 {
-			mode = core.ModeExecutable
+		if statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				mode = core.ModeSymlink
+			} else if info.Mode()&0111 != 0 {
+				mode = core.ModeExecutable
+			}
 		}
 		entry := core.IndexEntry{
 			Path: path,

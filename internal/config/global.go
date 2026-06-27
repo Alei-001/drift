@@ -89,18 +89,22 @@ func SaveGlobalConfig(cfg *GlobalConfig) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("cannot create %s: %w", dir, err)
 	}
-	if cfg.Password != "" && !strings.HasPrefix(cfg.Password, "$aes$") {
+	password := cfg.Password
+	if password != "" && !strings.HasPrefix(password, "$aes$") {
 		pc, err := NewPasswordCrypto()
 		if err != nil {
 			return fmt.Errorf("cannot initialize password crypto: %w", err)
 		}
-		encrypted, err := pc.EncryptPassword(cfg.Password)
+		encrypted, err := pc.EncryptPassword(password)
 		if err != nil {
 			return fmt.Errorf("cannot encrypt password: %w", err)
 		}
-		cfg.Password = encrypted
+		password = encrypted
 	}
+	prev := cfg.Password
+	cfg.Password = password
 	data, err := json.MarshalIndent(cfg, "", "  ")
+	cfg.Password = prev
 	if err != nil {
 		return err
 	}

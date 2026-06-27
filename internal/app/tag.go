@@ -56,7 +56,7 @@ func (a *App) TagAdd(version, label string) error {
 		return fmt.Errorf("failed to check tag existence: %w", err)
 	}
 	if existing != "" {
-		return fmt.Errorf("tag %q already exists (delete it first with 'drift tag --delete %s')", label, label)
+		return fmt.Errorf("tag %q already exists (delete it first with 'drift tag remove %s')", label, label)
 	}
 
 	if err := a.store.SaveRef(refName, commit.Hash); err != nil {
