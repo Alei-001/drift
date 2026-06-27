@@ -58,7 +58,7 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 			// an initialized repository, add its case here.
 			// See docs/refactoring/03-phase3-cli-framework.md.
 			switch cmd.Name() {
-			case "drift", "init", "help", "version", "clone":
+			case "drift", "init", "help", "version", "clone", "upgrade":
 				return nil
 		case "config":
 			// Config subcommands handle init at the app layer
@@ -101,6 +101,7 @@ func BuildRootCmd(application *app.App) *cobra.Command {
 	root.AddCommand(NewRmCmd(application))
 	root.AddCommand(NewMvCmd(application))
 	root.AddCommand(NewWIPCmd(application))
+	root.AddCommand(NewUpgradeCmd())
 	root.AddCommand(NewCleanCmd(application))
 	// Sync and Clone are disabled in v1.0.0 pending integration testing
 	// with real remote servers. The sync engine and transports remain in the

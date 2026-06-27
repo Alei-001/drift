@@ -33,7 +33,7 @@ type DiffResult struct {
 // computeEdits runs Myers diff on old/new content and returns the edit script.
 // Returns nil for binary content or empty data.
 func computeEdits(oldData, newData []byte, isBinary bool) []core.DiffEdit {
-	if isBinary || len(oldData) == 0 || len(newData) == 0 {
+	if isBinary {
 		return nil
 	}
 	oldLines := strings.Split(string(oldData), "\n")

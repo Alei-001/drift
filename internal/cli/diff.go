@@ -83,11 +83,11 @@ func NewDiffCmd(application *apppkg.App) *cobra.Command {
 			for _, e := range result.Entries {
 				switch e.Status {
 				case "added":
-					fmt.Printf("  + %s\n", e.Path)
-				case "modified":
-					fmt.Printf("  M %s\n", e.Path)
-				case "deleted":
-					fmt.Printf("  - %s\n", e.Path)
+						fmt.Printf("  A %s\n", e.Path)
+					case "modified":
+						fmt.Printf("  M %s\n", e.Path)
+					case "deleted":
+						fmt.Printf("  D %s\n", e.Path)
 				default:
 					fmt.Printf("  %s %s\n", e.Status, e.Path)
 				}
