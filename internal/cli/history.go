@@ -60,17 +60,19 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 		const maxCol = 40
 		const sep = "    "
 		const colSep = ""
+		const dateFmt = "06-01-02 15:04"
 
-		cw := newColWidths(4) // version, branch(/msg), msg, tag
+		cw := newColWidths(5) // version, date, branch(/msg), msg, tag
 
 		cw.feed(0, "VERSION")
+		cw.feed(1, "DATE")
 		if allBranches {
-			cw.feed(1, "BRANCH")
-			cw.feed(2, "MESSAGE")
+			cw.feed(2, "BRANCH")
+			cw.feed(3, "MESSAGE")
 		} else {
-			cw.feed(1, "MESSAGE")
+			cw.feed(2, "MESSAGE")
 		}
-		cw.feed(3, "TAG")
+		cw.feed(4, "TAG")
 
 		for _, c := range commits {
 			id := c.ID
@@ -78,27 +80,30 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 				id = id[:8]
 			}
 			cw.feed(0, id)
+			cw.feed(1, c.Timestamp.Format(dateFmt))
 			if allBranches {
-				cw.feed(1, c.Branch)
-				cw.feed(2, truncateByWidth(c.Message, maxCol))
+				cw.feed(2, c.Branch)
+				cw.feed(3, truncateByWidth(c.Message, maxCol))
 			} else {
-				cw.feed(1, truncateByWidth(c.Message, maxCol))
+				cw.feed(2, truncateByWidth(c.Message, maxCol))
 			}
-			cw.feed(3, strings.Join(tagsByHash[c.Hash], ", "))
+			cw.feed(4, strings.Join(tagsByHash[c.Hash], ", "))
 		}
 
 		cw.capAll(maxCol)
 
 		wVer := cw.v[0]
-		wBch := cw.v[1]
-		wMsg := cw.v[1]
+		wDat := cw.v[1]
+		wBch := cw.v[2]
+		wMsg := cw.v[2]
 		if allBranches {
-			wMsg = cw.v[2]
+			wMsg = cw.v[3]
 		}
-		wTag := cw.v[3]
+		wTag := cw.v[4]
 
 		hdrs := []interface{}{
 			colorCyan(fmt.Sprintf("%-*s", wVer, "VERSION")),
+			colorCyan(fmt.Sprintf("%-*s", wDat, "DATE")),
 		}
 		if allBranches {
 			hdrs = append(hdrs,
@@ -120,6 +125,7 @@ func formatCommits(commits []*core.Commit, tagsByHash map[string][]string, oneli
 
 			row := []interface{}{
 				colorYellow(fmt.Sprintf("%-*s", wVer, id)),
+				fmt.Sprintf("%-*s", wDat, c.Timestamp.Format(dateFmt)),
 			}
 			if allBranches {
 				row = append(row,
