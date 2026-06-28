@@ -40,7 +40,7 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 		}
 	}
 
-	snap, err := CreateSnapshot(store, dir, "first commit", "test")
+	snap, err := CreateSnapshot(store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 
 	// First commit
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644)
-	snap1, err := CreateSnapshot(store, dir, "first commit", "test")
+	snap1, err := CreateSnapshot(store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v2 - modified"), 0644)
 	os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("new file"), 0644)
 
-	snap2, err := CreateSnapshot(store, dir, "second commit", "test")
+	snap2, err := CreateSnapshot(store, dir, "second commit", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot failed: %v", err)
 	}
@@ -169,12 +169,12 @@ func TestCreateSnapshot_NothingChanged(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
 
-	_, err := CreateSnapshot(store, dir, "first commit", "test")
+	_, err := CreateSnapshot(store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
 
-	_, err = CreateSnapshot(store, dir, "second commit", "test")
+	_, err = CreateSnapshot(store, dir, "second commit", "test", nil)
 	if err == nil {
 		t.Fatal("expected 'nothing to save' error, got nil")
 	}
@@ -198,7 +198,7 @@ func TestCreateSnapshot_DefaultAuthor(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
 
-	snap, err := CreateSnapshot(store, dir, "test", "")
+	snap, err := CreateSnapshot(store, dir, "test", "", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestCreateSnapshot_EmptyMessage(t *testing.T) {
 	store := memory.NewMemoryStorage()
 	dir := t.TempDir()
 
-	_, err := CreateSnapshot(store, dir, "", "test")
+	_, err := CreateSnapshot(store, dir, "", "test", nil)
 	if err == nil {
 		t.Fatal("expected error for empty message, got nil")
 	}

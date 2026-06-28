@@ -28,6 +28,7 @@ var restoreCmd = &cobra.Command{
 
 		snapshot := resolveSnapshot(store, args[0])
 		if snapshot == nil {
+			statusFailed("Restore", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
 			return fmt.Errorf("snapshot not found: %s", args[0])
 		}
 
@@ -36,15 +37,31 @@ var restoreCmd = &cobra.Command{
 			filePath = args[1]
 		}
 
-		err = porcelain.RestoreSnapshot(store, cwd, snapshot.ID, filePath, restoreNoBackup)
+		backupID, err := porcelain.RestoreSnapshot(store, cwd, snapshot.ID, filePath, restoreNoBackup)
 		if err != nil {
+			statusFailed("Restore", "uncommitted changes would be overwritten.", "use 'drift save' first, or restore a single file.")
 			return err
 		}
 
 		if filePath != "" {
-			fmt.Printf("Restored %s from snapshot %s\n", filePath, snapshot.ShortID())
+			fmt.Printf(">>> Restored %s:%s [ok]\n", snapshot.ShortID(), filePath)
+			fmt.Println()
+			fmt.Printf("  ~  %s\n", filePath)
+			fmt.Println()
+			fmt.Println("  1 file: ~1")
+			if backupID != "" {
+				fmt.Printf("  backup: [%s]\n", backupID)
+			}
 		} else {
-			fmt.Printf("Restored to snapshot %s: %s\n", snapshot.ShortID(), snapshot.Message)
+			// Full restore: show added/modified/deleted files
+			add, mod, del := computeChanges(store, snapshot)
+			fmt.Printf(">>> Restored to %s [ok]\n", snapshot.ShortID())
+			printFileListWithSize(add, mod, del)
+			total := len(add) + len(mod) + len(del)
+			summaryLine(total, len(add), len(mod), len(del))
+			if backupID != "" {
+				fmt.Printf("  backup: [%s]\n", backupID)
+			}
 		}
 		return nil
 	},

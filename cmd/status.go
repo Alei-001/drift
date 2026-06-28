@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage/filesystem"
 	"github.com/your-org/drift/util/fsutil"
 )
+
+var statusShort bool
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -41,67 +41,70 @@ var statusCmd = &cobra.Command{
 		})
 
 		type change struct {
-			status string
-			path   string
+			typ  string // "+", "~", "-"
+			path string
 		}
 		var changes []change
-
 		printed := make(map[string]bool)
+
 		for _, entry := range index.Entries {
 			if info, ok := workspaceFiles[entry.Path]; ok {
 				if info.Size() != entry.Size || info.ModTime().Unix() != entry.ModTime {
-					changes = append(changes, change{"M", entry.Path})
+					changes = append(changes, change{"~", entry.Path})
 				}
 				printed[entry.Path] = true
 			} else {
-				changes = append(changes, change{"D", entry.Path})
+				changes = append(changes, change{"-", entry.Path})
 				printed[entry.Path] = true
 			}
 		}
 
 		for path := range workspaceFiles {
 			if !printed[path] {
-				changes = append(changes, change{"A", path})
+				changes = append(changes, change{"+", path})
 			}
 		}
 
 		if len(changes) == 0 {
-			fmt.Println("Nothing to save, working tree clean.")
+			statusOK("Status")
+			fmt.Println("Nothing changed since last save.")
 			return nil
 		}
 
-		headRef, err := store.GetRef("HEAD")
-		if err != nil || headRef.Target.IsZero() {
-			fmt.Printf("%d files changed:\n", len(changes))
-		} else {
-			headSnapshot, err := store.GetSnapshot(core.SnapshotID{Hash: headRef.Target})
-			if err != nil {
-				fmt.Printf("%d files changed:\n", len(changes))
-			} else {
-				since := time.Since(time.Unix(headSnapshot.Timestamp, 0))
-				fmt.Printf("Changes since last save (%s ago), %d files changed:\n", formatDuration(since), len(changes))
+		// Count by type
+		var added, modified, deleted int
+		for _, c := range changes {
+			switch c.typ {
+			case "+":
+				added++
+			case "~":
+				modified++
+			case "-":
+				deleted++
 			}
 		}
 
-		for _, c := range changes {
-			fmt.Printf("%s %s\n", c.status, c.path)
-		}
+		// Build header
+		header := fmt.Sprintf("Status (%d files changed since last save)", len(changes))
 
+		if statusShort {
+			fmt.Printf(">>> Status (%d files)\n", len(changes))
+			for _, c := range changes {
+				fmt.Println(c.path)
+			}
+		} else {
+			fmt.Printf(">>> %s\n", header)
+			fmt.Println()
+			for _, c := range changes {
+				fmt.Printf("  %s  %s\n", c.typ, c.path)
+			}
+			summaryLine(len(changes), added, modified, deleted)
+		}
 		return nil
 	},
 }
 
 func init() {
+	statusCmd.Flags().BoolVarP(&statusShort, "short", "s", false, "short format, paths only")
 	rootCmd.AddCommand(statusCmd)
-}
-
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%d second(s)", int(d.Seconds()))
-	} else if d < time.Hour {
-		return fmt.Sprintf("%d minute(s)", int(d.Minutes()))
-	} else if d < 24*time.Hour {
-		return fmt.Sprintf("%d hour(s)", int(d.Hours()))
-	}
-	return fmt.Sprintf("%d day(s)", int(d.Hours()/24))
 }

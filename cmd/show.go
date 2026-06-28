@@ -3,7 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/core"
@@ -12,6 +15,8 @@ import (
 	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/storage/filesystem"
 )
+
+var showOpen bool
 
 var showCmd = &cobra.Command{
 	Use:   "show <snapshot-id> <file>",
@@ -30,6 +35,7 @@ var showCmd = &cobra.Command{
 
 		snapshot := resolveSnapshot(store, idStr)
 		if snapshot == nil {
+			statusFailed("Show", fmt.Sprintf("snapshot not found: %s.", idStr), "use 'drift log' to list available snapshots.")
 			return fmt.Errorf("snapshot not found: %s", idStr)
 		}
 
@@ -41,6 +47,8 @@ var showCmd = &cobra.Command{
 			}
 		}
 		if targetEntry == nil {
+			statusFailed("Show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, snapshot.ShortID()),
+				fmt.Sprintf("use 'drift log -v %s' to list files in this snapshot.", snapshot.ShortID()))
 			return fmt.Errorf("file not found in snapshot: %s", filePath)
 		}
 
@@ -58,14 +66,78 @@ var showCmd = &cobra.Command{
 			header = header[:512]
 		}
 		engine := filetype.DetectEngine(filePath, header)
+
+		// Binary file handling
 		if engine != nil && engine.Name() != "text" {
-			fmt.Printf("[binary file: %s, %d bytes]\n", filePath, len(data))
+			if showOpen {
+				return openExternal(snapshot, filePath, data)
+			}
+			// Show metadata
+			fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
+			fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
+			if targetEntry.ModTime > 0 {
+				modTimeStr := time.Unix(targetEntry.ModTime, 0).Format("01-02 15:04")
+				fmt.Printf("  Modified:   %s\n", modTimeStr)
+			}
+			fmt.Println()
+			fmt.Println("  hint: use --open to view with system program.")
 			return nil
 		}
 
+		// Text file: print header then content
+		fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
+		fmt.Println()
 		os.Stdout.Write(data)
 		return nil
 	},
+}
+
+func openExternal(snapshot *core.Snapshot, filePath string, data []byte) error {
+	fmt.Printf(">>> Opening [ok]\n")
+	// Write temp file and open
+	tmpFile, err := os.CreateTemp("", "drift-show-*"+filepathExt(filePath))
+	if err != nil {
+		return fmt.Errorf("cannot create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	tmpFile.Close()
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", tmpPath)
+	case "darwin":
+		cmd = exec.Command("open", tmpPath)
+	default:
+		cmd = exec.Command("xdg-open", tmpPath)
+	}
+	if err := cmd.Start(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	fmt.Printf("Launched system viewer for %s:%s.\n", snapshot.ShortID(), filePath)
+	return nil
+}
+
+func filepathExt(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '.' {
+			return path[i:]
+		}
+		if path[i] == '/' || path[i] == '\\' {
+			return ""
+		}
+	}
+	return ""
+}
+
+func init() {
+	showCmd.Flags().BoolVar(&showOpen, "open", false, "open file with system viewer")
+	rootCmd.AddCommand(showCmd)
 }
 
 func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
@@ -98,7 +170,7 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 		return snap
 	}
 
-	// Short hash prefix
+	// Short hash prefix (or tag name)
 	snapshots, err := store.ListSnapshots(&storage.ListOptions{})
 	if err != nil {
 		return nil
@@ -109,29 +181,4 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 		}
 	}
 	return nil
-}
-
-func parseHexByte(s string) (byte, bool) {
-	if len(s) != 2 {
-		return 0, false
-	}
-	var b byte
-	for i := 0; i < 2; i++ {
-		c := s[i]
-		switch {
-		case c >= '0' && c <= '9':
-			b = b<<4 | (c - '0')
-		case c >= 'a' && c <= 'f':
-			b = b<<4 | (c - 'a' + 10)
-		case c >= 'A' && c <= 'F':
-			b = b<<4 | (c - 'A' + 10)
-		default:
-			return 0, false
-		}
-	}
-	return b, true
-}
-
-func init() {
-	rootCmd.AddCommand(showCmd)
 }

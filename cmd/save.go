@@ -3,12 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"runtime"
-	"strings"
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/porcelain"
+	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/storage/filesystem"
 	"github.com/spf13/cobra"
 )
@@ -30,10 +28,8 @@ var saveCmd = &cobra.Command{
 
 		message := saveMessage
 		if message == "" {
-			message = openEditor("")
-			if message == "" {
-				return fmt.Errorf("aborting save due to empty message")
-			}
+			statusFailed("Save", "-m <message> is required.", "use 'drift save -m \"your message\"' to describe this snapshot.")
+			return fmt.Errorf("message required")
 		}
 
 		author := cfg.User.Name
@@ -41,13 +37,24 @@ var saveCmd = &cobra.Command{
 			author = "drift"
 		}
 
-		snapshot, err := porcelain.CreateSnapshot(store, cwd, message, author)
+		var tags []string
+		if saveTag != "" {
+			tags = []string{saveTag}
+		}
+		snapshot, err := porcelain.CreateSnapshot(store, cwd, message, author, tags)
 		if err != nil {
+			if err.Error() == "nothing to save" {
+				statusFailed("Save", "nothing to save.", "modify some files first, or use --allow-empty.")
+				return fmt.Errorf("nothing to save")
+			}
 			return err
 		}
 
-		fmt.Printf("Saved snapshot %s: %s\n", snapshot.ShortID(), snapshot.Message)
+		// Compute added/modified/deleted by comparing with the previous snapshot
+		add, mod, del := computeChanges(store, snapshot)
 
+		sid := snapshot.ShortID()
+		msgLine := snapshot.Message
 		if saveTag != "" {
 			ref := &core.Reference{
 				Type:   core.RefTypeTag,
@@ -57,82 +64,68 @@ var saveCmd = &cobra.Command{
 			if err := store.SetRef("tags/"+saveTag, ref); err != nil {
 				return err
 			}
-			fmt.Printf("Tagged as: %s\n", saveTag)
+			msgLine += "  [" + saveTag + "]"
 		}
+		statusOK("Saved [%s]", sid)
+		fmt.Println(msgLine)
 
+		// Print file list with sizes
+		printFileListWithSize(add, mod, del)
+
+		// Summary
+		total := len(add) + len(mod) + len(del)
+		if total > 0 {
+			summaryLine(total, len(add), len(mod), len(del))
+		}
 		return nil
 	},
 }
 
-func openEditor(defaultMsg string) string {
-	editor := os.Getenv("EDITOR")
-	useCmdStart := false
-	if editor == "" {
-		if runtime.GOOS == "windows" {
-			editor = "notepad"
-			useCmdStart = true
-		} else {
-			editor = "vim"
+func computeChanges(store storage.Storer, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string) {
+	currFiles := make(map[string]core.FileEntry)
+	for _, f := range snapshot.Files {
+		currFiles[f.Path] = f
+	}
+
+	// Get previous snapshot files
+	var prevFiles map[string]core.FileEntry
+	if snapshot.PrevID != nil {
+		prevSnap, err := store.GetSnapshot(*snapshot.PrevID)
+		if err == nil {
+			prevFiles = make(map[string]core.FileEntry)
+			for _, f := range prevSnap.Files {
+				prevFiles[f.Path] = f
+			}
 		}
 	}
 
-	tmpFile, err := os.CreateTemp("", "drift-save-*.txt")
-	if err != nil {
-		return ""
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	// Write hint as comment (lines starting with # are stripped after editing)
-	hint := "# Please enter a snapshot message. Lines starting with # will be ignored.\n" +
-		"# Save the file and close the editor to continue.\n"
-	tmpFile.WriteString(hint)
-	if defaultMsg != "" {
-		for _, line := range strings.Split(defaultMsg, "\n") {
-			tmpFile.WriteString("# " + line + "\n")
-		}
-	}
-	tmpFile.Close()
-
-	var cmd *exec.Cmd
-	if useCmdStart {
-		// Use PowerShell Start-Process -Wait for reliable blocking on Windows
-		cmd = exec.Command("powershell", "-Command",
-			"Start-Process", "-FilePath", editor, "-ArgumentList", tmpPath, "-Wait")
-	} else {
-		cmd = exec.Command(editor, tmpPath)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
-	if err := cmd.Run(); err != nil {
-		return ""
-	}
-
-	data, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return ""
-	}
-
-	// Strip UTF-8 BOM if present (notepad may add it)
-	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
-		data = data[3:]
-	}
-
-	var lines []string
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+	// Find added and modified
+	for _, f := range snapshot.Files {
+		if prevFiles == nil {
+			added = append(added, f)
 			continue
 		}
-		lines = append(lines, line)
+		if prev, ok := prevFiles[f.Path]; !ok {
+			added = append(added, f)
+		} else if prev.Size != f.Size || !chunkHashesEqual(prev.Chunks, f.Chunks) {
+			modified = append(modified, f)
+		}
 	}
 
-	return strings.TrimSpace(strings.Join(lines, "\n"))
+	// Find deleted
+	if prevFiles != nil {
+		for p := range prevFiles {
+			if _, ok := currFiles[p]; !ok {
+				deleted = append(deleted, p)
+			}
+		}
+	}
+
+	return added, modified, deleted
 }
 
 func init() {
-	saveCmd.Flags().StringVarP(&saveMessage, "message", "m", "", "snapshot message")
+	saveCmd.Flags().StringVarP(&saveMessage, "message", "m", "", "snapshot message (required)")
 	saveCmd.Flags().StringVar(&saveTag, "tag", "", "tag name for this snapshot")
 	rootCmd.AddCommand(saveCmd)
 }

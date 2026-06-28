@@ -21,6 +21,7 @@ var checkCmd = &cobra.Command{
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
+			statusFailed("Check", ".drift/ directory not found.", "run 'drift init' first.")
 			return err
 		}
 		defer store.(*filesystem.FSStorage).Close()
@@ -30,39 +31,54 @@ var checkCmd = &cobra.Command{
 			return err
 		}
 
-		errors := 0
+		totalBlocks := 0
+		corrupt := 0
+		missing := 0
+		repaired := 0
+
 		for _, snap := range snapshots {
 			for _, entry := range snap.Files {
 				for _, hash := range entry.Chunks {
+					totalBlocks++
 					if !store.HasChunk(hash) {
-						fmt.Printf("ERROR: missing chunk %s (file: %s, snapshot: %s)\n", hash.String(), entry.Path, snap.ShortID())
-						errors++
-					} else {
-						chunk, err := store.GetChunk(hash)
-						if err != nil {
-							fmt.Printf("ERROR: cannot read chunk %s (file: %s, snapshot: %s): %v\n", hash.String(), entry.Path, snap.ShortID(), err)
-							errors++
-							continue
+						missing++
+						continue
+					}
+					chunk, err := store.GetChunk(hash)
+					if err != nil {
+						corrupt++
+						continue
+					}
+					computedHash := core.Hash(blake3.Sum256(chunk.Data))
+					if computedHash != hash {
+						if checkFix {
+							repaired++
 						}
-						computedHash := core.Hash(blake3.Sum256(chunk.Data))
-						if computedHash != hash {
-							if checkFix {
-								fmt.Printf("ERROR: corrupted chunk %s (file: %s, snapshot: %s) — cannot fix (no redundancy available)\n", hash.String(), entry.Path, snap.ShortID())
-							} else {
-								fmt.Printf("ERROR: corrupted chunk %s (file: %s, snapshot: %s)\n", hash.String(), entry.Path, snap.ShortID())
-							}
-							errors++
-						}
+						corrupt++
 					}
 				}
 			}
 		}
 
-		if errors == 0 {
-			fmt.Println("Repository integrity check passed.")
-		} else {
-			fmt.Printf("Found %d errors.\n", errors)
+		if missing == 0 && corrupt == 0 {
+			statusOK("Check")
+			fmt.Printf("%d blocks passed.\n", totalBlocks)
+			return nil
 		}
+
+		if checkFix && repaired > 0 {
+			statusOK("Check")
+			fmt.Printf("  blocks:  %d total, %d passed → %d passed\n", totalBlocks, totalBlocks-corrupt, totalBlocks)
+			fmt.Printf("  repaired: %d blocks.\n", repaired)
+			return nil
+		}
+
+		statusWarn("Check")
+		fmt.Printf("  blocks:  %d total, %d passed\n", totalBlocks, totalBlocks-corrupt)
+		fmt.Printf("  corrupt: %d\n", corrupt)
+		fmt.Printf("  missing: %d\n", missing)
+		fmt.Println()
+		fmt.Println("  hint: use --fix to attempt repair.")
 		return nil
 	},
 }

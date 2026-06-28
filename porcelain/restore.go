@@ -13,19 +13,24 @@ import (
 // RestoreSnapshot restores workspace to a snapshot.
 // If filePath is non-empty, only restore that specific file.
 // If noBackup is false, a backup snapshot is created before restoring.
-func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool) error {
+func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool) (string, error) {
 	// Get target snapshot
 	snap, err := store.GetSnapshot(snapshotID)
 	if err != nil {
-		return fmt.Errorf("get snapshot: %w", err)
+		return "", fmt.Errorf("get snapshot: %w", err)
 	}
 
 	// Create backup snapshot if requested
+	var backupID string
 	if !noBackup {
 		backupMsg := fmt.Sprintf("backup: restore to %s", snapshotID.Hash.String())
-		_, backupErr := CreateSnapshot(store, workDir, backupMsg, "drift")
-		if backupErr != nil && backupErr.Error() != "nothing to save" {
-			return fmt.Errorf("create backup: %w", backupErr)
+		backupSnap, backupErr := CreateSnapshot(store, workDir, backupMsg, "drift", nil)
+		if backupErr != nil {
+			if backupErr.Error() != "nothing to save" {
+				return "", fmt.Errorf("create backup: %w", backupErr)
+			}
+		} else {
+			backupID = backupSnap.ShortID()
 		}
 	}
 
@@ -39,7 +44,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 
 		if entry.Mode.IsDir() {
 			if err := os.MkdirAll(fullPath, 0755); err != nil {
-				return fmt.Errorf("create dir %s: %w", fullPath, err)
+				return "", fmt.Errorf("create dir %s: %w", fullPath, err)
 			}
 			continue
 		}
@@ -49,7 +54,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		for _, h := range entry.Chunks {
 			chunk, err := store.GetChunk(h)
 			if err != nil {
-				return fmt.Errorf("get chunk %s for %s: %w", h.String(), entry.Path, err)
+				return "", fmt.Errorf("get chunk %s for %s: %w", h.String(), entry.Path, err)
 			}
 			assembled = append(assembled, chunk.Data...)
 		}
@@ -57,16 +62,16 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		// Ensure parent directory exists
 		parentDir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(parentDir, 0755); err != nil {
-			return fmt.Errorf("create parent dir %s: %w", parentDir, err)
+			return "", fmt.Errorf("create parent dir %s: %w", parentDir, err)
 		}
 
 		if err := os.WriteFile(fullPath, assembled, 0644); err != nil {
-			return fmt.Errorf("write file %s: %w", fullPath, err)
+			return "", fmt.Errorf("write file %s: %w", fullPath, err)
 		}
 
 		// Restore original modification time
 		if err := os.Chtimes(fullPath, time.Unix(entry.ModTime, 0), time.Unix(entry.ModTime, 0)); err != nil {
-			return fmt.Errorf("set modtime %s: %w", fullPath, err)
+			return "", fmt.Errorf("set modtime %s: %w", fullPath, err)
 		}
 	}
 
@@ -77,7 +82,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		Target: snapshotID.Hash,
 	}
 	if err := store.SetRef("HEAD", headRef); err != nil {
-		return fmt.Errorf("update HEAD: %w", err)
+		return "", fmt.Errorf("update HEAD: %w", err)
 	}
 
 	// Rebuild index from restored files
@@ -94,8 +99,8 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		})
 	}
 	if err := store.SetIndex(newIndex); err != nil {
-		return fmt.Errorf("update index: %w", err)
+		return "", fmt.Errorf("update index: %w", err)
 	}
 
-	return nil
+	return backupID, nil
 }

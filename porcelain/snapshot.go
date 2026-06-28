@@ -17,7 +17,8 @@ import (
 
 // CreateSnapshot creates a snapshot of the current workspace state.
 // If message is empty, the caller should open an editor to get one.
-func CreateSnapshot(store storage.Storer, workDir string, message string, author string) (*core.Snapshot, error) {
+// tags are optional labels attached to the snapshot (e.g. --tag "v1").
+func CreateSnapshot(store storage.Storer, workDir string, message string, author string, tags []string) (*core.Snapshot, error) {
 	if message == "" {
 		return nil, fmt.Errorf("message is required")
 	}
@@ -152,6 +153,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		Timestamp: time.Now().Unix(),
 		Files:     fileEntries,
 		TotalSize: totalSize,
+		Tags:      tags,
 	}
 
 	// Compute snapshot hash: marshal to protobuf, hash with BLAKE3

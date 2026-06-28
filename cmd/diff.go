@@ -61,7 +61,7 @@ var diffCmd = &cobra.Command{
 			if snap2 == nil {
 				return fmt.Errorf("snapshot not found: %s", args[1])
 			}
-			diffSnapshots(store, cwd, snap1, snap2)
+			diffSnapshots(store, snap1, snap2)
 		}
 		return nil
 	},
@@ -73,6 +73,9 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 		snapFiles[snapshot.Files[i].Path] = &snapshot.Files[i]
 	}
 
+	var added, modified []string
+	var deleted []string
+
 	_ = fsutil.Walk(workDir, func(path string, info os.FileInfo) error {
 		rel, _ := filepath.Rel(workDir, path)
 		if info.IsDir() {
@@ -81,7 +84,7 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 
 		snapEntry, exists := snapFiles[rel]
 		if !exists {
-			fmt.Printf("A %s\n", rel)
+			added = append(added, rel)
 			return nil
 		}
 
@@ -92,111 +95,70 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 		}
 
 		if len(data) != int(snapEntry.Size) {
-			fmt.Printf("M %s\n", rel)
-			showFileDiff(store, rel, snapEntry, data)
+			modified = append(modified, rel)
 		}
 		delete(snapFiles, rel)
 		return nil
 	})
 
 	for path := range snapFiles {
-		fmt.Printf("D %s\n", path)
+		deleted = append(deleted, path)
 	}
+
+	fmt.Printf(">>> Diff workspace → %s\n", snapshot.ShortID())
+	fmt.Println()
+	for _, p := range added {
+		fmt.Printf("  +  %s\n", p)
+	}
+	for _, p := range modified {
+		fmt.Printf("  ~  %s\n", p)
+	}
+	for _, p := range deleted {
+		fmt.Printf("  -  %s\n", p)
+	}
+	total := len(added) + len(modified) + len(deleted)
+	fmt.Printf("\n  %d files: +%d ~%d -%d\n", total, len(added), len(modified), len(deleted))
 }
 
-func showFileDiff(store storage.Storer, path string, entry *core.FileEntry, newData []byte) {
-	var oldData []byte
-	for _, hash := range entry.Chunks {
-		chunk, err := store.GetChunk(hash)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: cannot get chunk %s: %v\n", hash.String(), err)
-			continue
-		}
-		oldData = append(oldData, chunk.Data...)
-	}
-
-	header := newData
-	if len(header) > 512 {
-		header = header[:512]
-	}
-	engine := filetype.DetectEngine(path, header)
-	if engine != nil && engine.Name() == "text" {
-		diff, _ := engine.Diff("a/"+path, oldData, "b/"+path, newData)
-		fmt.Println(diff)
-	} else {
-		fmt.Printf("  (binary file changed, %d -> %d bytes)\n", len(oldData), len(newData))
-	}
-}
-
-func diffSnapshots(store storage.Storer, workDir string, snap1, snap2 *core.Snapshot) {
-	_ = workDir // unused, kept for signature compatibility
-
+func diffSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot) {
 	snap1Files := make(map[string]*core.FileEntry)
 	for i := range snap1.Files {
 		snap1Files[snap1.Files[i].Path] = &snap1.Files[i]
 	}
 
+	var added, modified, deleted []string
+
 	for i := range snap2.Files {
 		entry2 := &snap2.Files[i]
 		entry1, exists := snap1Files[entry2.Path]
 		if !exists {
-			fmt.Printf("A %s\n", entry2.Path)
+			added = append(added, entry2.Path)
 			continue
 		}
 
-		// Compare hashes: if chunk list differs, file changed
 		if entry1.Size != entry2.Size || !chunkHashesEqual(entry1.Chunks, entry2.Chunks) {
-			fmt.Printf("M %s\n", entry2.Path)
-
-			// Assemble both versions and show diff
-			var data1, data2 []byte
-			for _, h := range entry1.Chunks {
-				chunk, err := store.GetChunk(h)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: cannot get chunk %s: %v\n", h.String(), err)
-					continue
-				}
-				data1 = append(data1, chunk.Data...)
-			}
-			for _, h := range entry2.Chunks {
-				chunk, err := store.GetChunk(h)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: cannot get chunk %s: %v\n", h.String(), err)
-					continue
-				}
-				data2 = append(data2, chunk.Data...)
-			}
-
-			header := data2
-			if len(header) > 512 {
-				header = header[:512]
-			}
-			engine := filetype.DetectEngine(entry2.Path, header)
-			if engine != nil && engine.Name() == "text" {
-				diff, _ := engine.Diff("a/"+entry2.Path, data1, "b/"+entry2.Path, data2)
-				fmt.Println(diff)
-			} else {
-				fmt.Printf("  (binary file changed, %d -> %d bytes)\n", len(data1), len(data2))
-			}
+			modified = append(modified, entry2.Path)
 		}
 		delete(snap1Files, entry2.Path)
 	}
 
 	for path := range snap1Files {
-		fmt.Printf("D %s\n", path)
+		deleted = append(deleted, path)
 	}
-}
 
-func chunkHashesEqual(a, b []core.Hash) bool {
-	if len(a) != len(b) {
-		return false
+	fmt.Printf(">>> Diff %s → %s\n", snap1.ShortID(), snap2.ShortID())
+	fmt.Println()
+	for _, p := range added {
+		fmt.Printf("  +  %s\n", p)
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
+	for _, p := range modified {
+		fmt.Printf("  ~  %s\n", p)
 	}
-	return true
+	for _, p := range deleted {
+		fmt.Printf("  -  %s\n", p)
+	}
+	total := len(added) + len(modified) + len(deleted)
+	fmt.Printf("\n  %d files: +%d ~%d -%d\n", total, len(added), len(modified), len(deleted))
 }
 
 func diffFileInSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot, filePath string) {
@@ -214,12 +176,14 @@ func diffFileInSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot, file
 		}
 	}
 
+	fmt.Printf(">>> Diff %s → %s %s\n", snap1.ShortID(), snap2.ShortID(), filePath)
+
 	if entry1 == nil && entry2 != nil {
-		fmt.Printf("A %s\n", filePath)
+		fmt.Printf("  +  %s  (added)\n", filePath)
 		return
 	}
 	if entry1 != nil && entry2 == nil {
-		fmt.Printf("D %s\n", filePath)
+		fmt.Printf("  -  %s  (deleted)\n", filePath)
 		return
 	}
 	if entry1.Size != entry2.Size || !chunkHashesEqual(entry1.Chunks, entry2.Chunks) {
@@ -227,7 +191,6 @@ func diffFileInSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot, file
 		for _, h := range entry1.Chunks {
 			chunk, err := store.GetChunk(h)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: cannot get chunk %s: %v\n", h.String(), err)
 				continue
 			}
 			data1 = append(data1, chunk.Data...)
@@ -235,12 +198,25 @@ func diffFileInSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot, file
 		for _, h := range entry2.Chunks {
 			chunk, err := store.GetChunk(h)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: cannot get chunk %s: %v\n", h.String(), err)
 				continue
 			}
 			data2 = append(data2, chunk.Data...)
 		}
-		showFileDiff(store, filePath, entry1, data2)
+
+		header := data2
+		if len(header) > 512 {
+			header = header[:512]
+		}
+		engine := filetype.DetectEngine(filePath, header)
+		if engine != nil && engine.Name() == "text" {
+			diff, _ := engine.Diff(snap1.ShortID()+"/"+filePath, data1, snap2.ShortID()+"/"+filePath, data2)
+			fmt.Println(diff)
+		} else {
+			fmt.Printf("  Size:       %s → %s (+%s)\n",
+				formatSize(entry1.Size), formatSize(entry2.Size),
+				formatSize(entry2.Size-entry1.Size))
+			fmt.Println("\n  (binary file — metadata only)")
+		}
 	}
 }
 
