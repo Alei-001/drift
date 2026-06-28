@@ -29,6 +29,9 @@ func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
 	if peekErr == io.EOF {
 		return nil, nil
 	}
+	if peekErr != nil {
+		return nil, peekErr
+	}
 	// Reconstruct reader with peeked byte
 	r = io.MultiReader(bytes.NewReader(buf[:]), r)
 

@@ -1,8 +1,8 @@
 package porcelain
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -74,20 +74,29 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		data, err := os.ReadFile(f.path)
+		// Open file for streaming reads
+		file, err := os.Open(f.path)
 		if err != nil {
-			return nil, fmt.Errorf("read file %s: %w", f.path, err)
+			return nil, fmt.Errorf("open file %s: %w", f.path, err)
 		}
 
-		// Detect engine for chunking
-		header := data
-		if len(header) > 512 {
-			header = header[:512]
+		// Read up to first 512 bytes for engine detection
+		header, err := io.ReadAll(io.LimitReader(file, 512))
+		if err != nil {
+			file.Close()
+			return nil, fmt.Errorf("read header %s: %w", f.path, err)
 		}
 		engine := filetype.DetectEngine(relPath, header)
 
-		// Chunk the file
-		chunks, err := engine.Chunk(bytes.NewReader(data))
+		// Seek back to start for chunking
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			file.Close()
+			return nil, fmt.Errorf("seek %s: %w", f.path, err)
+		}
+
+		// Chunk the file by streaming directly from the file
+		chunks, err := engine.Chunk(file)
+		file.Close()
 		if err != nil {
 			return nil, fmt.Errorf("chunk file %s: %w", f.path, err)
 		}
