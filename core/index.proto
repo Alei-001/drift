@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package core;
+
+option go_package = "github.com/your-org/drift/core";
+
+// IndexEntryProto is the protobuf representation of an index entry.
+message IndexEntryProto {
+  string path = 1;
+  bytes hash = 2;               // 32 bytes BLAKE3 hash
+  int64 size = 3;
+  int64 mod_time = 4;
+  repeated bytes chunk_hashes = 5; // each is 32 bytes BLAKE3 hash
+}
+
+// IndexProto is the protobuf representation of the staging index.
+message IndexProto {
+  repeated IndexEntryProto entries = 1;
+  int64 updated_at = 2;
+}
