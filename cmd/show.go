@@ -14,6 +14,7 @@ import (
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/storage/filesystem"
+	"github.com/your-org/drift/util/pathutil"
 )
 
 var showOpen bool
@@ -40,8 +41,9 @@ var showCmd = &cobra.Command{
 		}
 
 		var targetEntry *core.FileEntry
+		normalizedPath := pathutil.Normalize(filePath)
 		for i := range snapshot.Files {
-			if snapshot.Files[i].Path == filePath {
+			if snapshot.Files[i].Path == normalizedPath {
 				targetEntry = &snapshot.Files[i]
 				break
 			}

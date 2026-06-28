@@ -8,6 +8,7 @@ import (
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/util/pathutil"
 )
 
 // RestoreSnapshot restores workspace to a snapshot.
@@ -33,6 +34,9 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 			backupID = backupSnap.ShortID()
 		}
 	}
+
+	// Normalize path separator for cross-platform matching
+	filePath = pathutil.Normalize(filePath)
 
 	// Restore files
 	for _, entry := range snap.Files {

@@ -3,12 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage/filesystem"
 	"github.com/your-org/drift/util/fsutil"
+	"github.com/your-org/drift/util/pathutil"
 )
 
 var statusShort bool
@@ -34,8 +34,7 @@ var statusCmd = &cobra.Command{
 			if info.IsDir() {
 				return nil
 			}
-			rel, _ := filepath.Rel(cwd, path)
-			rel = filepath.ToSlash(rel)
+			rel, _ := pathutil.Rel(cwd, path)
 			workspaceFiles[rel] = info
 			return nil
 		})

@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/filetype"
 	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/util/fsutil"
+	"github.com/your-org/drift/util/pathutil"
 	"github.com/zeebo/blake3"
 	"google.golang.org/protobuf/proto"
 )
@@ -69,11 +69,10 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 
 	for _, f := range workspaceFiles {
 		// Convert absolute path to relative path (relative to workDir)
-		relPath, err := filepath.Rel(workDir, f.path)
+		relPath, err := pathutil.Rel(workDir, f.path)
 		if err != nil {
 			relPath = f.path
 		}
-		relPath = filepath.ToSlash(relPath)
 
 		// Open file for streaming reads
 		file, err := os.Open(f.path)
