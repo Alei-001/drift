@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/your-org/drift/core"
@@ -208,7 +207,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		symRef = headRef.SymRef
 	}
 	branchRef := &core.Reference{
-		Name:   strings.TrimPrefix(symRef, "heads/"),
+		Name:   symRef,
 		Type:   core.RefTypeBranch,
 		Target: snap.ID.Hash,
 	}

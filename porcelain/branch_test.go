@@ -192,8 +192,8 @@ func TestRenameBranch_NonCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRef heads/dev failed: %v", err)
 	}
-	if newRef.Name != "dev" {
-		t.Errorf("expected ref name 'dev', got '%s'", newRef.Name)
+	if newRef.Name != "heads/dev" {
+		t.Errorf("expected ref name 'heads/dev', got '%s'", newRef.Name)
 	}
 
 	// HEAD should be unchanged (still points to main).

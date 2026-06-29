@@ -31,7 +31,7 @@ func CreateBranch(store storage.Storer, name string) error {
 
 	return store.SetRef("heads/"+name, &core.Reference{
 		Type:   core.RefTypeBranch,
-		Name:   name,
+		Name:   "heads/" + name,
 		Target: headRef.Target,
 	})
 }
@@ -271,9 +271,11 @@ func RenameBranch(store storage.Storer, oldName, newName string) error {
 	}
 
 	// Create the new reference first. If this fails, the old one is intact.
+	// Name stores the full ref path to match project.go convention and what
+	// FSStorage.GetRef returns on read.
 	newRef := &core.Reference{
 		Type:   oldRef.Type,
-		Name:   newName,
+		Name:   "heads/" + newName,
 		Target: oldRef.Target,
 	}
 	if err := store.SetRef("heads/"+newName, newRef); err != nil {
