@@ -43,7 +43,7 @@ var saveCmd = &cobra.Command{
 		snapshot, err := porcelain.CreateSnapshot(store, cwd, message, author, tags)
 		if err != nil {
 			if err.Error() == "nothing to save" {
-				statusFailed("Save", "nothing to save.", "modify some files first to create a snapshot.")
+				statusFailed("Save", "nothing to save.", "modify some files first to create a meaningful checkpoint.")
 				return fmt.Errorf("nothing to save")
 			}
 			return err

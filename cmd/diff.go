@@ -236,6 +236,11 @@ assemble:
 		fmt.Printf("  Size:       %s → %s (%+s)\n",
 			formatSize(snapEntry.Size), formatSize(int64(len(workData))),
 			formatSize(int64(len(workData))-snapEntry.Size))
+		oldDims := imageDimensions(snapData)
+		newDims := imageDimensions(workData)
+		if oldDims != "" || newDims != "" {
+			fmt.Printf("  Dimensions: %s → %s\n", oldDims, newDims)
+		}
 		fmt.Println("\n  (binary file — metadata only)")
 	}
 	return nil
@@ -348,6 +353,11 @@ func diffFileInSnapshots(store storage.Storer, workDir string, snap1, snap2 *cor
 			fmt.Printf("  Size:       %s → %s (+%s)\n",
 				formatSize(entry1.Size), formatSize(entry2.Size),
 				formatSize(entry2.Size-entry1.Size))
+			oldDims := imageDimensions(data1)
+			newDims := imageDimensions(data2)
+			if oldDims != "" || newDims != "" {
+				fmt.Printf("  Dimensions: %s → %s\n", oldDims, newDims)
+			}
 			fmt.Println("\n  (binary file — metadata only)")
 		}
 	}

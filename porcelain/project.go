@@ -47,6 +47,29 @@ func InitProject(path string) error {
 		return fmt.Errorf("set index: %w", err)
 	}
 
+	// Create default .driftignore in project root if it doesn't exist
+	driftignorePath := filepath.Join(path, ".driftignore")
+	if _, err := os.Stat(driftignorePath); os.IsNotExist(err) {
+		driftignoreContent := []byte(`# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Office temp files
+~$*
+
+# Editor temp files
+*.tmp
+*.swp
+*~
+`)
+		if err := os.WriteFile(driftignorePath, driftignoreContent, 0644); err != nil {
+			return fmt.Errorf("write .driftignore: %w", err)
+		}
+	}
+
 	return nil
 }
 

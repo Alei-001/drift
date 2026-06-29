@@ -198,7 +198,7 @@ func logJSONMode(store storage.Storer, snapshots []*core.Snapshot) error {
 }
 
 func init() {
-	logCmd.Flags().IntVarP(&logLimit, "limit", "l", 0, "limit number of entries")
+	logCmd.Flags().IntVarP(&logLimit, "limit", "l", 10, "limit number of entries")
 	logCmd.Flags().StringVarP(&logVerbose, "verbose", "v", "", "show file details for a snapshot")
 	logCmd.Flags().BoolVar(&logJSON, "json", false, "output in JSON format for scripting")
 	logCmd.Flags().BoolVar(&logAll, "all", false, "include auto-saved snapshots")

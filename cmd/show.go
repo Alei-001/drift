@@ -19,19 +19,30 @@ import (
 var showOpen bool
 
 var showCmd = &cobra.Command{
-	Use:   "show <snapshot-id> <file>",
+	Use:   "show [<snapshot-id>] <file>",
 	Short: "Show file content from a snapshot",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		idStr := args[0]
-		filePath := args[1]
-
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
 		}
 		defer store.Close()
+
+		var idStr, filePath string
+		if len(args) == 1 {
+			headSnap := resolveHeadSnapshot(store)
+			if headSnap == nil {
+				statusFailed("Show", "no snapshot to show from.", "use 'drift save -m \"message\"' to create one first.")
+				return fmt.Errorf("no HEAD snapshot")
+			}
+			idStr = headSnap.ShortID()
+			filePath = args[0]
+		} else {
+			idStr = args[0]
+			filePath = args[1]
+		}
 
 		snapshot := resolveSnapshot(store, idStr)
 		if snapshot == nil {
@@ -73,14 +84,19 @@ var showCmd = &cobra.Command{
 		}
 		engine := filetype.DetectEngine(filePath, header)
 
-		// Binary file handling
+		// --open: launch system viewer for any file type
+		if showOpen {
+			return openExternal(snapshot, filePath, data)
+		}
+
+		// Binary file handling (metadata only)
 		if engine != nil && engine.Name() != "text" {
-			if showOpen {
-				return openExternal(snapshot, filePath, data)
-			}
 			// Show metadata
 			fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
 			fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
+			if dims := imageDimensions(data); dims != "" {
+				fmt.Printf("  Dimensions: %s\n", dims)
+			}
 			if targetEntry.ModTime > 0 {
 				modTimeStr := time.Unix(targetEntry.ModTime, 0).Format("01-02 15:04")
 				fmt.Printf("  Modified:   %s\n", modTimeStr)
@@ -151,6 +167,20 @@ func init() {
 }
 
 func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
+	// @tag:<name> — resolve via tags/<name> reference
+	if strings.HasPrefix(id, "@tag:") {
+		tagName := id[5:]
+		tagRef, err := store.GetRef("tags/" + tagName)
+		if err != nil {
+			return nil
+		}
+		snap, err := store.GetSnapshot(core.SnapshotID{Hash: tagRef.Target})
+		if err != nil {
+			return nil
+		}
+		return snap
+	}
+
 	if id == "HEAD" {
 		headRef, err := store.GetRef("HEAD")
 		if err != nil {

@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"strings"
 
 	"github.com/your-org/drift/core"
@@ -143,4 +148,14 @@ func parseHexByte(s string) (byte, bool) {
 		}
 	}
 	return b, true
+}
+
+// imageDimensions decodes image dimensions from data for common image formats
+// (PNG, JPEG, GIF). Returns empty string for non-image or undecodable data.
+func imageDimensions(data []byte) string {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%dx%d", cfg.Width, cfg.Height)
 }

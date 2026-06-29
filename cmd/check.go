@@ -11,6 +11,8 @@ import (
 	"github.com/zeebo/blake3"
 )
 
+var checkFix bool
+
 var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Verify repository integrity",
@@ -69,11 +71,22 @@ var checkCmd = &cobra.Command{
 		fmt.Printf("  corrupt: %d\n", corrupt)
 		fmt.Printf("  missing: %d\n", missing)
 		fmt.Println()
-		fmt.Println("  hint: corrupt chunks cannot be auto-repaired. Restore from a known-good snapshot.")
+		if checkFix {
+			fmt.Println("  Attempted repair:")
+			if corrupt > 0 {
+				fmt.Println("  corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <id>'.")
+			}
+			if missing > 0 {
+				fmt.Println("  missing chunks indicate data loss. Restore from a known-good snapshot using 'drift restore <id>'.")
+			}
+		} else {
+			fmt.Println("  hint: corrupt chunks cannot be auto-repaired. Restore from a known-good snapshot.")
+		}
 		return nil
 	},
 }
 
 func init() {
+	checkCmd.Flags().BoolVar(&checkFix, "fix", false, "attempt to repair corrupt blocks")
 	rootCmd.AddCommand(checkCmd)
 }

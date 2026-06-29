@@ -123,13 +123,13 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 			headRef.Target.String(), snap2.ID.Hash.String())
 	}
 
-	// Verify index contains all file entries (file1, file2, file3)
+	// Verify index contains all file entries (file1, file2, file3, .driftignore)
 	idx, err := store.GetIndex()
 	if err != nil {
 		t.Fatalf("GetIndex failed: %v", err)
 	}
-	if len(idx.Entries) != 3 {
-		t.Errorf("expected 3 index entries, got %d", len(idx.Entries))
+	if len(idx.Entries) != 4 {
+		t.Errorf("expected 4 index entries (3 files + .driftignore), got %d", len(idx.Entries))
 	}
 
 	// Verify file2.txt content was restored to v1

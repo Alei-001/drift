@@ -180,7 +180,7 @@ Error（无变更）：
 ```
 >>> Save [failed]
 Error: nothing to save.
-  hint: modify some files first, or use --allow-empty.
+  hint: modify some files first to create a meaningful checkpoint.
 ```
 
 - 自动扫描所有变更的文件（新增、修改、删除）
@@ -193,7 +193,7 @@ Error: nothing to save.
 ### `drift log`
 
 ```
-drift log [-l <n>] [--json] [--all] [--tag <name>]
+drift log [-l <n>] [--json] [--all]
 drift log -v <id>
 
 浏览历史快照。默认只显示用户手动创建的快照，[auto] 快照隐藏。
@@ -203,14 +203,12 @@ drift log -v <id>
   -v, --verbose    查看某个快照的文件变更明细
   --json          以 JSON 格式输出，适合脚本处理
   --all           包括自动保存 (drift watch) 的快照
-  --tag           按标签过滤
 
 示例：
   drift log
   drift log -l 20
   drift log -v 12ab
   drift log --all
-  drift log --tag submission
 ```
 
 Output — 默认：
@@ -312,6 +310,16 @@ Output — 二进制文件：
 ```
 >>> File @tag:submission:cover.psd
   Size:       23.4 MB
+  Modified:   06-28 16:30
+
+  hint: use --open to view with system program.
+```
+
+Output — 图片文件（额外显示尺寸）：
+
+```
+>>> File 12ab:cover.png
+  Size:       2.1 MB
   Dimensions: 4200×3150
   Modified:   06-28 16:30
 
@@ -469,12 +477,21 @@ Output — 二进制文件差异：
 ```
 >>> Diff 9f1e → 12ab cover.psd
   Size:       22.1 MB → 23.4 MB (+1.3 MB)
+
+  (binary file — metadata only)
+```
+
+Output — 图片文件差异（额外显示尺寸变化）：
+
+```
+>>> Diff 9f1e → 12ab cover.png
+  Size:       22.1 MB → 23.4 MB (+1.3 MB)
   Dimensions: 4000×3000 → 4200×3150
 
   (binary file — metadata only)
 ```
 
-> 无 file 参数时所有文件一视同仁（只比较哈希）。指定 file 参数时，文本文件输出 unified diff；二进制文件显示元信息变化。
+> 无 file 参数时所有文件一视同仁（只比较哈希）。指定 file 参数时，文本文件输出 unified diff；二进制文件显示元信息变化（图片额外显示尺寸）。
 
 ---
 
@@ -857,7 +874,6 @@ drift save -m "msg"                    save with message
 drift save -m "msg" --tag "v1"         save with tag
 drift log -l 10                        show last 10 entries
 drift log -v 12ab                      show file change details
-drift log --tag submission             filter by tag
 drift show 12ab chapter.md             view old version of a file
 drift show @tag:v1 cover.psd           show metadata for image
 drift show @tag:v1 cover.psd --open    open image with system app
