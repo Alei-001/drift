@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/your-org/drift/porcelain"
-	"github.com/your-org/drift/storage/filesystem"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +23,7 @@ var restoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.(*filesystem.FSStorage).Close()
+		defer store.Close()
 
 		snapshot := resolveSnapshot(store, args[0])
 		if snapshot == nil {

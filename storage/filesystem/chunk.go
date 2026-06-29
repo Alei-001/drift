@@ -1,11 +1,13 @@
 package filesystem
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/util/fsutil"
+	"github.com/zeebo/blake3"
 )
 
 func (fs *FSStorage) chunksDir() string {
@@ -44,6 +46,12 @@ func (fs *FSStorage) GetChunk(hash core.Hash) (*core.Chunk, error) {
 		return nil, err
 	}
 
+	// Verify data integrity: hash should match
+	computedHash := core.Hash(blake3.Sum256(data))
+	if computedHash != hash {
+		return nil, fmt.Errorf("chunk data integrity check failed: expected %s, got %s", hash.FullString(), computedHash.FullString())
+	}
+
 	ch := &core.Chunk{
 		Hash:  hash,
 		Size:  uint32(len(data)),
@@ -67,5 +75,11 @@ func (fs *FSStorage) PutChunk(chunk *core.Chunk) error {
 	}
 
 	compressed := fs.zstdEncoder.EncodeAll(chunk.Data, nil)
-	return fsutil.WriteFileAtomic(path, compressed, 0644)
+	if err := fsutil.WriteFileAtomic(path, compressed, 0644); err != nil {
+		return err
+	}
+
+	// Update cache after successful write
+	fs.chunkCache.Add(chunk.Hash, chunk)
+	return nil
 }

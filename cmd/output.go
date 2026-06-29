@@ -2,9 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/your-org/drift/core"
 )
@@ -15,12 +13,6 @@ import (
 func statusOK(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	fmt.Printf(">>> %s [ok]\n", msg)
-}
-
-// statusActive prints ">>> <format> [active]" to stdout.
-func statusActive(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf(">>> %s [active]\n", msg)
 }
 
 // statusWarn prints ">>> <format> [warning]" to stdout.
@@ -38,12 +30,6 @@ func statusFailed(action string, errMsg string, hint string) {
 	}
 }
 
-// statusInactive prints ">>> <format> [inactive]" to stdout.
-func statusInactive(format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
-	fmt.Printf(">>> %s [inactive]\n", msg)
-}
-
 // -- File list formatting --
 
 // fileChar returns the status symbol for a file change direction.
@@ -56,31 +42,6 @@ func fileChar(added, deleted bool) string {
 		return "-"
 	}
 	return "~"
-}
-
-// printFileList prints a file list with status symbols and optional sizes.
-// Each file entry gets "  <char>  <path>  <size>" format.
-// Returns counts of added, modified, deleted.
-func printFileList(titleFmt string, titleArgs []interface{}, addedFiles []core.FileEntry, deletedPaths []string, modFiles []core.FileEntry) (added, mod, del int) {
-	if len(addedFiles)+len(deletedPaths)+len(modFiles) == 0 {
-		return 0, 0, 0
-	}
-
-	fmt.Println()
-	for _, f := range addedFiles {
-		fmt.Printf("  +  %s\n", f.Path)
-		// Print size on the next line for compactness, or on same line? Design doc shows:
-		//   +  chapter4.md      12.3 KB
-		// Let's keep it simple: path only in diff, path+size in save/restore/verbose
-	}
-	for _, f := range modFiles {
-		fmt.Printf("  ~  %s\n", f.Path)
-	}
-	for _, p := range deletedPaths {
-		fmt.Printf("  -  %s\n", p)
-	}
-
-	return len(addedFiles), len(modFiles), len(deletedPaths)
 }
 
 // printFileListWithSize prints file list with sizes (for save/restore).
@@ -136,12 +97,6 @@ func summaryLine(total, added, mod, del int) {
 
 // -- Error helpers --
 
-// fatalNoRepo is a helper for "not a drift repository" errors.
-func fatalNoRepo() {
-	statusFailed("Init", "not a drift repository.", "use 'drift init' to create one.")
-	os.Exit(1)
-}
-
 // formatSize converts bytes to a human-readable string.
 func formatSize(size int64) string {
 	switch {
@@ -167,17 +122,6 @@ func chunkHashesEqual(a, b []core.Hash) bool {
 		}
 	}
 	return true
-}
-
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%d second(s)", int(d.Seconds()))
-	} else if d < time.Hour {
-		return fmt.Sprintf("%d minute(s)", int(d.Minutes()))
-	} else if d < 24*time.Hour {
-		return fmt.Sprintf("%d hour(s)", int(d.Hours()))
-	}
-	return fmt.Sprintf("%d day(s)", int(d.Hours()/24))
 }
 
 func parseHexByte(s string) (byte, bool) {

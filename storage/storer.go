@@ -1,5 +1,7 @@
 package storage
 
+import "io"
+
 // Storer is the composite interface for all storage backends.
 type Storer interface {
 	ChunkStorer
@@ -8,4 +10,5 @@ type Storer interface {
 	IndexStorer
 	PreviewStorer
 	ConfigStorer
+	io.Closer
 }

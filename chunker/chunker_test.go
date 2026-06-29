@@ -144,3 +144,47 @@ func TestFixedChunker_EmptyData(t *testing.T) {
 		}
 	}
 }
+
+func TestFastCDCChunker_SingleByte(t *testing.T) {
+	data := []byte{0x42}
+	chunker := NewFastCDCChunker()
+
+	chunks, err := chunker.Chunk(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("FastCDC Chunk failed on single byte: %v", err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("expected 1 chunk for single byte, got %d", len(chunks))
+	}
+	if len(chunks[0].Data) != 1 {
+		t.Fatalf("expected chunk Data length 1, got %d", len(chunks[0].Data))
+	}
+	if chunks[0].Data[0] != 0x42 {
+		t.Errorf("expected chunk Data [0x42], got [0x%x]", chunks[0].Data[0])
+	}
+	if chunks[0].Size != 1 {
+		t.Errorf("expected chunk Size 1, got %d", chunks[0].Size)
+	}
+}
+
+func TestFixedChunker_SingleByte(t *testing.T) {
+	data := []byte{0x42}
+	chunker := NewFixedChunker(4096)
+
+	chunks, err := chunker.Chunk(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Fixed Chunk failed on single byte: %v", err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("expected 1 chunk for single byte, got %d", len(chunks))
+	}
+	if len(chunks[0].Data) != 1 {
+		t.Fatalf("expected chunk Data length 1, got %d", len(chunks[0].Data))
+	}
+	if chunks[0].Data[0] != 0x42 {
+		t.Errorf("expected chunk Data [0x42], got [0x%x]", chunks[0].Data[0])
+	}
+	if chunks[0].Size != 1 {
+		t.Errorf("expected chunk Size 1, got %d", chunks[0].Size)
+	}
+}

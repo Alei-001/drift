@@ -10,7 +10,6 @@ import (
 	"github.com/your-org/drift/filetype"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
-	"github.com/your-org/drift/storage/filesystem"
 	"github.com/your-org/drift/util/fsutil"
 	"github.com/your-org/drift/util/pathutil"
 	"github.com/zeebo/blake3"
@@ -25,7 +24,7 @@ var diffCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.(*filesystem.FSStorage).Close()
+		defer store.Close()
 
 		if len(args) == 0 {
 			snap := resolveHeadSnapshot(store)
@@ -123,6 +122,14 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 
 		if len(data) != int(snapEntry.Size) {
 			modified = append(modified, rel)
+		} else {
+			// Same size: compare content hash
+			workHash := blake3.Sum256(data)
+			var workCoreHash core.Hash
+			copy(workCoreHash[:], workHash[:])
+			if workCoreHash != snapEntry.Hash {
+				modified = append(modified, rel)
+			}
 		}
 		delete(snapFiles, rel)
 		return nil
@@ -313,11 +320,16 @@ func diffFileInSnapshots(store storage.Storer, workDir string, snap1, snap2 *cor
 		fmt.Printf("  -  %s  (deleted)\n", filePath)
 		return
 	}
+	if entry1 == nil && entry2 == nil {
+		fmt.Fprintf(os.Stderr, "  warning: '%s' not found in either snapshot.\n", filePath)
+		return
+	}
 	if entry1.Size != entry2.Size || !chunkHashesEqual(entry1.Chunks, entry2.Chunks) {
 		var data1, data2 []byte
 		for _, h := range entry1.Chunks {
 			chunk, err := store.GetChunk(h)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: cannot read chunk %s: %v\n", h.String(), err)
 				continue
 			}
 			data1 = append(data1, chunk.Data...)
@@ -325,6 +337,7 @@ func diffFileInSnapshots(store storage.Storer, workDir string, snap1, snap2 *cor
 		for _, h := range entry2.Chunks {
 			chunk, err := store.GetChunk(h)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: cannot read chunk %s: %v\n", h.String(), err)
 				continue
 			}
 			data2 = append(data2, chunk.Data...)

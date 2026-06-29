@@ -1,10 +1,11 @@
 package text
 
 import (
+	"strconv"
 	"strings"
 )
 
-// Diff produces a unified diff between two text files using LCS.
+// Diff produces a unified diff between two text files using Myers diff.
 func (e *TextEngine) Diff(oldPath string, oldData []byte, newPath string, newData []byte) (string, error) {
 	oldLines := splitLines(string(oldData))
 	newLines := splitLines(string(newData))
@@ -13,8 +14,7 @@ func (e *TextEngine) Diff(oldPath string, oldData []byte, newPath string, newDat
 		return "", nil
 	}
 
-	lcs := computeLCS(oldLines, newLines)
-	script := buildEditScript(oldLines, newLines, lcs)
+	script := myersDiff(oldLines, newLines)
 
 	if isAllMatch(script) {
 		return "", nil
@@ -40,56 +40,14 @@ func splitLines(s string) []string {
 	if s == "" {
 		return nil
 	}
+	// Normalize CRLF to LF
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	// Remove any remaining lone \r
+	s = strings.ReplaceAll(s, "\r", "")
 	if strings.HasSuffix(s, "\n") {
 		s = s[:len(s)-1]
 	}
 	return strings.Split(s, "\n")
-}
-
-type lcsEntry struct{ oldIdx, newIdx int }
-
-func computeLCS(a, b []string) []lcsEntry {
-	m, n := len(a), len(b)
-	if m == 0 || n == 0 {
-		return nil
-	}
-
-	dp := make([][]int, m+1)
-	for i := range dp {
-		dp[i] = make([]int, n+1)
-	}
-
-	for i := 1; i <= m; i++ {
-		for j := 1; j <= n; j++ {
-			if a[i-1] == b[j-1] {
-				dp[i][j] = dp[i-1][j-1] + 1
-			} else if dp[i-1][j] >= dp[i][j-1] {
-				dp[i][j] = dp[i-1][j]
-			} else {
-				dp[i][j] = dp[i][j-1]
-			}
-		}
-	}
-
-	var result []lcsEntry
-	i, j := m, n
-	for i > 0 && j > 0 {
-		if a[i-1] == b[j-1] {
-			result = append(result, lcsEntry{i - 1, j - 1})
-			i--
-			j--
-		} else if dp[i-1][j] >= dp[i][j-1] {
-			i--
-		} else {
-			j--
-		}
-	}
-
-	for lo, hi := 0, len(result)-1; lo < hi; lo, hi = lo+1, hi-1 {
-		result[lo], result[hi] = result[hi], result[lo]
-	}
-
-	return result
 }
 
 type editAction int
@@ -105,30 +63,112 @@ type editOp struct {
 	line   string
 }
 
-func buildEditScript(oldLines, newLines []string, lcs []lcsEntry) []editOp {
+// myersDiff computes the edit script using the Myers diff algorithm.
+// O(ND) time, O(D*(N+M)) space — a significant improvement over O(N*M) DP
+// for inputs with small edit distance D.
+func myersDiff(a, b []string) []editOp {
+	m, n := len(a), len(b)
+	if m == 0 && n == 0 {
+		return nil
+	}
+	if m == 0 {
+		script := make([]editOp, 0, n)
+		for _, line := range b {
+			script = append(script, editOp{editInsert, line})
+		}
+		return script
+	}
+	if n == 0 {
+		script := make([]editOp, 0, m)
+		for _, line := range a {
+			script = append(script, editOp{editDelete, line})
+		}
+		return script
+	}
+
+	// V[k+offset] stores the furthest x reached on diagonal k = x - y.
+	maxD := m + n
+	offset := maxD
+	v := make([]int, 2*maxD+1)
+
+	// trace[d] is a snapshot of v before processing d, used for backtracking.
+	trace := make([][]int, 0, maxD+1)
+
+	d := 0
+	for ; d <= maxD; d++ {
+		vSnap := make([]int, len(v))
+		copy(vSnap, v)
+		trace = append(trace, vSnap)
+
+		done := false
+		for k := -d; k <= d; k += 2 {
+			var x int
+			if k == -d || (k != d && v[offset+k-1] < v[offset+k+1]) {
+				x = v[offset+k+1] // move down (insertion)
+			} else {
+				x = v[offset+k-1] + 1 // move right (deletion)
+			}
+			y := x - k
+			for x < m && y < n && a[x] == b[y] {
+				x++
+				y++
+			}
+			v[offset+k] = x
+			if x >= m && y >= n {
+				done = true
+				break
+			}
+		}
+		if done {
+			break
+		}
+	}
+
+	// Backtrack through the trace to build the edit script in reverse.
 	var script []editOp
-	oldIdx, newIdx := 0, 0
-	for _, e := range lcs {
-		for oldIdx < e.oldIdx {
-			script = append(script, editOp{editDelete, oldLines[oldIdx]})
-			oldIdx++
+	x, y := m, n
+	for d = len(trace) - 1; d > 0; d-- {
+		v = trace[d]
+		k := x - y
+
+		var prevK int
+		if k == -d || (k != d && v[offset+k-1] < v[offset+k+1]) {
+			prevK = k + 1
+		} else {
+			prevK = k - 1
 		}
-		for newIdx < e.newIdx {
-			script = append(script, editOp{editInsert, newLines[newIdx]})
-			newIdx++
+
+		prevX := v[offset+prevK]
+		prevY := prevX - prevK
+
+		// Emit diagonal matches (the "snake") in reverse order.
+		for x > prevX && y > prevY {
+			script = append(script, editOp{editMatch, a[x-1]})
+			x--
+			y--
 		}
-		script = append(script, editOp{editMatch, oldLines[oldIdx]})
-		oldIdx++
-		newIdx++
+
+		// Emit the single edit (delete or insert) that links the snakes.
+		if x == prevX {
+			script = append(script, editOp{editInsert, b[y-1]})
+		} else {
+			script = append(script, editOp{editDelete, a[x-1]})
+		}
+		x = prevX
+		y = prevY
 	}
-	for oldIdx < len(oldLines) {
-		script = append(script, editOp{editDelete, oldLines[oldIdx]})
-		oldIdx++
+	// Emit any remaining leading matches.
+	for x > 0 && y > 0 {
+		script = append(script, editOp{editMatch, a[x-1]})
+		x--
+		y--
 	}
-	for newIdx < len(newLines) {
-		script = append(script, editOp{editInsert, newLines[newIdx]})
-		newIdx++
+
+	// Reverse to get forward order.
+	for lo, hi := 0, len(script)-1; lo < hi; lo, hi = lo+1, hi-1 {
+		script[lo], script[hi] = script[hi], script[lo]
 	}
+
 	return script
 }
 
@@ -178,6 +218,32 @@ func groupIntoHunks(script []editOp) []hunk {
 		hunkEnd := changeEnd
 		for i := 0; i < contextSize && hunkEnd < len(script); i++ {
 			hunkEnd++
+		}
+
+		// Merge adjacent hunks whose context ranges overlap or touch.
+		// When the gap between change regions is <= 2*contextSize, the
+		// trailing context of one change overlaps the leading context of
+		// the next; combine them into a single hunk instead.
+		for {
+			nextChange := hunkEnd
+			for nextChange < len(script) && script[nextChange].action == editMatch {
+				nextChange++
+			}
+			if nextChange >= len(script) {
+				break
+			}
+			if nextChange-hunkEnd <= contextSize {
+				changeEnd2 := nextChange
+				for changeEnd2 < len(script) && script[changeEnd2].action != editMatch {
+					changeEnd2++
+				}
+				hunkEnd = changeEnd2
+				for i := 0; i < contextSize && hunkEnd < len(script); i++ {
+					hunkEnd++
+				}
+			} else {
+				break
+			}
 		}
 
 		// Calculate line numbers
@@ -233,13 +299,13 @@ func groupIntoHunks(script []editOp) []hunk {
 func (h hunk) String() string {
 	var sb strings.Builder
 	sb.WriteString("@@ -")
-	sb.WriteString(itoa(h.oldStart))
+	sb.WriteString(strconv.Itoa(h.oldStart))
 	sb.WriteByte(',')
-	sb.WriteString(itoa(h.oldCount))
+	sb.WriteString(strconv.Itoa(h.oldCount))
 	sb.WriteString(" +")
-	sb.WriteString(itoa(h.newStart))
+	sb.WriteString(strconv.Itoa(h.newStart))
 	sb.WriteByte(',')
-	sb.WriteString(itoa(h.newCount))
+	sb.WriteString(strconv.Itoa(h.newCount))
 	sb.WriteString(" @@")
 	if len(h.lines) > 0 {
 		sb.WriteByte('\n')
@@ -251,25 +317,4 @@ func (h hunk) String() string {
 	return sb.String()
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := false
-	if n < 0 {
-		neg = true
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
+

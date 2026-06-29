@@ -40,12 +40,12 @@ func (ms *MemoryStorage) GetChunk(hash core.Hash) (*core.Chunk, error) {
 	if !ok {
 		return nil, errors.New("chunk not found")
 	}
-	return v.(*core.Chunk), nil
+	return cloneChunk(v.(*core.Chunk)), nil
 }
 
 // PutChunk stores a chunk.
 func (ms *MemoryStorage) PutChunk(chunk *core.Chunk) error {
-	ms.chunks.Store(chunk.Hash.FullString(), chunk)
+	ms.chunks.Store(chunk.Hash.FullString(), cloneChunk(chunk))
 	return nil
 }
 
@@ -55,12 +55,12 @@ func (ms *MemoryStorage) GetSnapshot(id core.SnapshotID) (*core.Snapshot, error)
 	if !ok {
 		return nil, errors.New("snapshot not found")
 	}
-	return v.(*core.Snapshot), nil
+	return cloneSnapshot(v.(*core.Snapshot)), nil
 }
 
 // PutSnapshot stores a snapshot.
 func (ms *MemoryStorage) PutSnapshot(snapshot *core.Snapshot) error {
-	ms.snapshots.Store(snapshot.ID.Hash.FullString(), snapshot)
+	ms.snapshots.Store(snapshot.ID.Hash.FullString(), cloneSnapshot(snapshot))
 	return nil
 }
 
@@ -177,13 +177,125 @@ func (ms *MemoryStorage) GetConfig() (*core.Config, error) {
 	if ms.config == nil {
 		return core.DefaultConfig(), nil
 	}
-	return ms.config, nil
+	return cloneConfig(ms.config), nil
 }
 
 // SetConfig stores the configuration.
 func (ms *MemoryStorage) SetConfig(config *core.Config) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	ms.config = config
+	ms.config = cloneConfig(config)
 	return nil
+}
+
+// Close releases any resources held by the memory storage. It is a no-op.
+func (ms *MemoryStorage) Close() error {
+	return nil
+}
+
+// cloneChunk returns a deep copy of a Chunk.
+func cloneChunk(c *core.Chunk) *core.Chunk {
+	if c == nil {
+		return nil
+	}
+	clone := &core.Chunk{
+		Hash:  c.Hash,
+		Size:  c.Size,
+		Flags: c.Flags,
+	}
+	if c.Data != nil {
+		clone.Data = make([]byte, len(c.Data))
+		copy(clone.Data, c.Data)
+	}
+	return clone
+}
+
+// cloneFileEntry returns a deep copy of a FileEntry.
+func cloneFileEntry(f core.FileEntry) core.FileEntry {
+	clone := f
+	if f.Chunks != nil {
+		clone.Chunks = make([]core.Hash, len(f.Chunks))
+		copy(clone.Chunks, f.Chunks)
+	}
+	if f.Metadata != nil {
+		m := *f.Metadata
+		if f.Metadata.Extra != nil {
+			m.Extra = make(map[string]string, len(f.Metadata.Extra))
+			for k, v := range f.Metadata.Extra {
+				m.Extra[k] = v
+			}
+		}
+		clone.Metadata = &m
+	}
+	return clone
+}
+
+// cloneSnapshot returns a deep copy of a Snapshot.
+func cloneSnapshot(s *core.Snapshot) *core.Snapshot {
+	if s == nil {
+		return nil
+	}
+	clone := &core.Snapshot{
+		ID:        s.ID,
+		Message:   s.Message,
+		Author:    s.Author,
+		Timestamp: s.Timestamp,
+		TotalSize: s.TotalSize,
+	}
+	if s.PrevID != nil {
+		prev := *s.PrevID
+		clone.PrevID = &prev
+	}
+	if s.Files != nil {
+		clone.Files = make([]core.FileEntry, len(s.Files))
+		for i, f := range s.Files {
+			clone.Files[i] = cloneFileEntry(f)
+		}
+	}
+	if s.Tags != nil {
+		clone.Tags = make([]string, len(s.Tags))
+		copy(clone.Tags, s.Tags)
+	}
+	return clone
+}
+
+// cloneReference returns a deep copy of a Reference.
+// Hash is a value type ([32]byte), Name/Type are value types (string).
+func cloneReference(r *core.Reference) *core.Reference {
+	if r == nil {
+		return nil
+	}
+	clone := *r
+	return &clone
+}
+
+// cloneIndex returns a deep copy of an Index.
+func cloneIndex(idx *core.Index) *core.Index {
+	if idx == nil {
+		return nil
+	}
+	clone := &core.Index{
+		UpdatedAt: idx.UpdatedAt,
+	}
+	if idx.Entries != nil {
+		clone.Entries = make([]core.IndexEntry, len(idx.Entries))
+		for i, e := range idx.Entries {
+			clone.Entries[i] = e
+			if e.Chunks != nil {
+				clone.Entries[i].Chunks = make([]core.Hash, len(e.Chunks))
+				copy(clone.Entries[i].Chunks, e.Chunks)
+			}
+		}
+	}
+	return clone
+}
+
+// cloneConfig returns a deep copy of a Config.
+// User and Core are value-type structs (no slices/maps/pointers).
+func cloneConfig(c *core.Config) *core.Config {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	return &clone
 }

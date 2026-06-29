@@ -13,7 +13,6 @@ import (
 	"github.com/your-org/drift/filetype"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
-	"github.com/your-org/drift/storage/filesystem"
 	"github.com/your-org/drift/util/pathutil"
 )
 
@@ -32,7 +31,7 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.(*filesystem.FSStorage).Close()
+		defer store.Close()
 
 		snapshot := resolveSnapshot(store, idStr)
 		if snapshot == nil {
@@ -126,6 +125,10 @@ func openExternal(snapshot *core.Snapshot, filePath string, data []byte) error {
 		os.Remove(tmpPath)
 		return err
 	}
+	go func() {
+		cmd.Wait()
+		os.Remove(tmpPath)
+	}()
 	fmt.Printf("Launched system viewer for %s:%s.\n", snapshot.ShortID(), filePath)
 	return nil
 }
@@ -182,10 +185,21 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 	if err != nil {
 		return nil
 	}
+	var matches []*core.Snapshot
 	for _, s := range snapshots {
 		if strings.HasPrefix(s.ShortID(), id) || strings.HasPrefix(s.FullID(), id) {
-			return s
+			matches = append(matches, s)
 		}
+	}
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	if len(matches) > 1 {
+		fmt.Fprintf(os.Stderr, "ambiguous snapshot ID '%s' matches %d snapshots:\n", id, len(matches))
+		for _, m := range matches {
+			fmt.Fprintf(os.Stderr, "  %s\n", m.ShortID())
+		}
+		return nil
 	}
 	return nil
 }

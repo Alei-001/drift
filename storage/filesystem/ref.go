@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +11,28 @@ import (
 	"github.com/your-org/drift/util/fsutil"
 )
 
+// validateRefName checks that a ref name does not contain path traversal characters.
+func validateRefName(name string) error {
+	if name == "" {
+		return fmt.Errorf("ref name is empty")
+	}
+	// Check for path traversal
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid ref name: %q contains '..'", name)
+	}
+	// Ensure the cleaned path stays within the refs directory
+	cleaned := filepath.Clean(name)
+	if strings.HasPrefix(cleaned, "..") || cleaned == ".." {
+		return fmt.Errorf("invalid ref name: %q escapes refs directory", name)
+	}
+	return nil
+}
+
 // GetRef reads a reference from the refs directory.
 func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
+	if err := validateRefName(name); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(fs.root, RefsDir, name)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -34,6 +55,9 @@ func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
 
 // SetRef writes a reference to the refs directory.
 func (fs *FSStorage) SetRef(name string, ref *core.Reference) error {
+	if err := validateRefName(name); err != nil {
+		return err
+	}
 	path := filepath.Join(fs.root, RefsDir, name)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -79,6 +103,9 @@ func (fs *FSStorage) ListRefs(prefix string) ([]*core.Reference, error) {
 
 // DeleteRef removes a reference file.
 func (fs *FSStorage) DeleteRef(name string) error {
+	if err := validateRefName(name); err != nil {
+		return err
+	}
 	path := filepath.Join(fs.root, RefsDir, name)
 	return os.Remove(path)
 }

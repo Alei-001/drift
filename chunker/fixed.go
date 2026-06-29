@@ -16,6 +16,9 @@ func NewFixedChunker(chunkSize int) *FixedChunker {
 	if chunkSize < 4096 {
 		chunkSize = 4096
 	}
+	if chunkSize > 64*1024*1024 { // 64MB upper limit
+		chunkSize = 64 * 1024 * 1024
+	}
 	return &FixedChunker{chunkSize: chunkSize}
 }
 

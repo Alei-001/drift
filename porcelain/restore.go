@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/util/fsutil"
 	"github.com/your-org/drift/util/pathutil"
 )
 
@@ -42,18 +44,35 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		return "", fmt.Errorf("cannot resolve path: %w", pathErr)
 	}
 
+	// Track restored entry for single-file index update
+	var restoredEntry *core.FileEntry
+	// Track snapshot file paths for full-restore cleanup
+	snapFiles := make(map[string]bool)
+
+	// Resolve absolute workDir for path traversal protection
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workDir: %w", err)
+	}
+
 	// Restore files
 	for _, entry := range snap.Files {
 		if filePath != "" && entry.Path != filePath {
 			continue
 		}
 
-		fullPath := filepath.Join(workDir, entry.Path)
+		fullPath := filepath.Join(absWorkDir, entry.Path)
+
+		// Verify the resolved path stays within workDir (defense in depth against path traversal)
+		if fullPath != absWorkDir && !strings.HasPrefix(fullPath, absWorkDir+string(filepath.Separator)) {
+			continue
+		}
 
 		if entry.Mode.IsDir() {
 			if err := os.MkdirAll(fullPath, 0755); err != nil {
 				return "", fmt.Errorf("create dir %s: %w", fullPath, err)
 			}
+			snapFiles[entry.Path] = true
 			continue
 		}
 
@@ -73,7 +92,12 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 			return "", fmt.Errorf("create parent dir %s: %w", parentDir, err)
 		}
 
-		if err := os.WriteFile(fullPath, assembled, 0644); err != nil {
+		// Restore original file permissions
+		perm := os.FileMode(entry.Mode & 0o777)
+		if perm == 0 {
+			perm = 0644
+		}
+		if err := os.WriteFile(fullPath, assembled, perm); err != nil {
 			return "", fmt.Errorf("write file %s: %w", fullPath, err)
 		}
 
@@ -81,33 +105,94 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		if err := os.Chtimes(fullPath, time.Unix(entry.ModTime, 0), time.Unix(entry.ModTime, 0)); err != nil {
 			return "", fmt.Errorf("set modtime %s: %w", fullPath, err)
 		}
-	}
 
-	// Update HEAD reference
-	headRef := &core.Reference{
-		Name:   "HEAD",
-		Type:   core.RefTypeHead,
-		Target: snapshotID.Hash,
-	}
-	if err := store.SetRef("HEAD", headRef); err != nil {
-		return "", fmt.Errorf("update HEAD: %w", err)
-	}
+		snapFiles[entry.Path] = true
 
-	// Rebuild index from restored files
-	newIndex := &core.Index{}
-	for _, entry := range snap.Files {
-		if filePath != "" && entry.Path != filePath {
-			continue
+		// Track the restored entry for single-file index update
+		if filePath != "" {
+			entryCopy := entry
+			restoredEntry = &entryCopy
 		}
-		newIndex.Entries = append(newIndex.Entries, core.IndexEntry{
-			Path:    entry.Path,
-			Size:    entry.Size,
-			ModTime: entry.ModTime,
-			Chunks:  entry.Chunks,
-		})
 	}
-	if err := store.SetIndex(newIndex); err != nil {
-		return "", fmt.Errorf("update index: %w", err)
+
+	if filePath == "" {
+		// Full restore: remove files in workspace not in the snapshot
+		cleanErr := fsutil.Walk(workDir, func(path string, info os.FileInfo) error {
+			if info.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(workDir, path)
+			if err != nil {
+				return nil
+			}
+			rel = filepath.ToSlash(rel)
+			if snapFiles[rel] {
+				return nil
+			}
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("remove extra file %s: %w", path, err)
+			}
+			return nil
+		})
+		if cleanErr != nil {
+			return "", fmt.Errorf("clean workspace: %w", cleanErr)
+		}
+
+		// Update HEAD reference
+		headRef := &core.Reference{
+			Name:   "HEAD",
+			Type:   core.RefTypeHead,
+			Target: snapshotID.Hash,
+		}
+		if err := store.SetRef("HEAD", headRef); err != nil {
+			return "", fmt.Errorf("update HEAD: %w", err)
+		}
+
+		// Rebuild index from restored files
+		newIndex := &core.Index{}
+		for _, entry := range snap.Files {
+			newIndex.Entries = append(newIndex.Entries, core.IndexEntry{
+				Path:    entry.Path,
+				Hash:    entry.Hash,
+				Size:    entry.Size,
+				ModTime: entry.ModTime,
+				Chunks:  entry.Chunks,
+			})
+		}
+		if err := store.SetIndex(newIndex); err != nil {
+			return "", fmt.Errorf("update index: %w", err)
+		}
+	} else {
+		// Single-file restore: do not move HEAD, only update the restored entry
+		if restoredEntry != nil {
+			existingIndex, err := store.GetIndex()
+			if err != nil {
+				existingIndex = &core.Index{}
+			}
+			found := false
+			for i := range existingIndex.Entries {
+				if existingIndex.Entries[i].Path == filePath {
+					existingIndex.Entries[i].Size = restoredEntry.Size
+					existingIndex.Entries[i].ModTime = restoredEntry.ModTime
+					existingIndex.Entries[i].Chunks = restoredEntry.Chunks
+					existingIndex.Entries[i].Hash = restoredEntry.Hash
+					found = true
+					break
+				}
+			}
+			if !found {
+				existingIndex.Entries = append(existingIndex.Entries, core.IndexEntry{
+					Path:    restoredEntry.Path,
+					Hash:    restoredEntry.Hash,
+					Size:    restoredEntry.Size,
+					ModTime: restoredEntry.ModTime,
+					Chunks:  restoredEntry.Chunks,
+				})
+			}
+			if err := store.SetIndex(existingIndex); err != nil {
+				return "", fmt.Errorf("update index: %w", err)
+			}
+		}
 	}
 
 	return backupID, nil

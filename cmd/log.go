@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
-	"github.com/your-org/drift/storage/filesystem"
 )
 
 var logLimit int
@@ -27,7 +27,7 @@ var logCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.(*filesystem.FSStorage).Close()
+		defer store.Close()
 
 		if logVerbose != "" {
 			return logVerboseMode(store, logVerbose)
@@ -72,9 +72,9 @@ var logCmd = &cobra.Command{
 			}
 
 			msg := s.Message
-			if len(msg) > 28 {
-				msg = msg[:27] + "…"
-			}
+		if len([]rune(msg)) > 28 {
+			msg = string([]rune(msg)[:27]) + "…"
+		}
 
 			tag := ""
 			for _, t := range s.Tags {
@@ -84,9 +84,9 @@ var logCmd = &cobra.Command{
 				}
 			}
 			if tag != "" {
-				if len(tag) > 10 {
-					tag = tag[:9] + "…"
-				}
+			if len([]rune(tag)) > 10 {
+				tag = string([]rune(tag)[:9]) + "…"
+			}
 				tag = "[" + tag + "]"
 			}
 
@@ -162,29 +162,38 @@ func countSnapshotChanges(store storage.Storer, snapshot *core.Snapshot) (added,
 }
 
 func logJSONMode(store storage.Storer, snapshots []*core.Snapshot) error {
-	fmt.Printf(">>> History (%d)\n", len(snapshots))
-	fmt.Println("[")
-	for i, s := range snapshots {
-		add, mod, del := countSnapshotChanges(store, s)
-		tag := "null"
-		if len(s.Tags) > 0 && s.Tags[0] != "" {
-			tag = `"` + s.Tags[0] + `"`
-		}
-		changes := fmt.Sprintf("+%d ~%d -%d", add, mod, del)
-		comma := ","
-		if i == len(snapshots)-1 {
-			comma = ""
-		}
-		fmt.Printf(`  {"id":"%s","time":"%s","message":"%s","tag":%s,"changes":"%s"}%s`,
-			s.ShortID(),
-			time.Unix(s.Timestamp, 0).Format("2006-01-02T15:04:05"),
-			s.Message,
-			tag,
-			changes,
-			comma)
-		fmt.Println()
+	type jsonEntry struct {
+		ID      string  `json:"id"`
+		Time    string  `json:"time"`
+		Message string  `json:"message"`
+		Tag     *string `json:"tag"`
+		Changes string  `json:"changes"`
 	}
-	fmt.Println("]")
+
+	var entries []jsonEntry
+	for _, s := range snapshots {
+		add, mod, del := countSnapshotChanges(store, s)
+		changes := fmt.Sprintf("+%d ~%d -%d", add, mod, del)
+		entry := jsonEntry{
+			ID:      s.ShortID(),
+			Time:    time.Unix(s.Timestamp, 0).Format("2006-01-02T15:04:05"),
+			Message: s.Message,
+			Changes: changes,
+		}
+		if len(s.Tags) > 0 && s.Tags[0] != "" {
+			tag := s.Tags[0]
+			entry.Tag = &tag
+		}
+		entries = append(entries, entry)
+	}
+
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Printf(">>> History (%d)\n", len(snapshots))
+	os.Stdout.Write(data)
+	fmt.Println()
 	return nil
 }
 

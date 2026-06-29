@@ -1,6 +1,8 @@
 package text
 
 import (
+	"bufio"
+	"bytes"
 	"strings"
 )
 
@@ -12,9 +14,10 @@ func (e *TextEngine) Preview(data []byte, maxLines int) string {
 		maxLines = defaultPreviewLines
 	}
 
-	lines := strings.Split(string(data), "\n")
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	var lines []string
+	for i := 0; i < maxLines && scanner.Scan(); i++ {
+		lines = append(lines, scanner.Text())
 	}
 	return strings.Join(lines, "\n")
 }

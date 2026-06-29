@@ -31,6 +31,9 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 	headRef, err := store.GetRef("HEAD")
 	if err == nil {
 		headHash = headRef.Target
+	} else if !os.IsNotExist(err) {
+		// HEAD exists but can't be read — this is a real error
+		return nil, fmt.Errorf("read HEAD reference: %w", err)
 	}
 
 	// Get current index
@@ -74,6 +77,23 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			relPath = f.path
 		}
 
+		// Check if file is unchanged — skip chunking and reuse old chunks
+		if oldEntry, ok := oldIndexMap[relPath]; ok &&
+			oldEntry.Size == f.info.Size() &&
+			oldEntry.ModTime == f.info.ModTime().Unix() {
+			entry := core.FileEntry{
+				Path:    relPath,
+				Mode:    core.FileMode(f.info.Mode()),
+				Size:    f.info.Size(),
+				ModTime: f.info.ModTime().Unix(),
+				Chunks:  oldEntry.Chunks,
+				Hash:    oldEntry.Hash,
+			}
+			fileEntries = append(fileEntries, entry)
+			totalSize += f.info.Size()
+			continue
+		}
+
 		// Open file for streaming reads
 		file, err := os.Open(f.path)
 		if err != nil {
@@ -112,12 +132,21 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			chunkHashes = append(chunkHashes, c.Hash)
 		}
 
+		// Compute file-level hash from chunk hashes
+		fileHasher := blake3.New()
+		for _, h := range chunkHashes {
+			fileHasher.Write(h[:])
+		}
+		var fileHash core.Hash
+		copy(fileHash[:], fileHasher.Sum(nil))
+
 		entry := core.FileEntry{
 			Path:    relPath,
-			Mode:    core.FileModeRegular,
+			Mode:    core.FileMode(f.info.Mode()),
 			Size:    f.info.Size(),
 			ModTime: f.info.ModTime().Unix(),
 			Chunks:  chunkHashes,
+			Hash:    fileHash,
 		}
 		fileEntries = append(fileEntries, entry)
 		totalSize += f.info.Size()
@@ -126,6 +155,8 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		if oldEntry, ok := oldIndexMap[relPath]; !ok {
 			changed = true
 		} else if oldEntry.Size != f.info.Size() || oldEntry.ModTime != f.info.ModTime().Unix() {
+			changed = true
+		} else if oldEntry.Hash != fileHash {
 			changed = true
 		}
 	}
@@ -189,6 +220,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			Size:    entry.Size,
 			ModTime: entry.ModTime,
 			Chunks:  entry.Chunks,
+			Hash:    entry.Hash,
 		})
 	}
 	if err := store.SetIndex(newIndex); err != nil {
@@ -196,6 +228,42 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 	}
 
 	return snap, nil
+}
+
+// ComputeFileHash chunks a file with its detected engine and returns the
+// BLAKE3 file hash computed from the chunk hashes. It mirrors the hashing
+// performed during CreateSnapshot, so callers (e.g. status) can detect
+// content changes even when size and modification time are unchanged.
+// Chunks are not stored.
+func ComputeFileHash(filePath string) (core.Hash, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return core.Hash{}, fmt.Errorf("open file %s: %w", filePath, err)
+	}
+	defer file.Close()
+
+	header, err := io.ReadAll(io.LimitReader(file, 512))
+	if err != nil {
+		return core.Hash{}, fmt.Errorf("read header %s: %w", filePath, err)
+	}
+	engine := filetype.DetectEngine(filePath, header)
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return core.Hash{}, fmt.Errorf("seek %s: %w", filePath, err)
+	}
+
+	chunks, err := engine.Chunk(file)
+	if err != nil {
+		return core.Hash{}, fmt.Errorf("chunk file %s: %w", filePath, err)
+	}
+
+	fileHasher := blake3.New()
+	for _, c := range chunks {
+		fileHasher.Write(c.Hash[:])
+	}
+	var fileHash core.Hash
+	copy(fileHash[:], fileHasher.Sum(nil))
+	return fileHash, nil
 }
 
 // snapshotToProto converts a core.Snapshot to core.SnapshotProto for hashing.

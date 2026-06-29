@@ -13,5 +13,6 @@ type FileEntry struct {
 	Size     int64
 	ModTime  int64 // unix timestamp
 	Chunks   []Hash
+	Hash     Hash
 	Metadata *FileMetadata
 }

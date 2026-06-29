@@ -1,7 +1,10 @@
 package filetype
 
+import "sync"
+
 // Registry holds registered file type engines.
 type Registry struct {
+	mu      sync.RWMutex
 	engines []Engine
 }
 
@@ -24,12 +27,16 @@ func DetectEngine(path string, header []byte) Engine {
 
 // Register adds an engine to the registry.
 func (r *Registry) Register(engine Engine) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.engines = append(r.engines, engine)
 }
 
 // Detect finds the first matching engine for a file.
 // Returns nil if no engine matches.
 func (r *Registry) Detect(path string, header []byte) Engine {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, e := range r.engines {
 		if e.Detect(path, header) {
 			return e

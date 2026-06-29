@@ -3,6 +3,7 @@ package fsutil
 import (
 	"bufio"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -15,6 +16,10 @@ func Walk(root string, fn func(path string, info os.FileInfo) error) error {
 
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			// Skip files we can't access (permission denied, broken symlink, etc.)
+			if os.IsPermission(err) || os.IsNotExist(err) {
+				return nil
+			}
 			return err
 		}
 
@@ -69,14 +74,14 @@ func readIgnorePatterns(root string) ([]string, error) {
 }
 
 func isIgnored(rel string, info os.FileInfo, patterns []string) bool {
-	base := filepath.Base(rel)
+	rel = filepath.ToSlash(rel)
+	base := path.Base(rel)
 	for _, p := range patterns {
-		// Try matching against the base name
-		if match, _ := filepath.Match(p, base); match {
+		p = filepath.ToSlash(p)
+		if match, _ := path.Match(p, base); match {
 			return true
 		}
-		// Try matching against the full relative path
-		if match, _ := filepath.Match(p, rel); match {
+		if match, _ := path.Match(p, rel); match {
 			return true
 		}
 	}

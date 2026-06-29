@@ -3,10 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/porcelain"
-	"github.com/your-org/drift/storage/filesystem"
 	"github.com/your-org/drift/util/fsutil"
 	"github.com/your-org/drift/util/pathutil"
 )
@@ -22,7 +22,7 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.(*filesystem.FSStorage).Close()
+		defer store.Close()
 
 		index, err := store.GetIndex()
 		if err != nil {
@@ -30,7 +30,7 @@ var statusCmd = &cobra.Command{
 		}
 
 		workspaceFiles := make(map[string]os.FileInfo)
-		_ = fsutil.Walk(cwd, func(path string, info os.FileInfo) error {
+		err = fsutil.Walk(cwd, func(path string, info os.FileInfo) error {
 			if info.IsDir() {
 				return nil
 			}
@@ -38,6 +38,9 @@ var statusCmd = &cobra.Command{
 			workspaceFiles[rel] = info
 			return nil
 		})
+		if err != nil {
+			return err
+		}
 
 		type change struct {
 			typ  string // "+", "~", "-"
@@ -50,6 +53,13 @@ var statusCmd = &cobra.Command{
 			if info, ok := workspaceFiles[entry.Path]; ok {
 				if info.Size() != entry.Size || info.ModTime().Unix() != entry.ModTime {
 					changes = append(changes, change{"~", entry.Path})
+				} else {
+					// Size and ModTime match — verify content hash to catch
+					// changes that leave size/mtime unchanged.
+					fileHash, hashErr := porcelain.ComputeFileHash(filepath.Join(cwd, entry.Path))
+					if hashErr != nil || fileHash != entry.Hash {
+						changes = append(changes, change{"~", entry.Path})
+					}
 				}
 				printed[entry.Path] = true
 			} else {

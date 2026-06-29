@@ -1,6 +1,7 @@
 package filetype
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -183,5 +184,49 @@ func TestTextDiffIdentical(t *testing.T) {
 	}
 	if diff != "" {
 		t.Errorf("expected empty diff for identical data, got %q", diff)
+	}
+}
+
+func TestTextDiff_CRLF(t *testing.T) {
+	engine := DetectEngine("file.txt", []byte("text"))
+	oldData := []byte("line1\r\nline2\r\nline3\r\n")
+	newData := []byte("line1\nline2\nline3\n")
+	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff != "" {
+		t.Errorf("expected no diff for CRLF vs LF, got:\n%s", diff)
+	}
+}
+
+func TestTextDiff_HunkMerge(t *testing.T) {
+	engine := DetectEngine("file.txt", []byte("text"))
+	oldData := []byte("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n")
+	newData := []byte("line1\nCHANGED2\nline3\nline4\nline5\nline6\nCHANGED7\nline8\n")
+	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Count @@ markers — should be 2 (opening @@ ... @@), meaning 1 merged hunk
+	atAtCount := strings.Count(diff, "@@")
+	if atAtCount != 2 {
+		t.Errorf("expected 1 hunk (2 @@ markers), got %d @@ markers:\n%s", atAtCount, diff)
+	}
+}
+
+func TestTextDiff_LargeFile(t *testing.T) {
+	engine := DetectEngine("file.txt", []byte("text"))
+	var oldLines, newLines []string
+	for i := 0; i < 10000; i++ {
+		oldLines = append(oldLines, fmt.Sprintf("line %d", i))
+		newLines = append(newLines, fmt.Sprintf("line %d", i))
+	}
+	newLines[5000] = "CHANGED"
+	oldData := []byte(strings.Join(oldLines, "\n"))
+	newData := []byte(strings.Join(newLines, "\n"))
+	_, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
-	"github.com/your-org/drift/storage/filesystem"
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +23,7 @@ var saveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer store.(*filesystem.FSStorage).Close()
+		defer store.Close()
 
 		message := saveMessage
 		if message == "" {
@@ -44,7 +43,7 @@ var saveCmd = &cobra.Command{
 		snapshot, err := porcelain.CreateSnapshot(store, cwd, message, author, tags)
 		if err != nil {
 			if err.Error() == "nothing to save" {
-				statusFailed("Save", "nothing to save.", "modify some files first, or use --allow-empty.")
+				statusFailed("Save", "nothing to save.", "modify some files first to create a snapshot.")
 				return fmt.Errorf("nothing to save")
 			}
 			return err

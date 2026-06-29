@@ -1,7 +1,6 @@
 package chunker
 
 import (
-	"bytes"
 	"io"
 
 	cdc "github.com/PlakarKorp/go-cdc-chunkers"
@@ -23,19 +22,11 @@ func NewFastCDCChunker() *FastCDCChunker {
 }
 
 func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
-	// Peek first byte to check if stream is empty
-	var buf [1]byte
-	_, peekErr := r.Read(buf[:])
-	if peekErr == io.EOF {
-		return nil, nil
-	}
-	if peekErr != nil {
-		return nil, peekErr
-	}
-	// Reconstruct reader with peeked byte
-	r = io.MultiReader(bytes.NewReader(buf[:]), r)
-
-	ch, err := cdc.NewChunker("fastcdc", r, &cdc.ChunkerOpts{
+	// Use "fastcdc-v1.0.0" instead of legacy "fastcdc": the legacy mode
+	// forces hardcoded masks computed for an 8KB NormalSize, which would
+	// skew cut points for our 128KB/256KB/512KB sizes. The v1.0.0 variant
+	// computes masks dynamically from the actual NormalSize.
+	ch, err := cdc.NewChunker("fastcdc-v1.0.0", r, &cdc.ChunkerOpts{
 		MinSize:    fastCDCMinSize,
 		NormalSize: fastCDCAvgSize,
 		MaxSize:    fastCDCMaxSize,
@@ -47,6 +38,11 @@ func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
 	var chunks []*core.Chunk
 
 	err = ch.Split(func(offset, length uint, chunkData []byte) error {
+		// The chunker may emit a zero-length chunk (e.g. for an empty
+		// stream); skip it so callers never see empty chunks.
+		if length == 0 {
+			return nil
+		}
 		var hash core.Hash
 		sum := blake3.Sum256(chunkData)
 		copy(hash[:], sum[:])
