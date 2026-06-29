@@ -21,10 +21,10 @@
 | `storage/filesystem/config.go` | 配置读写 | P0 |
 | `storage/memory/` | 内存存储（测试用）| P1 |
 | `chunker/` | 封装 go-cdc-chunkers FastCDC + 定长 fallback + zstd 压缩 | P0 |
-| `filetype/engine.go` | Engine / Detector / Chunker / Differ / Previewer 接口定义 | P0 |
+| `filetype/engine.go` | Engine / Detector / ChunkerSelector / Differ / Previewer 接口定义 | P0 |
 | `filetype/registry.go` | 引擎注册表 + MIME 检测 | P0 |
 | `filetype/binary/` | 通用二进制引擎（fallback）| P0 |
-| `filetype/text/` | 文本引擎（Chunker + Differ）| P0 |
+| `filetype/text/` | 文本引擎（ChunkerFor + Differ）| P0 |
 | `util/cache/` | Chunk Cache + Preview Cache（hashicorp/golang-lru/v2）| P0 |
 | `util/fsutil/` | 目录遍历 + 原子文件操作 | P0 |
 | `util/logger/` | slog 封装 | P1 |
@@ -60,11 +60,14 @@
 
 | 模块 | 任务 | 状态 |
 |------|------|------|
-| `porcelain/branch.go` | 分支创建 / 切换逻辑 | ✅ 已完成 |
-| `cmd/branch.go` | `drift branch` 命令 | ✅ 已完成 |
-| `cmd/branch_switch.go` | `drift switch` / `drift switch -c` 命令 | ✅ 已完成 |
+| `porcelain/branch.go` | 分支创建 / 切换 / 删除 / 重命名逻辑 | ✅ 已完成 |
+| `cmd/branch.go` | `drift branch` / `branch -d` / `branch -m` 命令 | ✅ 已完成 |
+| `cmd/switch.go` | `drift switch` / `drift switch -c` 命令 | ✅ 已完成 |
 | `cmd/watch.go` | `drift watch` 命令（fsnotify） | ✅ 已完成 |
 | `cmd/ignore.go` | `drift ignore` 命令 | ✅ 已完成 |
+| `porcelain/lock.go` | 工作区锁（watch/switch 协调） | ✅ 已完成 |
+| `porcelain/gc.go` | 垃圾回收（不可达快照与块清理） | ✅ 已完成 |
+| `cmd/gc.go` | `drift gc` 命令 | ✅ 已完成 |
 | `util/glob/` | .driftignore 模式匹配 | ✅ 已完成 |
 | `util/event/` | 事件总线（watch 用） | ✅ 已完成 |
 
@@ -73,39 +76,76 @@
 | 命令 | 对应文件 | 功能 |
 |------|---------|------|
 | `drift branch <name>` | cmd/branch.go | 创建分支（不切换）|
-| `drift switch <name>` | cmd/branch_switch.go | 切换到已有分支 |
-| `drift switch -c <name>` | cmd/branch_switch.go | 创建并切换到新分支 |
-| `drift switch main` | cmd/branch_switch.go | 切回主线 |
-| `drift watch` | cmd/watch.go | 文件监听，自动保存 |
+| `drift branch -d <name>` | cmd/branch.go | 删除分支 |
+| `drift branch -m <new>` | cmd/branch.go | 重命名当前分支 |
+| `drift branch -m <old> <new>` | cmd/branch.go | 重命名指定分支 |
+| `drift switch <name>` | cmd/switch.go | 切换到已有分支 |
+| `drift switch -c <name>` | cmd/switch.go | 创建并切换到新分支 |
+| `drift switch main` | cmd/switch.go | 切回主线 |
+| `drift watch on/off/status` | cmd/watch.go | 文件监听，自动保存 |
 | `drift ignore <pattern>` | cmd/ignore.go | 忽略文件/目录 |
+| `drift gc [--dry-run]` | cmd/gc.go | 回收不可达快照与块 |
 
 ### 阶段二交付物
 
 - 多分支并行实验
-- `drift watch` 后台守护，崩溃保护
+- 分支删除 / 重命名（含当前分支 HEAD 同步）
+- `drift watch` 后台守护，崩溃保护，watch/switch 工作区锁协调
 - 分支间切换自动备份 + 工作区还原
+- 垃圾回收：删除分支后回收孤立快照与块，`--dry-run` 预览
 
 ---
 
 ## 阶段三：富文件类型引擎
 
-**目标**：图片/PSD 有格式感知，真正区别于 git。
+**目标**：图片/视频有格式感知，大文件分块策略优化。
 
 ### 模块任务
 
-| 模块 | 任务 |
-|------|------|
-| `filetype/image/chunker.go` | 图片分块器 |
-| `filetype/image/preview.go` | 缩略图生成（govips） |
-| `filetype/image/differ.go` | 像素级差异（为 GUI 储备） |
-| `storage/filesystem/preview.go` | 预览缓存存储 |
-| `filetype/psd/` | PSD 图层级分块（研究 + 实现） |
+| 模块 | 任务 | 状态 |
+|------|------|------|
+| `filetype/engine.go` | Detector 接口重构：拆为 `DetectByMagic` / `DetectByExtension` / `DetectByHeuristic` 三方法 | ✅ 已完成 |
+| `filetype/registry.go` | `Registry.Detect` 改为三轮分层匹配（magic → extension → heuristic） | ✅ 已完成 |
+| `filetype/init.go` | 引擎注册顺序：text → image → video → binary | ✅ 已完成 |
+| `filetype/image/engine.go` | ImageEngine：分层 Detect（png/jpg/gif/webp/bmp/tiff）、Name | ✅ 已完成 |
+| `filetype/image/differ.go` | 文件级元信息 diff（尺寸/格式/大小变化，不做像素 diff） | ✅ 已完成 |
+| `filetype/image/preview.go` | 输出图片摘要信息（尺寸 + 格式 + 大小） | ✅ 已完成 |
+| `filetype/video/engine.go` | VideoEngine：分层 Detect（mp4/mov/avi/mkv/webm） | ✅ 已完成 |
+| `filetype/video/differ.go` | 文件级 diff（文件大小变化） | ✅ 已完成 |
+| `filetype/video/preview.go` | 输出视频基本信息（含 MP4 tkhd 尺寸解析） | ✅ 已完成 |
+| `chunker/fastcdc.go` | FastCDC 参数可配置化：`NewFastCDCChunkerWithParams(min, avg, max int)` | ✅ 已完成 |
+| `porcelain/snapshot.go` | 按引擎类型 + 文件大小 5 档选择分块策略（各引擎 `ChunkerFor`） | ✅ 已完成 |
+| `porcelain/snapshot.go` | CreateSnapshot 与 ComputeFileHash 共用 `chunkFile()` 保证哈希一致 | ✅ 已完成 |
+| `filetype/psd/` | PSD 图层解析（研究性，非硬交付） | ⏸ 降级为研究项（P2） |
+
+### 分块策略分档（5 档自适应）
+
+各引擎 `ChunkerFor(fileSize)` 实现的分块策略（text 2 档 + binary 3 档 = 5 档效果）：
+
+| 文件特征 | 分块策略 | 理由 |
+|----------|---------|------|
+| 文本 < 64KB | 整文件一块（nil chunker） | 太小，分块增加索引开销无收益 |
+| 文本 64K-50MB | FastCDC 4K-8K-16K | 小块，行级修改去重好 |
+| 二进制 < 50MB | FastCDC 128K-256K-512K（默认） | 当前策略，已验证 |
+| 二进制 50M-500M | FastCDC 1M-2M-4M | 减少块数，降低索引膨胀 |
+| 二进制 > 500M | Fixed 8M | 大文件 CDC 找切点 CPU 开销大，定长更高效 |
+
+### 不做的事（明确排除）
+
+- 像素级 diff（为 Phase 4 GUI 储备，CLI 阶段不做）
+- 缩略图图片生成（需 govips/CGO，暂不引入重依赖）
+- PSD 图层级分块作为硬交付（降级为研究项 P2，未纳入 Phase 3 交付）
 
 ### 阶段三交付物
 
-- 图片文件 CDC 去重，200MB PSD 修改后仅存变化块
-- 缩略图自动生成并缓存（供 GUI 阶段使用）
-- 大文件处理策略（>100MB 定长分块）
+- **ImageEngine**：6 种图片格式检测（magic + 扩展名双层），元信息 diff（格式/尺寸/大小），preview 摘要
+- **VideoEngine**：5 种视频格式检测，大小 diff，preview（含 MP4 tkhd 尺寸解析）
+- **分层检测架构重构**：Detector 接口拆为 `DetectByMagic` / `DetectByExtension` / `DetectByHeuristic`，Registry 三轮分层匹配
+- **FastCDC 参数可配置化**：`NewFastCDCChunkerWithParams(min, avg, max int)`，默认 `NewFastCDCChunker()` 保持 128K-256K-512K
+- **5 档自适应分块策略**：按引擎类型 + 文件大小选择最优分块（含整文件单块优化）
+- **CreateSnapshot 与 ComputeFileHash 分块策略一致性保证**：共用 `chunkFile()` → 同一文件两路计算得到相同哈希
+- 图片/视频文件 diff 输出有意义的元信息对比（尺寸/格式/大小），而非 "binary files differ"
+- 图片/视频文件 show/preview 输出摘要信息，而非 `[binary file]`
 
 ---
 
@@ -160,9 +200,9 @@
 Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ──── Phase 5
   ▲             ▲            ▲            ▲            ▲
   │             │            │            │            │
-  │         分支+自动化   图片/PSD      GUI桌面      远程协同
-  │                       格式引擎      应用
-  │
+  │         分支+自动化   图片/视频     GUI桌面      远程协同
+  │                       +分层检测     应用
+  │                       +5档分块
  核心存储
  + 基础CLI
 
@@ -176,4 +216,5 @@ Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ───
 - [x] CLI 命令设计
 - [x] 开源库选型与核查
 - [x] 阶段一开发
-- [x] 阶段二开发（分支系统 + 自动化）
+- [x] 阶段二开发（分支系统 + 自动化 + GC）
+- [x] 阶段三开发（富文件类型引擎：Image/Video + 分层检测 + 5 档分块）

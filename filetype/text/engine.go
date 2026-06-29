@@ -35,18 +35,26 @@ func (e *TextEngine) Name() string {
 	return "text"
 }
 
-// Detect checks if a file is a text file by extension or by content.
-func (e *TextEngine) Detect(path string, header []byte) bool {
+// DetectByMagic checks file header signatures. Text has no unified magic
+// byte signature, so this always returns false.
+func (e *TextEngine) DetectByMagic(header []byte) bool {
+	return false
+}
+
+// DetectByExtension checks if the path's extension or basename is a known
+// text type.
+func (e *TextEngine) DetectByExtension(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	base := filepath.Base(path)
+	return textExtensions[ext] || textBasenames[base]
+}
 
-	if textExtensions[ext] || textBasenames[base] {
-		return true
-	}
-
+// DetectByHeuristic is the last-resort content sniffing: a header without
+// null bytes is treated as text. Used for extensionless or unknown-extension
+// files.
+func (e *TextEngine) DetectByHeuristic(path string, header []byte) bool {
 	if len(header) == 0 {
 		return false
 	}
-
 	return !bytes.Contains(header, []byte{0})
 }

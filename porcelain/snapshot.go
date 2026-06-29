@@ -15,6 +15,48 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// chunkFile reads from r and chunks it using the strategy selected by the
+// engine for the given file size. When the engine's ChunkerFor returns nil
+// (whole-file single chunk), the entire content is read and returned as one
+// chunk whose Hash is BLAKE3(content).
+//
+// Both CreateSnapshot and ComputeFileHash use this helper so that the chunk
+// layout—and therefore the file hash—stays identical between them.
+func chunkFile(r io.Reader, engine filetype.Engine, fileSize int64) ([]*core.Chunk, error) {
+	c := engine.ChunkerFor(fileSize)
+	if c == nil {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return nil, err
+		}
+		sum := blake3.Sum256(data)
+		var hash core.Hash
+		copy(hash[:], sum[:])
+		chunk := &core.Chunk{
+			Hash:  hash,
+			Size:  uint32(len(data)),
+			Data:  data,
+			Flags: core.ChunkFlagNone,
+		}
+		return []*core.Chunk{chunk}, nil
+	}
+	return c.Chunk(r)
+}
+
+// computeFileHashFromChunks computes the file-level hash by concatenating all
+// chunk hashes and hashing with BLAKE3. This mirrors the original hashing
+// logic used by CreateSnapshot and must be used by any code path that needs
+// to match it (including the whole-file single-chunk path).
+func computeFileHashFromChunks(chunks []*core.Chunk) core.Hash {
+	fileHasher := blake3.New()
+	for _, c := range chunks {
+		fileHasher.Write(c.Hash[:])
+	}
+	var fileHash core.Hash
+	copy(fileHash[:], fileHasher.Sum(nil))
+	return fileHash
+}
+
 // CreateSnapshot creates a snapshot of the current workspace state.
 // If message is empty, the caller should open an editor to get one.
 // tags are optional labels attached to the snapshot (e.g. --tag "v1").
@@ -114,14 +156,18 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			return nil, fmt.Errorf("seek %s: %w", f.path, err)
 		}
 
-		// Chunk the file by streaming directly from the file
-		chunks, err := engine.Chunk(file)
+		// Chunk the file using the strategy selected by the engine for
+		// this file size. chunkFile handles both the whole-file single-
+		// chunk path (ChunkerFor returns nil) and the multi-chunk path.
+		chunks, err := chunkFile(file, engine, f.info.Size())
 		file.Close()
 		if err != nil {
 			return nil, fmt.Errorf("chunk file %s: %w", f.path, err)
 		}
 
-		// Store chunks and collect hashes
+		// Store chunks and collect hashes. The whole-file single-chunk
+		// path also goes through PutChunk for dedup, so its chunk is
+		// stored exactly like any other.
 		var chunkHashes []core.Hash
 		for _, c := range chunks {
 			if !store.HasChunk(c.Hash) {
@@ -132,13 +178,10 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			chunkHashes = append(chunkHashes, c.Hash)
 		}
 
-		// Compute file-level hash from chunk hashes
-		fileHasher := blake3.New()
-		for _, h := range chunkHashes {
-			fileHasher.Write(h[:])
-		}
-		var fileHash core.Hash
-		copy(fileHash[:], fileHasher.Sum(nil))
+		// Compute file-level hash from chunk hashes. This stays identical
+		// to the original logic so existing snapshots remain compatible;
+		// for the single-chunk path it is BLAKE3(that chunk's hash).
+		fileHash := computeFileHashFromChunks(chunks)
 
 		entry := core.FileEntry{
 			Path:    relPath,
@@ -253,22 +296,25 @@ func ComputeFileHash(filePath string) (core.Hash, error) {
 	}
 	engine := filetype.DetectEngine(filePath, header)
 
+	// Stat the open file to get its size, which ChunkerFor needs to
+	// pick the same strategy CreateSnapshot uses.
+	info, err := file.Stat()
+	if err != nil {
+		return core.Hash{}, fmt.Errorf("stat file %s: %w", filePath, err)
+	}
+
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return core.Hash{}, fmt.Errorf("seek %s: %w", filePath, err)
 	}
 
-	chunks, err := engine.Chunk(file)
+	// Use the same chunking strategy as CreateSnapshot so the resulting
+	// file hash matches bit-for-bit.
+	chunks, err := chunkFile(file, engine, info.Size())
 	if err != nil {
 		return core.Hash{}, fmt.Errorf("chunk file %s: %w", filePath, err)
 	}
 
-	fileHasher := blake3.New()
-	for _, c := range chunks {
-		fileHasher.Write(c.Hash[:])
-	}
-	var fileHash core.Hash
-	copy(fileHash[:], fileHasher.Sum(nil))
-	return fileHash, nil
+	return computeFileHashFromChunks(chunks), nil
 }
 
 // snapshotToProto converts a core.Snapshot to core.SnapshotProto for hashing.

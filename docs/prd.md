@@ -177,7 +177,8 @@ drift/
 │   ├── fsutil/              # 文件系统工具（遍历、原子写入）
 │   └── logger/              # 结构化日志
 ├── chunker/                 # 分块算法
-│   ├── chunker.go           # Chunker 接口
+│   ├── chunker.go           # Chunker 接口（Chunk(r io.Reader)）
+│   ├── strategy.go          # 二进制类共享分块策略（BinaryChunkerFor + 阈值常量）
 │   ├── fastcdc.go           # FastCDC 实现
 │   └── fixed.go             # 定长分块器
 ├── storage/                 # 存储层

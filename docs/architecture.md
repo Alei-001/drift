@@ -36,18 +36,20 @@
 │  └─────────────┴─────────────┴─────────────┴──────────────────┘  │
 ├──────────────────────────────────────────────────────────────────┤
 │                    filetype 层 (filetype/)    ← 核心差异化层       │
-│  ┌────────┬────────┬────────┬──────────────┐                    │
-│  │ Text   │ Image  │ PSD    │  Binary      │                    │
-│  │Chunker │Chunker │Chunker │  Chunker     │                    │
-│  ├────────┼────────┼────────┼──────────────┤                    │
-│  │ Text   │ Image  │ Layer  │  Binary      │                    │
-│  │Differ  │Differ  │Differ  │  Differ      │                    │
-│  ├────────┼────────┼────────┼──────────────┤                    │
-│  │ Text   │ Image  │ PSD    │  Generic     │                    │
-│  │Preview │Preview │Preview │  Preview     │                    │
-│  └────────┴────────┴────────┴──────────────┘                    │
+│  ┌────────┬────────┬────────┬────────┬──────────────┐           │
+│  │ Text   │ Image  │ Video  │ (未来) │  Binary      │           │
+│  │Chunker │Chunker │Chunker │Chunker │  Chunker     │           │
+│  ├────────┼────────┼────────┼────────┼──────────────┤           │
+│  │ Text   │ Image  │ Video  │ (未来) │  Binary      │           │
+│  │Differ  │Differ  │Differ  │Differ  │  Differ      │           │
+│  ├────────┼────────┼────────┼────────┼──────────────┤           │
+│  │ Text   │ Image  │ Video  │ (未来) │  Generic     │           │
+│  │Preview │Preview │Preview │Preview │  Preview     │           │
+│  └────────┴────────┴────────┴────────┴──────────────┘           │
 │                                                                  │
-│  ▸ 更多引擎（Video / Audio / 3D 等）通过 Engine 接口按需扩展     │
+│  ▸ 检测分层：magic bytes → 扩展名 → 启发式（见 §3.3）            │
+│  ▸ 引擎注册顺序：text → image → video → binary                   │
+│  ▸ 更多引擎（Audio / 3D 等）通过 Engine 接口按需扩展             │
 ├──────────────────────────────────────────────────────────────────┤
 │                     chunker 层 (chunker/)                          │
 │  ┌──────────────────────┬──────────────────────────────────────┐  │
@@ -113,9 +115,9 @@ graph TB
 
     subgraph FILETYPE["filetype 层（可插拔）"]
         direction LR
-        TextEng["text 引擎<br/>Chunker/Differ/Preview"]
-        ImageEng["image 引擎<br/>Chunker/Differ/Preview"]
-        PSDEng["psd 引擎<br/>Chunker/Differ/Preview"]
+        TextEng["text 引擎<br/>ChunkerSelector/Differ/Preview"]
+        ImageEng["image 引擎<br/>PNG/JPG/GIF/WebP/BMP/TIFF"]
+        VideoEng["video 引擎<br/>MP4/MOV/AVI/MKV/WebM"]
         BinEng["binary 引擎<br/>通用 fallback"]
     end
 
@@ -316,26 +318,33 @@ drift/
 │   └── restore.go                # 恢复逻辑
 │
 ├── filetype/                     # 文件类型适配层（核心差异）
-│   ├── registry.go               # 引擎注册表 + 自动检测
-│   ├── engine.go                 # Engine 接口定义
+│   ├── registry.go               # 引擎注册表 + 三轮分层检测（magic/extension/heuristic）
+│   ├── engine.go                 # Engine 接口定义（Detector / ChunkerSelector / Differ / Previewer 子接口）
+│   ├── init.go                   # 引擎注册顺序：text → image → video → binary
 │   ├── text/                     # 文本文件引擎
-│   │   ├── chunker.go            # 文本分块器
+│   │   ├── chunker.go            # ChunkerFor 实现（2 档）
 │   │   ├── differ.go             # 文本差异
 │   │   └── preview.go            # 文本缩略（前N行）
-│   ├── image/                    # 通用图片引擎
-│   │   ├── chunker.go            # 图片分块器
-│   │   ├── differ.go             # 像素差异
-│   │   └── preview.go            # 缩略图生成
-│   ├── psd/                      # PSD 专用引擎
-│   │   ├── chunker.go            # 图层级分块
-│   │   ├── differ.go             # 图层差异
-│   │   └── preview.go            # 缩略图
+│   ├── image/                    # 通用图片引擎（png/jpg/gif/webp/bmp/tiff）
+│   │   ├── engine.go             # 分层检测（magic + 扩展名）
+│   │   ├── chunker.go            # ChunkerFor 实现（委托 BinaryChunkerFor）
+│   │   ├── differ.go             # 元信息 diff（格式/尺寸/大小）
+│   │   ├── preview.go            # 摘要信息（尺寸 + 格式 + 大小）
+│   │   └── engine_test.go
+│   ├── video/                    # 视频引擎（mp4/mov/avi/mkv/webm）
+│   │   ├── engine.go             # 分层检测（magic + 扩展名）
+│   │   ├── chunker.go            # ChunkerFor 实现（委托 BinaryChunkerFor）
+│   │   ├── differ.go             # 文件大小 diff
+│   │   ├── preview.go            # 视频摘要（含 MP4 tkhd 尺寸解析）
+│   │   └── engine_test.go
 │   └── binary/                   # 通用二进制引擎（fallback）
+│       ├── engine.go
 │       ├── chunker.go
 │       └── preview.go
 │
 ├── chunker/                      # 分块算法层
-│   ├── chunker.go                # Chunker 接口
+│   ├── chunker.go                # Chunker 接口（Chunk(r io.Reader)）
+│   ├── strategy.go               # 二进制类共享分块策略（BinaryChunkerFor + 阈值常量）
 │   ├── fastcdc.go                # FastCDC 实现
 │   ├── fixed.go                  # 定长分块（大文件 fallback）
 │   └── chunker_test.go
@@ -399,7 +408,7 @@ drift/
 |------|------|------|---------|
 | `cmd/` | CLI 参数解析、输出格式化、命令路由 | porcelain | 无（顶层） |
 | `porcelain/` | 业务逻辑编排、调用下层完成操作 | filetype, chunker, storage, core | cmd |
-| `filetype/` | 文件类型检测、注册 Chunker/Differ/Previewer | chunker, core | porcelain |
+| `filetype/` | 文件类型检测、注册 ChunkerSelector/Differ/Previewer | chunker, core | porcelain |
 | `chunker/` | CDC 分块算法实现 | core | filetype, porcelain |
 | `storage/` | 数据持久化接口与实现 | core, util | porcelain |
 | `core/` | 核心数据类型定义 | 无 | 所有模块 |
@@ -414,40 +423,73 @@ drift/
 
 // Engine 文件类型引擎 —— 可插拔的核心抽象
 // 每种文件类型通过注册自己的 Engine 实现来扩展 drift
+// 通过 Go 接口组合嵌入四个能力子接口
 type Engine interface {
-    // CanHandle 判断是否能处理该文件
-    CanHandle(file *core.FileEntry) bool
-
-    // Chunker 返回该文件类型的分块器
-    Chunker() Chunker
-
-    // Differ 返回该文件类型的差异计算器
-    Differ() Differ
-
-    // Previewer 返回该文件类型的预览生成器
-    Previewer() Previewer
+    Detector
+    ChunkerSelector
+    Differ
+    Previewer
 }
 
-// Detector 检测文件类型
-// 基于扩展名 + magic bytes + MIME 嗅探
+// Detector 分层检测器接口（Phase 3 重构）
+// 单一 Detect(path, header) 方法被拆为三个独立方法，分别对应不同的
+// 检测可靠性层级。Registry.Detect 按下表顺序三轮遍历所有引擎：
+//
+//   轮次 | 方法                  | 证据强度 | 适用场景
+//   1   | DetectByMagic(header) | 最强     | 文件头有明确 magic bytes（如 PNG/JPG/MP4）
+//   2   | DetectByExtension(path)| 次强     | 扩展名明确的常规文件
+//   3   | DetectByHeuristic      | 最弱     | 无扩展名/未知扩展名的兜底嗅探
+//
+// 设计理由：
+//   - magic bytes 最可靠，应优先；但并非所有格式都有签名（如 text/binary）
+//   - 扩展名次之，能覆盖绝大多数用户文件
+//   - 启发式最弱，仅用于兜底，避免误判
+// 分层后引擎注册顺序不影响正确性（每轮内部按注册顺序短路），
+// 但约定顺序 text → image → video → binary 以保证可读性。
 type Detector interface {
-    Detect(path string, header []byte) (confidence float64)
+    Name() string
+    // DetectByMagic 基于文件头 magic bytes 判断（最强证据）。
+    // 仅当 header 匹配本引擎已知且无歧义的签名时返回 true。
+    // 不得依赖 path/扩展名。无 magic 签名的引擎（如 text/binary）恒返回 false。
+    DetectByMagic(header []byte) bool
+    // DetectByExtension 基于路径扩展名判断（中等证据）。
+    // 不得读取 header 内容。
+    DetectByExtension(path string) bool
+    // DetectByHeuristic 内容嗅探兜底（最弱证据）。
+    // 仅在前两轮均无匹配时调用，用于无扩展名或未知扩展名文件。
+    DetectByHeuristic(path string, header []byte) bool
 }
 
-type Chunker interface {
-    // Chunk 将文件内容分割为内容寻址的块列表
-    Chunk(r io.Reader) ([]*core.Chunk, error)
+// ChunkerSelector 按文件大小返回合适的分块器。
+// 返回 nil 表示"整文件单块"：调用方读取整个文件并构造单个 Chunk，其 Hash 为 BLAKE3(content)。
+// 每个引擎根据文件大小自治决定分块策略，使策略与理解该类型的引擎共置一处；
+// 未来引擎（如 PSD）可返回结构感知的 chunker，而无需改动 snapshot 层。
+type ChunkerSelector interface {
+    ChunkerFor(fileSize int64) chunker.Chunker
 }
 
+// Differ 计算两个版本文件内容的差异
 type Differ interface {
-    // Diff 计算两个版本的差异
-    Diff(a, b *core.FileEntry, opts DiffOptions) (*DiffResult, error)
+    Diff(oldPath string, oldData []byte, newPath string, newData []byte) (string, error)
 }
 
+// Previewer 生成文件预览（文本用前N行，图片用尺寸/格式摘要，视频用容器信息）
 type Previewer interface {
-    // Generate 生成文件预览（文本用前N行，图片用缩略图）
-    Generate(r io.Reader, opts PreviewOptions) (*core.Preview, error)
+    Preview(data []byte, maxLines int) string
 }
+
+
+// =================== filetype/registry.go ===================
+
+// Registry.Detect 三轮分层匹配实现：
+//   1. 遍历所有引擎的 DetectByMagic，命中即返回（最强）
+//   2. 无匹配则遍历所有引擎的 DetectByExtension（次强）
+//   3. 仍无匹配则遍历 DetectByHeuristic 兜底（最弱）
+//   4. 三轮均无命中返回 nil（binary 引擎始终通过 heuristic 兜底，故实际不会发生）
+//
+// 该分层保证：精确 magic 签名永远优先于弱启发式，
+// 避免了旧版 Detect(path, header) 一锅烩时可能出现的误判。
+func (r *Registry) Detect(path string, header []byte) Engine
 
 
 // =================== storage/storer.go ===================
@@ -460,6 +502,7 @@ type Storer interface {
     IndexStorer
     PreviewStorer
     ConfigStorer
+    io.Closer
 }
 
 // ChunkStorer 块存储 —— 内容寻址
@@ -467,6 +510,7 @@ type ChunkStorer interface {
     HasChunk(hash core.Hash) bool
     GetChunk(hash core.Hash) (*core.Chunk, error)
     PutChunk(chunk *core.Chunk) error
+    DeleteChunk(hash core.Hash) error
     ListChunks() ([]core.Hash, error)
 }
 
@@ -475,7 +519,14 @@ type SnapshotStorer interface {
     GetSnapshot(id core.SnapshotID) (*core.Snapshot, error)
     PutSnapshot(snap *core.Snapshot) error
     DeleteSnapshot(id core.SnapshotID) error
-    ListSnapshots(branch string, opts ListOptions) ([]*core.Snapshot, error)
+    ListSnapshots(opts *ListOptions) ([]*core.Snapshot, error)
+}
+
+// ListOptions 控制快照列表的分页与分支过滤
+type ListOptions struct {
+    Limit  int
+    Offset int
+    Branch string
 }
 
 // ReferenceStorer 引用存储
@@ -488,8 +539,8 @@ type ReferenceStorer interface {
 
 // PreviewStorer 预览缓存
 type PreviewStorer interface {
-    GetPreview(hash core.Hash, size string) (*core.Preview, error)
-    PutPreview(hash core.Hash, size string, preview *core.Preview) error
+    GetPreview(hash core.Hash, size int) ([]byte, error)
+    PutPreview(hash core.Hash, size int, data []byte) error
 }
 
 // IndexStorer 工作区索引（文件 → 块的映射）
@@ -502,7 +553,6 @@ type IndexStorer interface {
 type ConfigStorer interface {
     GetConfig() (*core.Config, error)
     SetConfig(cfg *core.Config) error
-    GetIgnorePatterns() ([]string, error)
 }
 ```
 
@@ -715,7 +765,7 @@ sequenceDiagram
 
     loop 每个变更文件
         Snapshot->>Registry: DetectEngine(path, content)
-        Registry-->>Snapshot: Engine(text/image/psd/...)
+        Registry-->>Snapshot: Engine(text/image/video/binary)
 
         Note over Snapshot,PS: 3. 生成预览
         Snapshot->>Engine: Previewer.Generate(content)
@@ -723,8 +773,8 @@ sequenceDiagram
         Snapshot->>PS: PutPreview(hash, "thumb_128", preview)
 
         Note over Snapshot,CD: 4. CDC 分块
-        Snapshot->>Engine: Chunker.Chunk(content)
-        Engine->>CD: FastCDC.Split(reader)
+        Snapshot->>Engine: ChunkerFor(fileSize)
+        Engine->>CD: chunker.Chunk(reader)（按引擎策略）
         CD-->>Engine: []Chunk
 
         loop 每个 Chunk
@@ -895,12 +945,21 @@ sequenceDiagram
 
 // Register 注册自定义文件类型引擎
 // 第三方可通过 Go plugin 或编译时注册扩展
-func Register(priority int, detector Detector, engine Engine)
+// 注册顺序约定：text → image → video → binary（详见 §3.3 分层检测）
+func Register(engine Engine)
 
-// 使用示例：
+// 使用示例（实现分层 Detector 接口的三个方法）：
 func init() {
-    filetype.Register(100, &PSDDetector{}, &PSDEngine{})
+    filetype.Register(&ClipStudioEngine{})
 }
+
+type ClipStudioEngine struct{}
+
+func (e *ClipStudioEngine) Name() string                       { return "clip-studio" }
+func (e *ClipStudioEngine) DetectByMagic(header []byte) bool   { return /* magic 嗅探 */ }
+func (e *ClipStudioEngine) DetectByExtension(path string) bool { return /* 扩展名匹配 */ }
+func (e *ClipStudioEngine) DetectByHeuristic(path string, header []byte) bool { return false }
+// ... ChunkerSelector / Differ / Previewer 略
 ```
 
 ### 6.5 错误处理策略
@@ -1071,31 +1130,47 @@ var defaultIgnorePatterns = []string{
 
 ### 9.1 文件类型扩展
 
-新增文件类型只需实现三个接口并注册：
+新增文件类型只需实现 Engine 的四个子接口并注册：
 
 ```go
 // 示例：新增 .clip (CLIP Studio Paint) 支持
 type ClipStudioEngine struct{}
 
-func (e *ClipStudioEngine) CanHandle(file *core.FileEntry) bool {
-    return file.Metadata.MIMEType == "application/x-clip-studio"
+func (e *ClipStudioEngine) Name() string { return "clip-studio" }
+
+// 分层 Detector（Phase 3 重构）：实现三个方法即可被 Registry 三轮检测识别
+func (e *ClipStudioEngine) DetectByMagic(header []byte) bool {
+    // magic bytes 嗅探（若格式有签名）
+    return len(header) >= 4 && string(header[:4]) == "CSF "
+}
+func (e *ClipStudioEngine) DetectByExtension(path string) bool {
+    return strings.ToLower(filepath.Ext(path)) == ".clip"
+}
+func (e *ClipStudioEngine) DetectByHeuristic(path string, header []byte) bool {
+    return false // 无需启发式兜底
 }
 
-func (e *ClipStudioEngine) Chunker() filetype.Chunker {
-    return &ClipChunker{}  // 按图层分块
+// ChunkerFor 按文件大小返回分块策略。
+// 可复用 chunker.BinaryChunkerFor 共享策略，或用 NewFastCDCChunkerWithParams 自定义粒度，
+// 也可返回结构感知的专用 chunker（如 PSDLayerChunker）。
+func (e *ClipStudioEngine) ChunkerFor(fileSize int64) chunker.Chunker {
+    return chunker.BinaryChunkerFor(fileSize)
 }
 
-func (e *ClipStudioEngine) Differ() filetype.Differ {
-    return &ClipDiffer{}   // 图层级 diff
+func (e *ClipStudioEngine) Diff(oldPath string, oldData []byte, newPath string, newData []byte) (string, error) {
+    // 图层级 diff（自定义实现）
+    return clipLayerDiff(oldData, newData)
 }
 
-func (e *ClipStudioEngine) Previewer() filetype.Previewer {
-    return &ClipPreviewer{} // 提取缩略图
+func (e *ClipStudioEngine) Preview(data []byte, maxLines int) string {
+    // 提取缩略图信息
+    return clipThumbnailInfo(data)
 }
 
 // 注册（在 init 或 main 中）
+// 注册顺序按约定追加在 binary 之前（见 init.go）
 func init() {
-    filetype.Register(90, &ClipDetector{}, &ClipStudioEngine{})
+    filetype.Register(&ClipStudioEngine{})
 }
 ```
 
@@ -1144,10 +1219,16 @@ storage 接口使用语义化版本：
 
 | 优化点 | 方案 | 预期效果 |
 |--------|------|---------|
-| **FastCDC 窗口** | 48 字节滑动窗口，平均块大小 256KB | 去重率 30-70%（取决于文件类型） |
-| **大文件跳过** | >100MB 文件使用 4MB 定长分块 | 避免 CDC 计算开销 |
+| **FastCDC 窗口** | 48 字节滑动窗口，默认平均块 256KB | 去重率 30-70%（取决于文件类型） |
+| **FastCDC 参数化** | `NewFastCDCChunkerWithParams(min, avg, max int)`，默认 `NewFastCDCChunker()` 仍为 128K-256K-512K | 按文件类型选择最优分块粒度（见 §10.4） |
+| **整文件单块优化** | 文本 < 64KB 不分块（ChunkerFor 返回 nil），整文件作单个 Chunk | 跳过 FastCDC 开销，索引更紧凑 |
+| **大文件跳过** | > 500MB 文件使用 8MB 定长分块 | 避免 CDC 找切点 CPU 开销 |
 | **并发分块** | 多文件并行分块（goroutine pool） | CPU 利用率提升 3-5x |
 | **分块缓存** | 基于 ModTime + Size 的快速变更检测 | 未变文件跳过二次分块 |
+| **哈希一致性** | CreateSnapshot 与 ComputeFileHash 共用 `chunkFile()`，分块布局完全相同 | 同一文件两路计算得到相同哈希，避免增量误判 |
+
+> **FastCDC 参数约束**：底层库要求 `MinSize >= 64`、`NormalSize` 为 2 的幂、`MinSize < NormalSize < MaxSize`。
+> `clampFastCDCParams` 会对非法输入自动钳位到合法范围（必要时回退默认三元组），任何输入都不会触发库 panic。
 
 ### 10.2 缓存策略
 
@@ -1195,20 +1276,66 @@ storage 接口使用语义化版本：
   - 合并碎片化的 pack
 ```
 
-### 10.4 大文件处理策略
+### 10.4 分块策略（各引擎 ChunkerFor 自治 + 文件大小 5 档自适应）
 
+drift 不再使用统一的 FastCDC 默认参数，而是由各引擎通过 `ChunkerFor(fileSize)` 自治决定分块策略。`porcelain/snapshot.go` 的 `chunkFile(r, engine, fileSize)` 调用 `engine.ChunkerFor(fileSize)` 获取 chunker：返回 nil 走整文件单块路径，否则 `c.Chunk(r)`。text 引擎实现 2 档（<64KB 整文件 / 否则 FastCDC 4K-8K-16K）；image/video/binary 引擎共用 `chunker.BinaryChunkerFor(fileSize)` 的 3 档策略。合计仍是下表 5 档效果。`CreateSnapshot` 与 `ComputeFileHash` 共用 `chunkFile`，保证两路计算得到完全相同的分块布局与文件哈希。
+
+| 文件特征 | 分块策略 | 理由 |
+|----------|---------|------|
+| 文本 < 64KB | 整文件一块（`ChunkerFor` 返回 nil） | 太小，分块增加索引开销无收益 |
+| 文本 64K-50MB | FastCDC 4K-8K-16K | 小块，行级修改去重好 |
+| 二进制 < 50MB | FastCDC 128K-256K-512K（默认） | 当前默认策略，已验证 |
+| 二进制 50M-500M | FastCDC 1M-2M-4M | 减少块数，降低索引膨胀 |
+| 二进制 > 500M | Fixed 8M | 大文件 CDC 找切点 CPU 开销大，定长更高效 |
+
+实现要点：
+
+```go
+// chunker/strategy.go —— 二进制类引擎（image/video/binary）共享的 3 档策略
+// 放在 chunker 包而非 filetype 包，是为了避免 filetype ↔ 子包循环依赖。
+const (
+    BinaryLargeThreshold = 50 * 1024 * 1024   // 50MB
+    BinaryHugeThreshold  = 500 * 1024 * 1024  // 500MB
+)
+
+func BinaryChunkerFor(fileSize int64) Chunker {
+    switch {
+    case fileSize < BinaryLargeThreshold:
+        return NewFastCDCChunker()                              // 128K-256K-512K
+    case fileSize < BinaryHugeThreshold:
+        return NewFastCDCChunkerWithParams(1<<20, 2<<20, 4<<20) // 1M-2M-4M
+    default:
+        return NewFixedChunker(8 << 20)                         // 8M 定长
+    }
+}
+
+// filetype/text/chunker.go —— 文本引擎自治 2 档
+func (e *TextEngine) ChunkerFor(fileSize int64) chunker.Chunker {
+    if fileSize < 64*1024 {
+        return nil // 整文件单块，由 chunkFile 直接拼一个 Chunk
+    }
+    return chunker.NewFastCDCChunkerWithParams(4096, 8192, 16384) // 4K-8K-16K
+}
+
+// filetype/image|video|binary/chunker.go —— 复用共享策略
+func (e *ImageEngine) ChunkerFor(fileSize int64) chunker.Chunker {
+    return chunker.BinaryChunkerFor(fileSize)
+}
+
+// porcelain/snapshot.go —— 调用方：策略选择由引擎自治，snapshot 层零分支
+func chunkFile(r io.Reader, engine filetype.Engine, fileSize int64) ([]*core.Chunk, error) {
+    c := engine.ChunkerFor(fileSize)
+    if c == nil {
+        // 整文件单块：读全部内容，构造单个 Chunk{Hash: BLAKE3(content), ...}
+        // ...
+    }
+    return c.Chunk(r)
+}
 ```
-文件大小分级（优先级：引擎分块 > 通用分块）：
 
-> 规则优先：若文件类型注册了专用引擎（如 PSD 引擎按图层分块），
-  即使文件超过 100MB 也优先走引擎分块。
-> 通用回退：未被任何引擎认领的文件，按下表降级：
-
-< 1 MB    → 标准 FastCDC 分块
-1-100 MB  → FastCDC + goroutine 并发
-100 MB+   → 固定 4MB 分块 + 流式处理
-1 GB+     → 固定 16MB 分块 + 稀疏索引（不缓存所有块元数据）
-```
+> **整文件单块路径**：当 `ChunkerFor` 返回 nil 时，`chunkFile` 会读取整文件，生成单个 `Chunk{Hash: BLAKE3(content), Size: len(data), Data: content}`，文件级哈希仍走"块哈希串联后再 BLAKE3"的统一路径（见 `computeFileHashFromChunks`），保持与多块路径的哈希算法一致。
+>
+> **PSD 与未来专用引擎**：Phase 3 已将 PSD 图层分块降级为研究项（P2），当前所有 .psd 文件按"二进制"档处理。未来若引入图层感知的专用引擎，只需实现 `PSDEngine.ChunkerFor` 返回自定义结构感知 chunker（如 `PSDLayerChunker`）按图层切分，无需改动 snapshot 层。
 
 ### 10.5 性能指标目标
 

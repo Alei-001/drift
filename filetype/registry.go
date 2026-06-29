@@ -32,13 +32,29 @@ func (r *Registry) Register(engine Engine) {
 	r.engines = append(r.engines, engine)
 }
 
-// Detect finds the first matching engine for a file.
-// Returns nil if no engine matches.
+// Detect finds the best matching engine for a file using layered detection.
+// Layer 1 (magic bytes) is queried first — the most reliable signal.
+// Layer 2 (extension) is queried only if no magic matched.
+// Layer 3 (heuristic) is the final fallback for unknown extensions.
+// Returns nil if no engine matches (should not happen when binary is registered).
 func (r *Registry) Detect(path string, header []byte) Engine {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	// Layer 1: magic bytes (strongest)
 	for _, e := range r.engines {
-		if e.Detect(path, header) {
+		if e.DetectByMagic(header) {
+			return e
+		}
+	}
+	// Layer 2: extension (medium)
+	for _, e := range r.engines {
+		if e.DetectByExtension(path) {
+			return e
+		}
+	}
+	// Layer 3: heuristic (weakest, fallback)
+	for _, e := range r.engines {
+		if e.DetectByHeuristic(path, header) {
 			return e
 		}
 	}

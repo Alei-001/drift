@@ -10,15 +10,120 @@ import (
 )
 
 const (
-	fastCDCMinSize = 131072 // 128KB
-	fastCDCAvgSize = 262144 // 256KB
-	fastCDCMaxSize = 524288 // 512KB
+	fastCDCDefaultMinSize = 128 * 1024 // 128KB
+	fastCDCDefaultAvgSize = 256 * 1024 // 256KB
+	fastCDCDefaultMaxSize = 512 * 1024 // 512KB
+	// fastCDCMinSizeFloor is the minimum value accepted by the underlying
+	// FastCDC library (it rejects MinSize < 64). We clamp to this floor so
+	// callers can never trip a library validation error.
+	fastCDCMinSizeFloor = 64
 )
 
-type FastCDCChunker struct{}
+type FastCDCChunker struct {
+	minSize int
+	avgSize int
+	maxSize int
+}
 
+// NewFastCDCChunker creates a FastCDC chunker with the default
+// 128KB/256KB/512KB min/avg/max sizes. Behavior is unchanged from before
+// this constructor accepted parameters.
 func NewFastCDCChunker() *FastCDCChunker {
-	return &FastCDCChunker{}
+	return NewFastCDCChunkerWithParams(fastCDCDefaultMinSize, fastCDCDefaultAvgSize, fastCDCDefaultMaxSize)
+}
+
+// NewFastCDCChunkerWithParams creates a FastCDC chunker with custom
+// min/avg/max chunk sizes. Parameters are clamped to satisfy the underlying
+// FastCDC library constraints (MinSize >= 64B, NormalSize must be a power of
+// two, MinSize < NormalSize < MaxSize), so any input produces a usable
+// chunker without panicking.
+func NewFastCDCChunkerWithParams(minSize, avgSize, maxSize int) *FastCDCChunker {
+	minSize, avgSize, maxSize = clampFastCDCParams(minSize, avgSize, maxSize)
+	return &FastCDCChunker{
+		minSize: minSize,
+		avgSize: avgSize,
+		maxSize: maxSize,
+	}
+}
+
+// clampFastCDCParams normalizes min/avg/max sizes against both the task's
+// clamp rules and the FastCDC library constraints.
+func clampFastCDCParams(minSize, avgSize, maxSize int) (int, int, int) {
+	// minSize: negative -> default minimum (512B); enforce library floor of 64B.
+	if minSize < 0 {
+		minSize = 512
+	}
+	if minSize < fastCDCMinSizeFloor {
+		minSize = fastCDCMinSizeFloor
+	}
+
+	// maxSize: non-positive or smaller than minSize -> default 512KB.
+	if maxSize <= 0 || maxSize < minSize {
+		maxSize = fastCDCDefaultMaxSize
+	}
+
+	// If minSize and maxSize are still inconsistent (minSize >= maxSize,
+	// e.g. the user passed a minSize larger than the default max), fall
+	// back to the default pair so a valid range always exists.
+	if minSize >= maxSize {
+		minSize = fastCDCDefaultMinSize
+		maxSize = fastCDCDefaultMaxSize
+	}
+
+	// avgSize: must be a power of two strictly between minSize and maxSize.
+	// The task specifies (minSize+maxSize)/2 as the fallback target, but the
+	// library requires a power of two, so we round to the nearest power of
+	// two that fits in (minSize, maxSize).
+	if !isPowerOfTwo(avgSize) || avgSize <= minSize || avgSize >= maxSize {
+		avgSize = nearestPowerOfTwoBetween(minSize, maxSize)
+		if avgSize <= minSize || avgSize >= maxSize {
+			// No valid power of two exists between minSize and maxSize;
+			// fall back to the full default triple.
+			minSize = fastCDCDefaultMinSize
+			avgSize = fastCDCDefaultAvgSize
+			maxSize = fastCDCDefaultMaxSize
+		}
+	}
+
+	return minSize, avgSize, maxSize
+}
+
+func isPowerOfTwo(n int) bool {
+	return n > 0 && (n&(n-1)) == 0
+}
+
+// nearestPowerOfTwoBetween returns the power of two closest to
+// (minVal+maxVal)/2 that lies strictly between minVal and maxVal.
+// It returns 0 if no such power of two exists.
+func nearestPowerOfTwoBetween(minVal, maxVal int) int {
+	target := (minVal + maxVal) / 2
+	lower := 1
+	for lower*2 <= target {
+		lower *= 2
+	}
+	upper := lower * 2
+
+	var best int
+	if target-lower <= upper-target {
+		best = lower
+	} else {
+		best = upper
+	}
+	if best > minVal && best < maxVal {
+		return best
+	}
+	if upper > minVal && upper < maxVal {
+		return upper
+	}
+	if lower > minVal && lower < maxVal {
+		return lower
+	}
+	for p := lower; p > minVal; p /= 2 {
+		if p > minVal && p < maxVal {
+			return p
+		}
+	}
+	return 0
 }
 
 func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
@@ -27,9 +132,9 @@ func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
 	// skew cut points for our 128KB/256KB/512KB sizes. The v1.0.0 variant
 	// computes masks dynamically from the actual NormalSize.
 	ch, err := cdc.NewChunker("fastcdc-v1.0.0", r, &cdc.ChunkerOpts{
-		MinSize:    fastCDCMinSize,
-		NormalSize: fastCDCAvgSize,
-		MaxSize:    fastCDCMaxSize,
+		MinSize:    f.minSize,
+		NormalSize: f.avgSize,
+		MaxSize:    f.maxSize,
 	})
 	if err != nil {
 		return nil, err
