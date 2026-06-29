@@ -60,7 +60,7 @@ var diffCmd = &cobra.Command{
 				return fmt.Errorf("snapshot not found: %s", args[1])
 			}
 			filePath := args[2]
-			diffFileInSnapshots(store, snap1, snap2, filePath)
+			diffFileInSnapshots(store, cwd, snap1, snap2, filePath)
 		} else {
 			snap1 := resolveSnapshot(store, args[0])
 			if snap1 == nil {
@@ -149,8 +149,11 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 
 // diffWorkspaceFileVsSnapshot shows content-level diff for a single file: workspace vs snapshot.
 func diffWorkspaceFileVsSnapshot(store storage.Storer, workDir string, snapshot *core.Snapshot, filePath string) error {
-	// Normalize path separator for cross-platform matching
-	filePath = pathutil.Normalize(filePath)
+	// Normalize path and resolve absolute paths
+	filePath, err := pathutil.RelToWorkDir(workDir, filePath)
+	if err != nil {
+		return fmt.Errorf("cannot resolve path: %w", err)
+	}
 
 	// Find the file in the snapshot
 	var snapEntry *core.FileEntry
@@ -279,9 +282,12 @@ func diffSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot) {
 	fmt.Printf("\n  %d files: +%d ~%d -%d\n", total, len(added), len(modified), len(deleted))
 }
 
-func diffFileInSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot, filePath string) {
-	// Normalize path separator for cross-platform matching
-	filePath = pathutil.Normalize(filePath)
+func diffFileInSnapshots(store storage.Storer, workDir string, snap1, snap2 *core.Snapshot, filePath string) {
+	filePath, err := pathutil.RelToWorkDir(workDir, filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: cannot resolve path: %v\n", err)
+		return
+	}
 
 	var entry1, entry2 *core.FileEntry
 	for i := range snap1.Files {

@@ -22,3 +22,14 @@ func Rel(basepath, targpath string) (string, error) {
 func Normalize(p string) string {
 	return filepath.ToSlash(p)
 }
+
+// RelToWorkDir converts a user-provided path to a normalized relative path from workDir.
+// If the path is absolute, it is made relative to workDir. If relative, it is normalized.
+// This is the standard entry point for user-facing file paths in CLI commands.
+func RelToWorkDir(workDir, path string) (string, error) {
+	path = Normalize(path)
+	if filepath.IsAbs(path) {
+		return Rel(workDir, path)
+	}
+	return path, nil
+}

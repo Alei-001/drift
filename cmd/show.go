@@ -41,7 +41,12 @@ var showCmd = &cobra.Command{
 		}
 
 		var targetEntry *core.FileEntry
-		normalizedPath := pathutil.Normalize(filePath)
+		normalizedPath, err := pathutil.RelToWorkDir(cwd, filePath)
+		if err != nil {
+			statusFailed("Show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
+				"use a relative path from the project root.")
+			return fmt.Errorf("invalid path: %s", filePath)
+		}
 		for i := range snapshot.Files {
 			if snapshot.Files[i].Path == normalizedPath {
 				targetEntry = &snapshot.Files[i]

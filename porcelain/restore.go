@@ -35,8 +35,12 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		}
 	}
 
-	// Normalize path separator for cross-platform matching
-	filePath = pathutil.Normalize(filePath)
+	// Normalize path and resolve absolute paths
+	var pathErr error
+	filePath, pathErr = pathutil.RelToWorkDir(workDir, filePath)
+	if pathErr != nil {
+		return "", fmt.Errorf("cannot resolve path: %w", pathErr)
+	}
 
 	// Restore files
 	for _, entry := range snap.Files {
