@@ -11,11 +11,17 @@ import (
 )
 
 var branchDelete bool
+var branchMove bool
 
 var branchCmd = &cobra.Command{
 	Use:   "branch [<name>]",
-	Short: "Create, list, or delete branches",
-	Args:  cobra.MaximumNArgs(1),
+	Short: "Create, list, delete, or rename branches",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 2 {
+			return fmt.Errorf("too many arguments")
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
@@ -24,30 +30,81 @@ var branchCmd = &cobra.Command{
 		}
 		defer store.Close()
 
+		if branchDelete && branchMove {
+			return fmt.Errorf("cannot use -d and -m together")
+		}
+
 		if branchDelete {
 			if len(args) == 0 {
 				return fmt.Errorf("branch name required with -d")
 			}
+			if len(args) > 1 {
+				return fmt.Errorf("branch delete accepts at most one argument")
+			}
 			name := args[0]
 			err := porcelain.DeleteBranch(store, name)
 			if err != nil {
-				if strings.Contains(err.Error(), "not found") {
-					statusFailed("Branch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch' to list existing branches.")
-					return err
+				var hint string
+				switch {
+				case strings.Contains(err.Error(), "not found"):
+					hint = "use 'drift branch' to list existing branches."
+					statusFailed("Branch", fmt.Sprintf("branch '%s' not found.", name), hint)
+				case strings.Contains(err.Error(), "cannot delete the current branch"):
+					hint = "switch to another branch first with 'drift switch'."
+					statusFailed("Branch", err.Error(), hint)
+				case strings.Contains(err.Error(), "cannot delete 'main'"):
+					hint = "'main' is the default branch and cannot be removed."
+					statusFailed("Branch", err.Error(), hint)
+				default:
+					statusFailed("Branch", err.Error(), "")
 				}
-				if strings.Contains(err.Error(), "cannot delete the current branch") {
-					statusFailed("Branch", err.Error(), "switch to another branch first with 'drift switch'.")
-					return err
-				}
-				if strings.Contains(err.Error(), "cannot delete 'main'") {
-					statusFailed("Branch", err.Error(), "'main' is the default branch and cannot be removed.")
-					return err
-				}
-				statusFailed("Branch", err.Error(), "")
 				return err
 			}
 			statusOK("Branch deleted")
 			fmt.Printf("'%s' has been removed.\n", name)
+			return nil
+		}
+
+		if branchMove {
+			if len(args) == 0 {
+				return fmt.Errorf("new branch name required with -m")
+			}
+			var oldName, newName string
+			if len(args) == 1 {
+				// Rename the current branch.
+				headRef, err := store.GetRef("HEAD")
+				if err != nil {
+					return fmt.Errorf("read HEAD: %w", err)
+				}
+				if headRef.SymRef == "" {
+					return fmt.Errorf("HEAD is detached; specify both old and new branch names")
+				}
+				oldName = strings.TrimPrefix(headRef.SymRef, "heads/")
+				newName = args[0]
+			} else {
+				oldName = args[0]
+				newName = args[1]
+			}
+			err := porcelain.RenameBranch(store, oldName, newName)
+			if err != nil {
+				var hint string
+				switch {
+				case strings.Contains(err.Error(), "not found"):
+					hint = "use 'drift branch' to list existing branches."
+					statusFailed("Branch", fmt.Sprintf("branch '%s' not found.", oldName), hint)
+				case strings.Contains(err.Error(), "already exists"):
+					hint = "use 'drift branch' to list existing branches."
+					statusFailed("Branch", err.Error(), hint)
+				case strings.Contains(err.Error(), "cannot rename 'main'"):
+					hint = "'main' is the default branch and cannot be renamed."
+					statusFailed("Branch", err.Error(), hint)
+				default:
+					statusFailed("Branch", err.Error(), "")
+				}
+				return err
+			}
+			statusOK("Branch renamed")
+			fmt.Printf("'%s' has been renamed to '%s'.\n", oldName, newName)
 			return nil
 		}
 
@@ -71,6 +128,9 @@ var branchCmd = &cobra.Command{
 			return nil
 		}
 
+		if len(args) > 1 {
+			return fmt.Errorf("too many arguments for branch creation")
+		}
 		name := args[0]
 		err = porcelain.CreateBranch(store, name)
 		if err != nil {
@@ -82,22 +142,23 @@ var branchCmd = &cobra.Command{
 			return err
 		}
 		headRef, _ := store.GetRef("HEAD")
-	sid := "no commits yet"
-	if !headRef.Target.IsZero() {
-		snap, _ := store.GetSnapshot(core.SnapshotID{Hash: headRef.Target})
-		if snap != nil {
-			sid = snap.ShortID()
-		} else {
-			sid = headRef.Target.String()
+		sid := "no commits yet"
+		if !headRef.Target.IsZero() {
+			snap, _ := store.GetSnapshot(core.SnapshotID{Hash: headRef.Target})
+			if snap != nil {
+				sid = snap.ShortID()
+			} else {
+				sid = headRef.Target.String()
+			}
 		}
-	}
-	statusOK("Branch created")
-	fmt.Printf("'%s' at snapshot %s.\n", name, sid)
-	return nil
+		statusOK("Branch created")
+		fmt.Printf("'%s' at snapshot %s.\n", name, sid)
+		return nil
 	},
 }
 
 func init() {
 	branchCmd.Flags().BoolVarP(&branchDelete, "delete", "d", false, "delete a branch")
+	branchCmd.Flags().BoolVarP(&branchMove, "move", "m", false, "rename a branch")
 	rootCmd.AddCommand(branchCmd)
 }

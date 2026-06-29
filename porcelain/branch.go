@@ -223,3 +223,79 @@ func DeleteBranch(store storage.Storer, name string) error {
 
 	return store.DeleteRef("heads/" + name)
 }
+
+// RenameBranch renames a branch from oldName to newName. It refuses to rename:
+//   - "main" (the default, protected branch)
+//   - a non-existent branch
+//   - to a name that already exists
+//
+// If the renamed branch is the current branch (HEAD points to it), HEAD is
+// updated to point to the new name. Only references are modified; snapshots
+// remain untouched.
+//
+// The operation is ordered as SetRef(new) then DeleteRef(old) so that a crash
+// leaves a duplicate rather than a missing branch, which is safer to recover.
+func RenameBranch(store storage.Storer, oldName, newName string) error {
+	if oldName == "" {
+		return fmt.Errorf("old branch name is empty")
+	}
+	if newName == "" {
+		return fmt.Errorf("new branch name is empty")
+	}
+	if oldName == "main" {
+		return fmt.Errorf("cannot rename 'main'")
+	}
+
+	// Verify the source branch exists before any other check (including the
+	// same-name no-op), so that a typo'd branch name is always reported rather
+	// than silently treated as a successful no-op.
+	oldRef, err := store.GetRef("heads/" + oldName)
+	if err != nil {
+		return fmt.Errorf("branch '%s' not found", oldName)
+	}
+
+	if oldName == newName {
+		return nil
+	}
+
+	// Validate the new name using the same rules as CreateBranch.
+	if strings.Contains(newName, "..") {
+		return fmt.Errorf("invalid branch name: %q contains '..'", newName)
+	}
+	if strings.ContainsAny(newName, `/\`) {
+		return fmt.Errorf("invalid branch name: %q contains path separator", newName)
+	}
+
+	if _, err := store.GetRef("heads/" + newName); err == nil {
+		return fmt.Errorf("branch '%s' already exists", newName)
+	}
+
+	// Create the new reference first. If this fails, the old one is intact.
+	newRef := &core.Reference{
+		Type:   oldRef.Type,
+		Name:   newName,
+		Target: oldRef.Target,
+	}
+	if err := store.SetRef("heads/"+newName, newRef); err != nil {
+		return fmt.Errorf("create renamed branch: %w", err)
+	}
+
+	// Update HEAD if renaming the current branch.
+	headRef, err := store.GetRef("HEAD")
+	if err != nil {
+		return fmt.Errorf("read HEAD: %w", err)
+	}
+	if headRef.SymRef == "heads/"+oldName {
+		headRef.SymRef = "heads/" + newName
+		if err := store.SetRef("HEAD", headRef); err != nil {
+			return fmt.Errorf("update HEAD: %w", err)
+		}
+	}
+
+	// Finally remove the old reference.
+	if err := store.DeleteRef("heads/" + oldName); err != nil {
+		return fmt.Errorf("remove old branch: %w", err)
+	}
+
+	return nil
+}

@@ -77,7 +77,7 @@ drift
 ├── status       查看自上次保存后的变更
 ├── diff         比较两个快照的差异
 ├── restore      恢复文件到指定快照
-├── branch       创建 / 列出 / 删除分支
+├── branch       创建 / 列出 / 删除 / 重命名分支
 ├── switch       切换到主分支或其他分支
 ├── ignore       忽略文件或目录
 ├── watch        自动监听并保存（后台守护）
@@ -554,17 +554,24 @@ Error: uncommitted changes would be overwritten.
 ```
 drift branch [<name>]
 drift branch -d <name>
+drift branch -m <new-name>
+drift branch -m <old-name> <new-name>
 
 不带参数时列出所有分支。带 name 时创建新分支（不切换）。
 使用 -d 删除指定分支。
+使用 -m 重命名分支：单参数时重命名当前分支，双参数时重命名指定分支。
+重命名当前分支会同步更新 HEAD 指向新分支名。
 
 选项：
   -d    删除分支
+  -m    重命名分支
 
 示例：
   drift branch                      # list branches
   drift branch new-color-scheme     # create branch
   drift branch -d old-experiment    # delete branch
+  drift branch -m dev               # rename current branch to 'dev'
+  drift branch -m feature dev       # rename 'feature' to 'dev'
 ```
 
 Output — 创建：
@@ -588,6 +595,13 @@ Output — 删除：
 ```
 >>> Branch deleted [ok]
 'old-experiment' has been removed.
+```
+
+Output — 重命名：
+
+```
+>>> Branch renamed [ok]
+'feature' has been renamed to 'dev'.
 ```
 
 Error：
@@ -620,6 +634,37 @@ Error — 删除 main 分支：
 >>> Branch [failed]
 Error: cannot delete 'main'.
   hint: 'main' is the default branch and cannot be removed.
+```
+
+Error — 重命名到已存在的分支名：
+
+```
+>>> Branch [failed]
+Error: branch 'dev' already exists.
+  hint: use 'drift branch' to list existing branches.
+```
+
+Error — 重命名不存在的分支：
+
+```
+>>> Branch [failed]
+Error: branch 'old-name' not found.
+  hint: use 'drift branch' to list existing branches.
+```
+
+Error — 重命名当前分支时未指定新名字：
+
+```
+>>> Branch [failed]
+Error: new branch name required with -m.
+```
+
+Error — 重命名 main 分支：
+
+```
+>>> Branch [failed]
+Error: cannot rename 'main'.
+  hint: 'main' is the default branch and cannot be renamed.
 ```
 
 ---
@@ -923,6 +968,8 @@ drift restore 12ab chapter.md          restore a single file
 drift branch                           list all branches
 drift branch "new-direction"           create a branch
 drift branch -d "old-experiment"       delete a branch
+drift branch -m "dev"                  rename current branch
+drift branch -m "feature" "dev"        rename a specific branch
 drift switch -c "experiment"           create and switch
 drift switch main                      switch back to main
 drift ignore "*.psd"                   ignore PSD files
