@@ -194,3 +194,32 @@ func countSnapshotDiff(from, to *core.Snapshot) int {
 	}
 	return count
 }
+
+// DeleteBranch removes a branch reference. It refuses to delete:
+//   - "main" (the default, protected branch)
+//   - the current branch (user must switch away first)
+//
+// Only the reference is removed; snapshots remain in storage and can be
+// reclaimed later by a future prune/GC command.
+func DeleteBranch(store storage.Storer, name string) error {
+	if name == "" {
+		return fmt.Errorf("branch name is empty")
+	}
+	if name == "main" {
+		return fmt.Errorf("cannot delete 'main'")
+	}
+
+	if _, err := store.GetRef("heads/" + name); err != nil {
+		return fmt.Errorf("branch '%s' not found", name)
+	}
+
+	headRef, err := store.GetRef("HEAD")
+	if err != nil {
+		return fmt.Errorf("read HEAD: %w", err)
+	}
+	if headRef.SymRef == "heads/"+name {
+		return fmt.Errorf("cannot delete the current branch '%s'", name)
+	}
+
+	return store.DeleteRef("heads/" + name)
+}

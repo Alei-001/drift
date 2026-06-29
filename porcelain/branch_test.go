@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/your-org/drift/core"
@@ -97,5 +98,78 @@ func TestListBranches(t *testing.T) {
 
 	if current != "main" {
 		t.Errorf("expected current branch 'main', got '%s'", current)
+	}
+}
+
+func TestDeleteBranch_Success(t *testing.T) {
+	store := setupBranchStore()
+	if err := CreateBranch(store, "feature"); err != nil {
+		t.Fatalf("CreateBranch failed: %v", err)
+	}
+
+	err := DeleteBranch(store, "feature")
+	if err != nil {
+		t.Fatalf("DeleteBranch failed: %v", err)
+	}
+
+	if _, err := store.GetRef("heads/feature"); err == nil {
+		t.Error("expected heads/feature to be deleted, but it still exists")
+	}
+}
+
+func TestDeleteBranch_NotFound(t *testing.T) {
+	store := setupBranchStore()
+
+	err := DeleteBranch(store, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent branch, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error containing 'not found', got '%s'", err.Error())
+	}
+}
+
+func TestDeleteBranch_CurrentBranch(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(store, "feature")
+	store.SetRef("HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/feature",
+	})
+
+	err := DeleteBranch(store, "feature")
+	if err == nil {
+		t.Fatal("expected error for deleting current branch, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot delete the current branch") {
+		t.Errorf("expected error containing 'cannot delete the current branch', got '%s'", err.Error())
+	}
+}
+
+func TestDeleteBranch_MainProtected(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(store, "other")
+	store.SetRef("HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/other",
+	})
+
+	err := DeleteBranch(store, "main")
+	if err == nil {
+		t.Fatal("expected error for deleting main, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot delete 'main'") {
+		t.Errorf("expected error containing \"cannot delete 'main'\", got '%s'", err.Error())
+	}
+}
+
+func TestDeleteBranch_EmptyName(t *testing.T) {
+	store := setupBranchStore()
+
+	err := DeleteBranch(store, "")
+	if err == nil {
+		t.Fatal("expected error for empty name, got nil")
 	}
 }
