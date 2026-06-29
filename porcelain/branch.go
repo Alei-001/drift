@@ -91,6 +91,36 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 		autosaveID = autosaveSnap.ShortID()
 	}
 
+	// Read target branch ref (before any modification).
+	targetRef, err := store.GetRef("heads/" + name)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("read target branch: %w", err)
+	}
+	targetWasEmpty := targetRef.Target.IsZero()
+
+	// If target branch is empty (no commits), inherit the source branch's
+	// current snapshot as the target's initial state. This makes the first
+	// save on the target branch have a parent snapshot, so the diff display
+	// is meaningful (only actual changes are shown, not all files).
+	// Behavior mirrors git: a branch switched to from another branch shares
+	// the source's history as its starting point.
+	if targetWasEmpty {
+		var sourceTarget core.Hash
+		if autosaveSnap != nil {
+			sourceTarget = autosaveSnap.ID.Hash
+		} else if fromBranch != "" {
+			if fromRef, refErr := store.GetRef("heads/" + fromBranch); refErr == nil && fromRef != nil {
+				sourceTarget = fromRef.Target
+			}
+		}
+		if !sourceTarget.IsZero() {
+			targetRef.Target = sourceTarget
+			if err := store.SetRef("heads/"+name, targetRef); err != nil {
+				return "", "", 0, fmt.Errorf("init target branch: %w", err)
+			}
+		}
+	}
+
 	newHeadRef := &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
@@ -100,11 +130,10 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 		return "", "", 0, fmt.Errorf("update HEAD: %w", err)
 	}
 
-	targetRef, err := store.GetRef("heads/" + name)
-	if err != nil {
-		return "", "", 0, fmt.Errorf("read target branch: %w", err)
-	}
-	if !targetRef.Target.IsZero() {
+	// Restore target branch snapshot to workspace. Skip if target was empty
+	// (workspace already matches the inherited snapshot via auto-save, so
+	// restoring would be redundant).
+	if !targetWasEmpty && !targetRef.Target.IsZero() {
 		targetSnap, err := store.GetSnapshot(core.SnapshotID{Hash: targetRef.Target})
 		if err != nil {
 			return "", "", 0, fmt.Errorf("get target snapshot: %w", err)

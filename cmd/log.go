@@ -17,6 +17,7 @@ var logLimit int
 var logVerbose string
 var logJSON bool
 var logAll bool
+var logBranch string
 
 var logCmd = &cobra.Command{
 	Use:   "log",
@@ -33,10 +34,27 @@ var logCmd = &cobra.Command{
 			return logVerboseMode(store, logVerbose)
 		}
 
-		opts := &storage.ListOptions{Limit: logLimit, Offset: 0}
-		snapshots, err := store.ListSnapshots(opts)
-		if err != nil {
-			return err
+		var snapshots []*core.Snapshot
+		var branchMap map[string][]string
+
+		if logBranch != "" {
+			// Branch-filtered: walk PrevID chain from branch tip
+			snapshots, err = walkBranchHistory(store, logBranch)
+			if err != nil {
+				return err
+			}
+			branchMap = make(map[string][]string)
+			for _, s := range snapshots {
+				branchMap[s.ID.Hash.String()] = []string{logBranch}
+			}
+		} else {
+			// Global: list all, build branch map for the column
+			opts := &storage.ListOptions{Limit: logLimit, Offset: 0}
+			snapshots, err = store.ListSnapshots(opts)
+			if err != nil {
+				return err
+			}
+			branchMap, _ = buildBranchMap(store)
 		}
 
 		// Filter auto-saves unless --all
@@ -48,20 +66,33 @@ var logCmd = &cobra.Command{
 			filtered = append(filtered, s)
 		}
 
+		// Apply limit after filtering for branch walk
+		if logBranch != "" && logLimit > 0 && len(filtered) > logLimit {
+			filtered = filtered[:logLimit]
+		}
+
 		if len(filtered) == 0 {
-			statusFailed("Log", "no snapshots yet.", "use 'drift save -m \"message\"' to create your first snapshot.")
+			hint := "use 'drift save -m \"message\"' to create your first snapshot."
+			if logBranch != "" {
+				hint = fmt.Sprintf("branch '%s' has no snapshots yet.", logBranch)
+			}
+			statusFailed("Log", "no snapshots yet.", hint)
 			return fmt.Errorf("no snapshots")
 		}
 
 		if logJSON {
-			return logJSONMode(store, filtered)
+			return logJSONMode(store, filtered, branchMap)
 		}
 
 		// Default table format
-		label := fmt.Sprintf("History (%d snapshots)", len(filtered))
-		if logAll {
-			label = fmt.Sprintf("History (%d snapshots, including auto-saves)", len(filtered))
+		label := fmt.Sprintf("History (%d snapshots", len(filtered))
+		if logBranch != "" {
+			label += fmt.Sprintf(" on '%s'", logBranch)
 		}
+		if logAll {
+			label += ", including auto-saves"
+		}
+		label += ")"
 		fmt.Printf(">>> %s\n", label)
 		for _, s := range filtered {
 			timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
@@ -72,9 +103,18 @@ var logCmd = &cobra.Command{
 			}
 
 			msg := s.Message
-		if len([]rune(msg)) > 28 {
-			msg = string([]rune(msg)[:27]) + "…"
-		}
+			if len([]rune(msg)) > 28 {
+				msg = string([]rune(msg)[:27]) + "…"
+			}
+
+			// Branch column
+			branchCol := ""
+			if branches, ok := branchMap[s.ID.Hash.String()]; ok && len(branches) > 0 {
+				branchCol = strings.Join(branches, ",")
+			}
+			if len([]rune(branchCol)) > 16 {
+				branchCol = string([]rune(branchCol)[:15]) + "…"
+			}
 
 			tag := ""
 			for _, t := range s.Tags {
@@ -84,9 +124,9 @@ var logCmd = &cobra.Command{
 				}
 			}
 			if tag != "" {
-			if len([]rune(tag)) > 10 {
-				tag = string([]rune(tag)[:9]) + "…"
-			}
+				if len([]rune(tag)) > 10 {
+					tag = string([]rune(tag)[:9]) + "…"
+				}
 				tag = "[" + tag + "]"
 			}
 
@@ -94,7 +134,7 @@ var logCmd = &cobra.Command{
 			if strings.HasPrefix(s.Message, "auto -") {
 				suffix = "    · dimmed"
 			}
-			fmt.Printf("%s  %s  %-28s  %-12s  %s%s\n", s.ShortID(), timeStr, msg, tag, changes, suffix)
+			fmt.Printf("%s  %s  %-16s  %-28s  %-12s  %s%s\n", s.ShortID(), timeStr, branchCol, msg, tag, changes, suffix)
 		}
 		return nil
 	},
@@ -161,13 +201,14 @@ func countSnapshotChanges(store storage.Storer, snapshot *core.Snapshot) (added,
 	return len(a), len(m), len(d)
 }
 
-func logJSONMode(store storage.Storer, snapshots []*core.Snapshot) error {
+func logJSONMode(store storage.Storer, snapshots []*core.Snapshot, branchMap map[string][]string) error {
 	type jsonEntry struct {
-		ID      string  `json:"id"`
-		Time    string  `json:"time"`
-		Message string  `json:"message"`
-		Tag     *string `json:"tag"`
-		Changes string  `json:"changes"`
+		ID      string   `json:"id"`
+		Time    string   `json:"time"`
+		Message string   `json:"message"`
+		Branch  []string `json:"branch,omitempty"`
+		Tag     *string  `json:"tag"`
+		Changes string   `json:"changes"`
 	}
 
 	var entries []jsonEntry
@@ -179,6 +220,9 @@ func logJSONMode(store storage.Storer, snapshots []*core.Snapshot) error {
 			Time:    time.Unix(s.Timestamp, 0).Format("2006-01-02T15:04:05"),
 			Message: s.Message,
 			Changes: changes,
+		}
+		if branches, ok := branchMap[s.ID.Hash.String()]; ok && len(branches) > 0 {
+			entry.Branch = branches
 		}
 		if len(s.Tags) > 0 && s.Tags[0] != "" {
 			tag := s.Tags[0]
@@ -197,9 +241,79 @@ func logJSONMode(store storage.Storer, snapshots []*core.Snapshot) error {
 	return nil
 }
 
+// walkBranchHistory walks the PrevID chain from a branch's tip snapshot and
+// returns all reachable snapshots in newest-first order.
+func walkBranchHistory(store storage.Storer, branchName string) ([]*core.Snapshot, error) {
+	ref, err := store.GetRef("heads/" + branchName)
+	if err != nil {
+		return nil, fmt.Errorf("branch '%s' not found", branchName)
+	}
+	if ref.Target.IsZero() {
+		return nil, nil
+	}
+
+	var snapshots []*core.Snapshot
+	current := &core.SnapshotID{Hash: ref.Target}
+	for current != nil {
+		snap, err := store.GetSnapshot(*current)
+		if err != nil {
+			break
+		}
+		snapshots = append(snapshots, snap)
+		if snap.PrevID != nil {
+			current = snap.PrevID
+		} else {
+			current = nil
+		}
+	}
+	return snapshots, nil
+}
+
+// buildBranchMap builds a map from snapshot hash to the list of branch names
+// whose history (PrevID chain) contains that snapshot.
+func buildBranchMap(store storage.Storer) (map[string][]string, error) {
+	branches, _, err := porcelain.ListBranches(store)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string][]string)
+	for _, b := range branches {
+		name := strings.TrimPrefix(b.Name, "heads/")
+		if b.Target.IsZero() {
+			continue
+		}
+		current := &core.SnapshotID{Hash: b.Target}
+		for current != nil {
+			snap, err := store.GetSnapshot(*current)
+			if err != nil {
+				break
+			}
+			hashStr := snap.ID.Hash.String()
+			already := false
+			for _, existing := range result[hashStr] {
+				if existing == name {
+					already = true
+					break
+				}
+			}
+			if !already {
+				result[hashStr] = append(result[hashStr], name)
+			}
+			if snap.PrevID != nil {
+				current = snap.PrevID
+			} else {
+				current = nil
+			}
+		}
+	}
+	return result, nil
+}
+
 func init() {
 	logCmd.Flags().IntVarP(&logLimit, "limit", "l", 10, "limit number of entries")
 	logCmd.Flags().StringVarP(&logVerbose, "verbose", "v", "", "show file details for a snapshot")
+	logCmd.Flags().StringVarP(&logBranch, "branch", "b", "", "filter history by branch")
 	logCmd.Flags().BoolVar(&logJSON, "json", false, "output in JSON format for scripting")
 	logCmd.Flags().BoolVar(&logAll, "all", false, "include auto-saved snapshots")
 	rootCmd.AddCommand(logCmd)
