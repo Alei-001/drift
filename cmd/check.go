@@ -63,6 +63,13 @@ var checkCmd = &cobra.Command{
 		if missing == 0 && corrupt == 0 {
 			statusOK("Check")
 			fmt.Printf("%d blocks passed.\n", totalBlocks)
+
+			// 追加不可达快照提示
+			unreachable, err := porcelain.CountUnreachableSnapshots(store)
+			if err == nil && unreachable > 0 {
+				fmt.Printf("  hint: %d unreachable snapshots detected. use 'drift gc --dry-run' to review.\n", unreachable)
+			}
+
 			return nil
 		}
 

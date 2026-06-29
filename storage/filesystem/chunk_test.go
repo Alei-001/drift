@@ -67,3 +67,128 @@ func TestGetChunk_IntegrityCheck(t *testing.T) {
 		t.Fatal("expected error for corrupted chunk, got nil")
 	}
 }
+
+// TestDeleteChunk_Idempotent verifies that deleting a chunk that does not
+// exist returns nil (no error).
+func TestDeleteChunk_Idempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fs, err := NewFSStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFSStorage: %v", err)
+	}
+	defer fs.Close()
+
+	data := []byte("non-existent chunk")
+	var hash core.Hash
+	sum := blake3.Sum256(data)
+	copy(hash[:], sum[:])
+
+	// Deleting a chunk that was never stored must not error.
+	if err := fs.DeleteChunk(hash); err != nil {
+		t.Fatalf("DeleteChunk on non-existent chunk: expected nil, got %v", err)
+	}
+}
+
+// TestDeleteChunk_ClearsCache verifies that DeleteChunk removes the cache
+// entry so a subsequent GetChunk does not return stale cached data.
+func TestDeleteChunk_ClearsCache(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fs, err := NewFSStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFSStorage: %v", err)
+	}
+	defer fs.Close()
+
+	data := []byte("cache clear test data")
+	var hash core.Hash
+	sum := blake3.Sum256(data)
+	copy(hash[:], sum[:])
+
+	chunk := &core.Chunk{
+		Hash: hash,
+		Size: uint32(len(data)),
+		Data: data,
+	}
+
+	if err := fs.PutChunk(chunk); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
+
+	// Read the chunk back so it enters the cache.
+	retrieved, err := fs.GetChunk(hash)
+	if err != nil {
+		t.Fatalf("GetChunk before delete: %v", err)
+	}
+	if !bytes.Equal(retrieved.Data, data) {
+		t.Fatalf("data mismatch before delete: got %q, want %q", retrieved.Data, data)
+	}
+
+	// Delete the chunk — this must clear both the file and the cache.
+	if err := fs.DeleteChunk(hash); err != nil {
+		t.Fatalf("DeleteChunk: %v", err)
+	}
+
+	// GetChunk must now fail: the file is gone and the cache entry was
+	// removed.
+	if _, err := fs.GetChunk(hash); err == nil {
+		t.Fatal("expected error after DeleteChunk (cache should be cleared), got nil")
+	}
+}
+
+// TestListChunks verifies that ListChunks returns all stored chunk hashes
+// and returns an empty result for an empty store.
+func TestListChunks(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fs, err := NewFSStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFSStorage: %v", err)
+	}
+	defer fs.Close()
+
+	// Empty storage: expect an empty slice with no error.
+	hashes, err := fs.ListChunks()
+	if err != nil {
+		t.Fatalf("ListChunks on empty storage: %v", err)
+	}
+	if len(hashes) != 0 {
+		t.Fatalf("expected 0 chunks on empty storage, got %d", len(hashes))
+	}
+
+	// Store two distinct chunks.
+	data1 := []byte("list chunks test one")
+	data2 := []byte("list chunks test two")
+	var hash1, hash2 core.Hash
+	sum1 := blake3.Sum256(data1)
+	sum2 := blake3.Sum256(data2)
+	copy(hash1[:], sum1[:])
+	copy(hash2[:], sum2[:])
+
+	chunk1 := &core.Chunk{Hash: hash1, Size: uint32(len(data1)), Data: data1}
+	chunk2 := &core.Chunk{Hash: hash2, Size: uint32(len(data2)), Data: data2}
+
+	if err := fs.PutChunk(chunk1); err != nil {
+		t.Fatalf("PutChunk 1: %v", err)
+	}
+	if err := fs.PutChunk(chunk2); err != nil {
+		t.Fatalf("PutChunk 2: %v", err)
+	}
+
+	hashes, err = fs.ListChunks()
+	if err != nil {
+		t.Fatalf("ListChunks: %v", err)
+	}
+	if len(hashes) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(hashes))
+	}
+
+	// Verify both hashes are present (order is not guaranteed).
+	want := map[core.Hash]bool{hash1: true, hash2: true}
+	for _, h := range hashes {
+		if !want[h] {
+			t.Fatalf("unexpected hash %s in ListChunks result", h.FullString())
+		}
+	}
+}

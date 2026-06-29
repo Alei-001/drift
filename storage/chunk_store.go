@@ -7,4 +7,6 @@ type ChunkStorer interface {
 	HasChunk(hash core.Hash) bool
 	GetChunk(hash core.Hash) (*core.Chunk, error)
 	PutChunk(chunk *core.Chunk) error
+	DeleteChunk(hash core.Hash) error
+	ListChunks() ([]core.Hash, error)
 }

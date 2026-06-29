@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"encoding/hex"
 	"errors"
 	"sort"
 	"strings"
@@ -47,6 +48,29 @@ func (ms *MemoryStorage) GetChunk(hash core.Hash) (*core.Chunk, error) {
 func (ms *MemoryStorage) PutChunk(chunk *core.Chunk) error {
 	ms.chunks.Store(chunk.Hash.FullString(), cloneChunk(chunk))
 	return nil
+}
+
+// DeleteChunk removes a chunk. It is idempotent.
+func (ms *MemoryStorage) DeleteChunk(hash core.Hash) error {
+	ms.chunks.Delete(hash.FullString())
+	return nil
+}
+
+// ListChunks returns the hashes of all stored chunks. The order of the
+// returned slice is not guaranteed.
+func (ms *MemoryStorage) ListChunks() ([]core.Hash, error) {
+	var hashes []core.Hash
+	ms.chunks.Range(func(key, value any) bool {
+		b, err := hex.DecodeString(key.(string))
+		if err != nil {
+			return true
+		}
+		var h core.Hash
+		copy(h[:], b)
+		hashes = append(hashes, h)
+		return true
+	})
+	return hashes, nil
 }
 
 // GetSnapshot retrieves a snapshot.

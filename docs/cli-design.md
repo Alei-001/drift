@@ -85,6 +85,7 @@ drift
 │   ├── off       停止监听
 │   └── status    查看状态
 ├── check        校验数据完整性
+├── gc           回收无引用的快照与块
 ├── remote       管理远程存储（后续版本）
 ├── sync         同步到远程（后续版本）
 └── help         帮助信息
@@ -867,6 +868,14 @@ Output — 全部正常：
 142 blocks passed.
 ```
 
+Output — 全部正常但有不可达快照：
+
+```
+>>> Check [ok]
+142 blocks passed.
+  hint: 3 unreachable snapshots detected. use 'drift gc --dry-run' to review.
+```
+
 Output — 有损坏（未修复）：
 
 ```
@@ -890,6 +899,64 @@ Error：
 
 ```
 >>> Check [failed]
+Error: .drift/ directory not found.
+  hint: run 'drift init' first.
+```
+
+---
+
+### `drift gc`
+
+```
+drift gc [--dry-run]
+
+回收不再被任何分支或标签引用的快照与块，释放存储空间。
+删除分支后留下的孤立快照、以及这些快照独占的块，都会被清理。
+
+回收算法：
+  1. 从所有 refs（heads/*、tags/*）的 target 出发，沿快照 PrevID 链
+     遍历，标记所有可达快照。
+  2. 删除未被标记的快照（即"不可达快照"）。
+  3. 扫描所有可达快照引用的块哈希，删除未被引用的块。
+  4. 先删快照、后删块，保证中途任何时刻都不会出现快照引用已删块的情况。
+
+选项：
+  --dry-run  只统计将要回收的数量，不实际删除
+
+示例：
+  drift gc --dry-run    # 预览将回收多少快照与块
+  drift gc              # 执行回收
+```
+
+Output — 正常回收：
+
+```
+>>> GC [ok]
+  snapshots:  3 removed
+  chunks:     27 removed
+  freed:      12.4 MB
+```
+
+Output — 预览模式：
+
+```
+>>> GC [dry-run]
+  snapshots:  3 would be removed
+  chunks:     27 would be removed
+  freed:      ~12.4 MB
+```
+
+Output — 无可回收：
+
+```
+>>> GC [ok]
+  nothing to reclaim.
+```
+
+Error：
+
+```
+>>> GC [failed]
 Error: .drift/ directory not found.
   hint: run 'drift init' first.
 ```
@@ -937,7 +1004,7 @@ init    save    log    show    status    restore    check
 ### 第二阶段：分支 + 自动化
 
 ```
-branch    switch    ignore    watch
+branch    switch    ignore    watch    gc
 ```
 
 ### 第三阶段：远程
@@ -979,4 +1046,6 @@ drift watch on                          start auto-watch daemon
 drift watch off                         stop auto-watch daemon
 drift watch status                      check daemon status
 drift check                            verify data integrity
+drift gc --dry-run                     preview reclaimable snapshots and chunks
+drift gc                               reclaim unreachable snapshots and chunks
 ```

@@ -1,9 +1,11 @@
 package filesystem
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/util/fsutil"
@@ -82,4 +84,54 @@ func (fs *FSStorage) PutChunk(chunk *core.Chunk) error {
 	// Update cache after successful write
 	fs.chunkCache.Add(chunk.Hash, chunk)
 	return nil
+}
+
+// DeleteChunk removes a chunk from disk and the in-memory cache. It is
+// idempotent: a missing file is not an error.
+func (fs *FSStorage) DeleteChunk(hash core.Hash) error {
+	path := fs.chunkPath(hash)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	fs.chunkCache.Remove(hash)
+	return nil
+}
+
+// ListChunks returns the hashes of all chunks stored on disk. The order
+// of the returned slice is not guaranteed.
+func (fs *FSStorage) ListChunks() ([]core.Hash, error) {
+	chunksDir := fs.chunksDir()
+	var hashes []core.Hash
+	err := filepath.WalkDir(chunksDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(chunksDir, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		parts := strings.Split(rel, "/")
+		if len(parts) != 2 {
+			return nil
+		}
+		b, err := hex.DecodeString(parts[0] + parts[1])
+		if err != nil {
+			return err
+		}
+		var h core.Hash
+		copy(h[:], b)
+		hashes = append(hashes, h)
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return hashes, nil
+		}
+		return nil, err
+	}
+	return hashes, nil
 }
