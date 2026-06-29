@@ -118,7 +118,7 @@ func nearestPowerOfTwoBetween(minVal, maxVal int) int {
 	if lower > minVal && lower < maxVal {
 		return lower
 	}
-	for p := lower; p > minVal; p /= 2 {
+	for p := lower / 2; p > minVal; p /= 2 {
 		if p > minVal && p < maxVal {
 			return p
 		}
