@@ -26,6 +26,12 @@ func statusWarn(format string, args ...interface{}) {
 	fmt.Printf(">>> %s [warning]\n", msg)
 }
 
+// statusActive prints ">>> <format> [active]" to stdout.
+func statusActive(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	fmt.Printf(">>> %s [active]\n", msg)
+}
+
 // statusFailed prints the error block: status line + Error + hint.
 func statusFailed(action string, errMsg string, hint string) {
 	fmt.Printf(">>> %s [failed]\n", action)
@@ -64,7 +70,9 @@ func printFileListWithSize(added, modified []core.FileEntry, deleted []string) {
 }
 
 // printFileListWithLineCount prints file list with sizes and line counts (for log -v).
-func printFileListWithLineCount(added, modified []core.FileEntry, deleted []string, store interface{ GetChunk(core.Hash) (*core.Chunk, error) }) {
+func printFileListWithLineCount(added, modified []core.FileEntry, deleted []string, store interface {
+	GetChunk(core.Hash) (*core.Chunk, error)
+}) {
 	fmt.Println()
 	for _, f := range added {
 		fmt.Printf("  +  %s      %s\n", f.Path, formatSize(f.Size))
@@ -83,7 +91,9 @@ func printFileListWithLineCount(added, modified []core.FileEntry, deleted []stri
 }
 
 // countLinesFromChunks reads chunk data and counts newlines.
-func countLinesFromChunks(store interface{ GetChunk(core.Hash) (*core.Chunk, error) }, entry core.FileEntry) int {
+func countLinesFromChunks(store interface {
+	GetChunk(core.Hash) (*core.Chunk, error)
+}, entry core.FileEntry) int {
 	var data []byte
 	for _, h := range entry.Chunks {
 		chunk, err := store.GetChunk(h)

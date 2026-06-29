@@ -29,6 +29,9 @@ func validateRefName(name string) error {
 }
 
 // GetRef reads a reference from the refs directory.
+// For HEAD, if the file contains a symbolic reference ("ref: heads/main"),
+// the SymRef field is populated and Target is resolved by recursively
+// reading the referenced branch.
 func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
 	if err := validateRefName(name); err != nil {
 		return nil, err
@@ -38,8 +41,23 @@ func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
 	if err != nil {
 		return nil, err
 	}
-	hexStr := strings.TrimSpace(string(data))
-	b, err := hex.DecodeString(hexStr)
+	content := strings.TrimSpace(string(data))
+
+	if name == "HEAD" && strings.HasPrefix(content, "ref: ") {
+		symRef := strings.TrimSpace(content[len("ref: "):])
+		target, err := fs.GetRef(symRef)
+		if err != nil {
+			return nil, err
+		}
+		return &core.Reference{
+			Name:   name,
+			Type:   refType(name),
+			SymRef: symRef,
+			Target: target.Target,
+		}, nil
+	}
+
+	b, err := hex.DecodeString(content)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +72,8 @@ func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
 }
 
 // SetRef writes a reference to the refs directory.
+// If ref.SymRef is non-empty, a symbolic reference ("ref: <target>") is
+// written instead of a hash.
 func (fs *FSStorage) SetRef(name string, ref *core.Reference) error {
 	if err := validateRefName(name); err != nil {
 		return err
@@ -62,6 +82,9 @@ func (fs *FSStorage) SetRef(name string, ref *core.Reference) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
+	}
+	if ref.SymRef != "" {
+		return fsutil.WriteFileAtomic(path, []byte("ref: "+ref.SymRef+"\n"), 0644)
 	}
 	hexStr := ref.Target.FullString()
 	return fsutil.WriteFileAtomic(path, []byte(hexStr+"\n"), 0644)
@@ -82,6 +105,7 @@ func (fs *FSStorage) ListRefs(prefix string) ([]*core.Reference, error) {
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
 		if !strings.HasPrefix(rel, prefix) {
 			return nil
 		}

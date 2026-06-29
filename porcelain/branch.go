@@ -1,0 +1,162 @@
+package porcelain
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/your-org/drift/core"
+	"github.com/your-org/drift/storage"
+)
+
+// CreateBranch creates a new branch pointing at the current HEAD snapshot.
+func CreateBranch(store storage.Storer, name string) error {
+	if name == "" {
+		return fmt.Errorf("branch name is empty")
+	}
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid branch name: %q contains '..'", name)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("invalid branch name: %q contains path separator", name)
+	}
+
+	if ref, err := store.GetRef("heads/" + name); err == nil && ref != nil {
+		return fmt.Errorf("branch '%s' already exists", name)
+	}
+
+	headRef, err := store.GetRef("HEAD")
+	if err != nil {
+		return fmt.Errorf("read HEAD: %w", err)
+	}
+
+	return store.SetRef("heads/"+name, &core.Reference{
+		Type:   core.RefTypeBranch,
+		Name:   name,
+		Target: headRef.Target,
+	})
+}
+
+// ListBranches returns all branch references and the name of the current
+// branch (without the "heads/" prefix). If HEAD is not a symbolic reference
+// the current branch name is empty.
+func ListBranches(store storage.Storer) ([]*core.Reference, string, error) {
+	refs, err := store.ListRefs("heads/")
+	if err != nil {
+		return nil, "", err
+	}
+
+	current := ""
+	headRef, err := store.GetRef("HEAD")
+	if err != nil {
+		return nil, "", fmt.Errorf("read HEAD: %w", err)
+	}
+	if headRef.SymRef != "" {
+		current = strings.TrimPrefix(headRef.SymRef, "heads/")
+	}
+
+	return refs, current, nil
+}
+
+// SwitchBranch switches to the target branch. If create is true, it creates the branch first.
+// It auto-saves current changes, updates HEAD symref, and restores the target snapshot to workspace.
+// Returns autosave snapshot short ID (empty if nothing to save), the source branch name,
+// and the number of files that differ between the source and target branch snapshots.
+func SwitchBranch(store storage.Storer, workDir string, name string, create bool, author string) (string, string, int, error) {
+	headRef, err := store.GetRef("HEAD")
+	if err != nil {
+		return "", "", 0, fmt.Errorf("read HEAD: %w", err)
+	}
+	fromBranch := ""
+	if headRef.SymRef != "" {
+		fromBranch = strings.TrimPrefix(headRef.SymRef, "heads/")
+	}
+
+	if create {
+		if err := CreateBranch(store, name); err != nil {
+			return "", "", 0, err
+		}
+	} else {
+		if _, err := store.GetRef("heads/" + name); err != nil {
+			return "", "", 0, fmt.Errorf("branch '%s' not found", name)
+		}
+	}
+
+	autosaveID := ""
+	autosaveSnap, err := CreateSnapshot(store, workDir, "auto - switch backup", author, nil)
+	if err != nil {
+		if err.Error() != "nothing to save" {
+			return "", "", 0, fmt.Errorf("auto-save: %w", err)
+		}
+	} else {
+		autosaveID = autosaveSnap.ShortID()
+	}
+
+	newHeadRef := &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/" + name,
+	}
+	if err := store.SetRef("HEAD", newHeadRef); err != nil {
+		return "", "", 0, fmt.Errorf("update HEAD: %w", err)
+	}
+
+	targetRef, err := store.GetRef("heads/" + name)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("read target branch: %w", err)
+	}
+	if !targetRef.Target.IsZero() {
+		targetSnap, err := store.GetSnapshot(core.SnapshotID{Hash: targetRef.Target})
+		if err != nil {
+			return "", "", 0, fmt.Errorf("get target snapshot: %w", err)
+		}
+		if err := restoreFilesToWorkspace(store, workDir, targetSnap); err != nil {
+			return "", "", 0, fmt.Errorf("restore workspace: %w", err)
+		}
+	}
+
+	var fromSnap, toSnap *core.Snapshot
+	if fromBranch != "" {
+		fromRef, refErr := store.GetRef("heads/" + fromBranch)
+		if refErr == nil && !fromRef.Target.IsZero() {
+			fromSnap, _ = store.GetSnapshot(core.SnapshotID{Hash: fromRef.Target})
+		}
+	}
+	if !targetRef.Target.IsZero() {
+		toSnap, _ = store.GetSnapshot(core.SnapshotID{Hash: targetRef.Target})
+	}
+	diffCount := countSnapshotDiff(fromSnap, toSnap)
+
+	return autosaveID, fromBranch, diffCount, nil
+}
+
+func countSnapshotDiff(from, to *core.Snapshot) int {
+	if from == nil && to == nil {
+		return 0
+	}
+	if from == nil {
+		return len(to.Files)
+	}
+	if to == nil {
+		return len(from.Files)
+	}
+	fromFiles := make(map[string]core.FileEntry)
+	for _, f := range from.Files {
+		fromFiles[f.Path] = f
+	}
+	count := 0
+	seen := make(map[string]bool)
+	for _, f := range to.Files {
+		seen[f.Path] = true
+		if prev, ok := fromFiles[f.Path]; !ok {
+			count++
+		} else if prev.Hash != f.Hash {
+			count++
+		}
+	}
+	for p := range fromFiles {
+		if !seen[p] {
+			count++
+		}
+	}
+	return count
+}

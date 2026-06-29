@@ -47,6 +47,16 @@ func (fs *FSStorage) PutSnapshot(snapshot *core.Snapshot) error {
 	return fsutil.WriteFileAtomic(path, data, 0644)
 }
 
+// DeleteSnapshot removes a snapshot from disk. It is idempotent:
+// a missing file is not an error.
+func (fs *FSStorage) DeleteSnapshot(id core.SnapshotID) error {
+	path := fs.snapshotPath(id)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 // ListSnapshots lists all snapshots, sorted by timestamp descending,
 // with optional limit/offset and branch filter.
 func (fs *FSStorage) ListSnapshots(opts *storage.ListOptions) ([]*core.Snapshot, error) {

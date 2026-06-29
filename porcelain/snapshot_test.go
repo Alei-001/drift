@@ -12,11 +12,16 @@ import (
 
 func TestCreateSnapshot_FirstCommit(t *testing.T) {
 	store := memory.NewMemoryStorage()
-	// Set up initial state: HEAD with empty hash and empty index
+	// Set up initial state: HEAD symref -> heads/main, empty index
+	store.SetRef("heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{},
+	})
 	store.SetRef("HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
-		Target: core.Hash{},
+		SymRef: "heads/main",
 	})
 	store.SetIndex(&core.Index{
 		Entries:   []core.IndexEntry{},
@@ -95,10 +100,15 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 
 func TestCreateSnapshot_SecondCommit(t *testing.T) {
 	store := memory.NewMemoryStorage()
+	store.SetRef("heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{},
+	})
 	store.SetRef("HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
-		Target: core.Hash{},
+		SymRef: "heads/main",
 	})
 	store.SetIndex(&core.Index{
 		Entries:   []core.IndexEntry{},
@@ -156,10 +166,15 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 
 func TestCreateSnapshot_NothingChanged(t *testing.T) {
 	store := memory.NewMemoryStorage()
+	store.SetRef("heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{},
+	})
 	store.SetRef("HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
-		Target: core.Hash{},
+		SymRef: "heads/main",
 	})
 	store.SetIndex(&core.Index{
 		Entries:   []core.IndexEntry{},
@@ -185,10 +200,15 @@ func TestCreateSnapshot_NothingChanged(t *testing.T) {
 
 func TestCreateSnapshot_DefaultAuthor(t *testing.T) {
 	store := memory.NewMemoryStorage()
+	store.SetRef("heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{},
+	})
 	store.SetRef("HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
-		Target: core.Hash{},
+		SymRef: "heads/main",
 	})
 	store.SetIndex(&core.Index{
 		Entries:   []core.IndexEntry{},

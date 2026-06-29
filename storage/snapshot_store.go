@@ -13,5 +13,6 @@ type ListOptions struct {
 type SnapshotStorer interface {
 	GetSnapshot(id core.SnapshotID) (*core.Snapshot, error)
 	PutSnapshot(snapshot *core.Snapshot) error
+	DeleteSnapshot(id core.SnapshotID) error
 	ListSnapshots(opts *ListOptions) ([]*core.Snapshot, error)
 }

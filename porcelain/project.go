@@ -30,10 +30,21 @@ func InitProject(path string) error {
 		return fmt.Errorf("set config: %w", err)
 	}
 
+	// Create main branch ref (zero hash = no commits yet)
+	mainRef := &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{},
+	}
+	if err := store.SetRef("heads/main", mainRef); err != nil {
+		return fmt.Errorf("set main branch: %w", err)
+	}
+
+	// Create HEAD as a symbolic reference pointing to heads/main
 	headRef := &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
-		Target: core.Hash{},
+		SymRef: "heads/main",
 	}
 	if err := store.SetRef("HEAD", headRef); err != nil {
 		return fmt.Errorf("set HEAD: %w", err)

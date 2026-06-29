@@ -64,6 +64,12 @@ func (ms *MemoryStorage) PutSnapshot(snapshot *core.Snapshot) error {
 	return nil
 }
 
+// DeleteSnapshot removes a snapshot. It is idempotent.
+func (ms *MemoryStorage) DeleteSnapshot(id core.SnapshotID) error {
+	ms.snapshots.Delete(id.Hash.FullString())
+	return nil
+}
+
 // ListSnapshots lists all snapshots, sorted by timestamp descending,
 // with optional limit/offset and branch filter.
 func (ms *MemoryStorage) ListSnapshots(opts *storage.ListOptions) ([]*core.Snapshot, error) {
@@ -108,13 +114,24 @@ func (ms *MemoryStorage) ListSnapshots(opts *storage.ListOptions) ([]*core.Snaps
 	return snapshots, nil
 }
 
-// GetRef reads a reference.
+// GetRef reads a reference. If the reference is a symbolic reference,
+// Target is resolved by recursively reading the referenced ref.
 func (ms *MemoryStorage) GetRef(name string) (*core.Reference, error) {
 	v, ok := ms.refs.Load(name)
 	if !ok {
 		return nil, errors.New("reference not found")
 	}
-	return v.(*core.Reference), nil
+	ref := v.(*core.Reference)
+	if ref.SymRef != "" {
+		target, err := ms.GetRef(ref.SymRef)
+		if err != nil {
+			return nil, err
+		}
+		resolved := cloneReference(ref)
+		resolved.Target = target.Target
+		return resolved, nil
+	}
+	return ref, nil
 }
 
 // SetRef writes a reference.

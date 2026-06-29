@@ -58,15 +58,15 @@
 
 ### 模块任务
 
-| 模块 | 任务 |
-|------|------|
-| `porcelain/branch.go` | 分支创建 / 切换逻辑 |
-| `cmd/branch.go` | `drift branch` 命令 |
-| `cmd/branch_switch.go` | `drift switch` / `drift switch -c` 命令 |
-| `cmd/watch.go` | `drift watch` 命令（fsnotify） |
-| `cmd/ignore.go` | `drift ignore` 命令 |
-| `util/glob/` | .driftignore 模式匹配 |
-| `util/event/` | 事件总线（watch 用） |
+| 模块 | 任务 | 状态 |
+|------|------|------|
+| `porcelain/branch.go` | 分支创建 / 切换逻辑 | ✅ 已完成 |
+| `cmd/branch.go` | `drift branch` 命令 | ✅ 已完成 |
+| `cmd/branch_switch.go` | `drift switch` / `drift switch -c` 命令 | ✅ 已完成 |
+| `cmd/watch.go` | `drift watch` 命令（fsnotify） | ✅ 已完成 |
+| `cmd/ignore.go` | `drift ignore` 命令 | ✅ 已完成 |
+| `util/glob/` | .driftignore 模式匹配 | ✅ 已完成 |
+| `util/event/` | 事件总线（watch 用） | ✅ 已完成 |
 
 ### CLI 命令
 
@@ -175,4 +175,5 @@ Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ───
 - [x] 项目架构设计
 - [x] CLI 命令设计
 - [x] 开源库选型与核查
-- [ ] 阶段一开发
+- [x] 阶段一开发
+- [x] 阶段二开发（分支系统 + 自动化）

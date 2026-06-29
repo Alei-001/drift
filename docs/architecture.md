@@ -375,8 +375,8 @@ drift/
 │   ├── fsutil/
 │   │   ├── walk.go               # 目录遍历
 │   │   └── atomic.go             # 原子文件操作
-│   ├── glob/
-│   │   └── match.go              # .driftignore 模式匹配
+│   ├── glob/                     # glob 匹配引擎（支持 ** 递归通配符，替代 path.Match）
+│   │   └── match.go              # .driftignore 模式匹配（被 fsutil/walk.go 调用）
 │   ├── event/
 │   │   └── bus.go                # 事件总线（watch 用）
 │   └── logger/
@@ -404,6 +404,8 @@ drift/
 | `storage/` | 数据持久化接口与实现 | core, util | porcelain |
 | `core/` | 核心数据类型定义 | 无 | 所有模块 |
 | `util/` | 通用工具 | 无 | 所有模块 |
+
+> **watch 守护进程**：`drift watch on` 通过 `porcelain.StartDaemon` 启动轮询模式后台子进程，使用 `.drift/watch.pid` 文件管理生命周期（启动/停止/状态查询）。进程管理跨平台实现：Windows 通过 `taskkill /PID` 终止，Unix 通过 `SIGTERM` 终止（见 `watch_proc_windows.go` / `watch_proc_unix.go`）。
 
 ### 3.3 核心接口定义
 
@@ -472,6 +474,7 @@ type ChunkStorer interface {
 type SnapshotStorer interface {
     GetSnapshot(id core.SnapshotID) (*core.Snapshot, error)
     PutSnapshot(snap *core.Snapshot) error
+    DeleteSnapshot(id core.SnapshotID) error
     ListSnapshots(branch string, opts ListOptions) ([]*core.Snapshot, error)
 }
 
@@ -579,6 +582,7 @@ type Reference struct {
     Type   RefType
     Name   string       // "refs/heads/main", "refs/tags/v1.0"
     Target SnapshotID   // 指向的快照 ID
+    SymRef string       // 符号引用目标（如 "heads/main"），非空时表示这是一个 symref
 }
 
 type RefType uint8
@@ -635,7 +639,7 @@ type CoreConfig struct {
 
 ```
 .drift/
-├── HEAD                  # 文本文件："ref: refs/heads/main"
+├── HEAD                  # 文本文件："ref: heads/<branch>"（符号引用 symref）
 ├── config                # 项目配置（TOML 格式）
 ├── index                 # 工作区索引（protobuf 二进制）
 │
@@ -664,6 +668,8 @@ type CoreConfig struct {
 │
 └── lock                  # 并发锁文件
 ```
+
+> **HEAD symref 解析**：HEAD 文件以符号引用（symref）格式存储，内容为 `ref: heads/<branch>`。调用 `GetRef("HEAD")` 时会识别 `ref:` 前缀，自动递归解析 symref 链（HEAD → heads/main → snapshot 哈希），返回的 `Reference` 中 `SymRef` 字段记录符号目标，`Target` 字段为最终解析到的快照哈希。
 
 ### 4.3 序列化格式
 

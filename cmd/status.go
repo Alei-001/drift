@@ -3,12 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/porcelain"
-	"github.com/your-org/drift/util/fsutil"
-	"github.com/your-org/drift/util/pathutil"
 )
 
 var statusShort bool
@@ -24,90 +21,44 @@ var statusCmd = &cobra.Command{
 		}
 		defer store.Close()
 
-		index, err := store.GetIndex()
+		changes, err := porcelain.DetectChanges(store, cwd)
 		if err != nil {
 			return err
 		}
 
-		workspaceFiles := make(map[string]os.FileInfo)
-		err = fsutil.Walk(cwd, func(path string, info os.FileInfo) error {
-			if info.IsDir() {
-				return nil
-			}
-			rel, _ := pathutil.Rel(cwd, path)
-			workspaceFiles[rel] = info
-			return nil
-		})
-		if err != nil {
-			return err
-		}
+		total := len(changes.Added) + len(changes.Modified) + len(changes.Deleted)
 
-		type change struct {
-			typ  string // "+", "~", "-"
-			path string
-		}
-		var changes []change
-		printed := make(map[string]bool)
-
-		for _, entry := range index.Entries {
-			if info, ok := workspaceFiles[entry.Path]; ok {
-				if info.Size() != entry.Size || info.ModTime().Unix() != entry.ModTime {
-					changes = append(changes, change{"~", entry.Path})
-				} else {
-					// Size and ModTime match — verify content hash to catch
-					// changes that leave size/mtime unchanged.
-					fileHash, hashErr := porcelain.ComputeFileHash(filepath.Join(cwd, entry.Path))
-					if hashErr != nil || fileHash != entry.Hash {
-						changes = append(changes, change{"~", entry.Path})
-					}
-				}
-				printed[entry.Path] = true
-			} else {
-				changes = append(changes, change{"-", entry.Path})
-				printed[entry.Path] = true
-			}
-		}
-
-		for path := range workspaceFiles {
-			if !printed[path] {
-				changes = append(changes, change{"+", path})
-			}
-		}
-
-		if len(changes) == 0 {
+		if total == 0 {
 			statusOK("Status")
 			fmt.Println("Nothing changed since last save.")
 			return nil
 		}
 
-		// Count by type
-		var added, modified, deleted int
-		for _, c := range changes {
-			switch c.typ {
-			case "+":
-				added++
-			case "~":
-				modified++
-			case "-":
-				deleted++
-			}
-		}
-
-		// Build header
-		header := fmt.Sprintf("Status (%d files changed since last save)", len(changes))
-
 		if statusShort {
-			fmt.Printf(">>> Status (%d files)\n", len(changes))
-			for _, c := range changes {
-				fmt.Println(c.path)
+			fmt.Printf(">>> Status (%d files)\n", total)
+			for _, p := range changes.Added {
+				fmt.Println(p)
+			}
+			for _, p := range changes.Modified {
+				fmt.Println(p)
+			}
+			for _, p := range changes.Deleted {
+				fmt.Println(p)
 			}
 		} else {
+			header := fmt.Sprintf("Status (%d files changed since last save)", total)
 			fmt.Printf(">>> %s\n", header)
 			fmt.Println()
-			for _, c := range changes {
-				fmt.Printf("  %s  %s\n", c.typ, c.path)
+			for _, p := range changes.Added {
+				fmt.Printf("  +  %s\n", p)
 			}
-			summaryLine(len(changes), added, modified, deleted)
+			for _, p := range changes.Modified {
+				fmt.Printf("  ~  %s\n", p)
+			}
+			for _, p := range changes.Deleted {
+				fmt.Printf("  -  %s\n", p)
+			}
+			summaryLine(total, len(changes.Added), len(changes.Modified), len(changes.Deleted))
 		}
 		return nil
 	},

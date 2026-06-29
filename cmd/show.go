@@ -181,6 +181,25 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 		return snap
 	}
 
+	// Branch name resolution: "main" or the current branch name
+	headRef, headErr := store.GetRef("HEAD")
+	if headErr == nil && headRef.SymRef != "" {
+		branchName := strings.TrimPrefix(headRef.SymRef, "heads/")
+		if id == branchName || id == "main" {
+			refName := headRef.SymRef
+			if id != branchName {
+				refName = "heads/main"
+			}
+			branchRef, err := store.GetRef(refName)
+			if err == nil && !branchRef.Target.IsZero() {
+				snap, err := store.GetSnapshot(core.SnapshotID{Hash: branchRef.Target})
+				if err == nil {
+					return snap
+				}
+			}
+		}
+	}
+
 	if id == "HEAD" {
 		headRef, err := store.GetRef("HEAD")
 		if err != nil {

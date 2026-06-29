@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/your-org/drift/core"
@@ -200,14 +201,19 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		return nil, fmt.Errorf("save snapshot: %w", err)
 	}
 
-	// Update HEAD reference
-	newHeadRef := &core.Reference{
-		Name:   "HEAD",
-		Type:   core.RefTypeHead,
+	// Update the current branch ref (HEAD is a symref, e.g. heads/main)
+	headRef, err = store.GetRef("HEAD")
+	symRef := "heads/main"
+	if err == nil && headRef.SymRef != "" {
+		symRef = headRef.SymRef
+	}
+	branchRef := &core.Reference{
+		Name:   strings.TrimPrefix(symRef, "heads/"),
+		Type:   core.RefTypeBranch,
 		Target: snap.ID.Hash,
 	}
-	if err := store.SetRef("HEAD", newHeadRef); err != nil {
-		return nil, fmt.Errorf("update HEAD: %w", err)
+	if err := store.SetRef(symRef, branchRef); err != nil {
+		return nil, fmt.Errorf("update branch: %w", err)
 	}
 
 	// Update index

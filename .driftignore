@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Office temp files
+~$*
+
+# Editor temp files
+*.tmp
+*.swp
+*~

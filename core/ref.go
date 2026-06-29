@@ -14,4 +14,11 @@ type Reference struct {
 	Name   string
 	Type   RefType
 	Target Hash
+	SymRef string
+}
+
+// IsSymRef reports whether this reference is a symbolic reference
+// (e.g. HEAD -> heads/main) rather than a direct hash.
+func (r *Reference) IsSymRef() bool {
+	return r.SymRef != ""
 }

@@ -1,0 +1,13 @@
+{
+  "User": {
+    "Name": "",
+    "Email": ""
+  },
+  "Core": {
+    "ChunkMinSize": 131072,
+    "ChunkAvgSize": 262144,
+    "ChunkMaxSize": 524288,
+    "CompressionLevel": 3,
+    "IgnoreFile": ".driftignore"
+  }
+}

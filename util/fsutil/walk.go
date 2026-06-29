@@ -6,6 +6,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/your-org/drift/util/glob"
 )
 
 func Walk(root string, fn func(path string, info os.FileInfo) error) error {
@@ -78,10 +80,10 @@ func isIgnored(rel string, info os.FileInfo, patterns []string) bool {
 	base := path.Base(rel)
 	for _, p := range patterns {
 		p = filepath.ToSlash(p)
-		if match, _ := path.Match(p, base); match {
+		if match, _ := glob.Match(p, base); match {
 			return true
 		}
-		if match, _ := path.Match(p, rel); match {
+		if match, _ := glob.Match(p, rel); match {
 			return true
 		}
 	}
