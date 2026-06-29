@@ -154,6 +154,9 @@ func RunDaemonLoop(store storage.Storer, cwd string, interval int, keep int) {
 			os.Remove(statePath)
 			return
 		case <-ticker.C:
+			if IsWorkspaceLocked(cwd) {
+				continue
+			}
 			changes, err := DetectChanges(store, cwd)
 			if err != nil {
 				continue

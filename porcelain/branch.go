@@ -62,6 +62,11 @@ func ListBranches(store storage.Storer) ([]*core.Reference, string, error) {
 // Returns autosave snapshot short ID (empty if nothing to save), the source branch name,
 // and the number of files that differ between the source and target branch snapshots.
 func SwitchBranch(store storage.Storer, workDir string, name string, create bool, author string) (string, string, int, error) {
+	if err := AcquireWorkspaceLock(workDir); err != nil {
+		return "", "", 0, err
+	}
+	defer ReleaseWorkspaceLock(workDir)
+
 	headRef, err := store.GetRef("HEAD")
 	if err != nil {
 		return "", "", 0, fmt.Errorf("read HEAD: %w", err)

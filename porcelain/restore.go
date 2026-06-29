@@ -17,6 +17,11 @@ import (
 // If filePath is non-empty, only restore that specific file.
 // If noBackup is false, a backup snapshot is created before restoring.
 func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool) (string, error) {
+	if err := AcquireWorkspaceLock(workDir); err != nil {
+		return "", err
+	}
+	defer ReleaseWorkspaceLock(workDir)
+
 	// Get target snapshot
 	snap, err := store.GetSnapshot(snapshotID)
 	if err != nil {
