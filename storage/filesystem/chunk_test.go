@@ -3,6 +3,7 @@ package filesystem
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/your-org/drift/core"
@@ -190,5 +191,47 @@ func TestListChunks(t *testing.T) {
 		if !want[h] {
 			t.Fatalf("unexpected hash %s in ListChunks result", h.FullString())
 		}
+	}
+}
+
+// TestListChunks_SkipsInvalidFiles verifies that non-chunk files in the
+// chunks directory (e.g. .DS_Store) are skipped instead of aborting.
+func TestListChunks_SkipsInvalidFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fs, err := NewFSStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFSStorage: %v", err)
+	}
+	defer fs.Close()
+
+	// Store one real chunk.
+	data := []byte("real chunk data")
+	var hash core.Hash
+	sum := blake3.Sum256(data)
+	copy(hash[:], sum[:])
+	if err := fs.PutChunk(&core.Chunk{Hash: hash, Size: uint32(len(data)), Data: data}); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
+
+	// Drop the cache so ListChunks is forced to scan disk (not strictly
+	// necessary for ListChunks, but mirrors real-world conditions).
+	fs.chunkCache.Remove(hash)
+
+	// Place a stray non-hex file in a chunk subdirectory.
+	subDir := filepath.Join(fs.chunksDir(), hash.FullString()[:2])
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, ".DS_Store"), []byte("junk"), 0644); err != nil {
+		t.Fatalf("write junk: %v", err)
+	}
+
+	hashes, err := fs.ListChunks()
+	if err != nil {
+		t.Fatalf("ListChunks should skip invalid files, got error: %v", err)
+	}
+	if len(hashes) != 1 || hashes[0] != hash {
+		t.Fatalf("expected only the real chunk hash, got %v", hashes)
 	}
 }

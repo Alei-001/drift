@@ -120,7 +120,9 @@ func (fs *FSStorage) ListChunks() ([]core.Hash, error) {
 		}
 		b, err := hex.DecodeString(parts[0] + parts[1])
 		if err != nil {
-			return err
+			// Skip non-chunk files (e.g. .DS_Store, temp files) instead of
+			// aborting the entire listing.
+			return nil
 		}
 		var h core.Hash
 		copy(h[:], b)
