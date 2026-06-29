@@ -114,20 +114,13 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: cannot read %s: %v\n", rel, err)
-			return nil
-		}
-
-		if len(data) != int(snapEntry.Size) {
+		if info.Size() != snapEntry.Size {
 			modified = append(modified, rel)
 		} else {
-			// Same size: compare content hash
-			workHash := blake3.Sum256(data)
-			var workCoreHash core.Hash
-			copy(workCoreHash[:], workHash[:])
-			if workCoreHash != snapEntry.Hash {
+			// Same size: compare content hash using the same method as
+			// CreateSnapshot (blake3 of chunk hashes), not raw content hash.
+			workHash, hashErr := porcelain.ComputeFileHash(path)
+			if hashErr != nil || workHash != snapEntry.Hash {
 				modified = append(modified, rel)
 			}
 		}

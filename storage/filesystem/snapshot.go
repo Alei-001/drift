@@ -8,6 +8,7 @@ import (
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/util/fsutil"
+	"github.com/zeebo/blake3"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -175,6 +176,13 @@ func snapshotFromProto(p *core.SnapshotProto) *core.Snapshot {
 		for _, ch := range fe.ChunkHashes {
 			f.Chunks = append(f.Chunks, bytesToHash(ch))
 		}
+		// Compute file-level hash from chunk hashes (same method as
+		// CreateSnapshot) since it is not stored explicitly in the proto.
+		fileHasher := blake3.New()
+		for _, h := range f.Chunks {
+			fileHasher.Write(h[:])
+		}
+		copy(f.Hash[:], fileHasher.Sum(nil))
 		if fe.MimeType != nil {
 			f.Metadata = &core.FileMetadata{MimeType: *fe.MimeType}
 		}
