@@ -53,14 +53,18 @@ var branchCmd = &cobra.Command{
 			return err
 		}
 		headRef, _ := store.GetRef("HEAD")
+	sid := "no commits yet"
+	if !headRef.Target.IsZero() {
 		snap, _ := store.GetSnapshot(core.SnapshotID{Hash: headRef.Target})
-		sid := headRef.Target.String()
 		if snap != nil {
 			sid = snap.ShortID()
+		} else {
+			sid = headRef.Target.String()
 		}
-		statusOK("Branch created")
-		fmt.Printf("'%s' at snapshot %s.\n", name, sid)
-		return nil
+	}
+	statusOK("Branch created")
+	fmt.Printf("'%s' at snapshot %s.\n", name, sid)
+	return nil
 	},
 }
 

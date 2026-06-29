@@ -67,7 +67,7 @@ var ignoreCmd = &cobra.Command{
 			newPatterns = append(newPatterns, p)
 		}
 
-		n, err := addIgnoreRules(ignorePath, args)
+		n, err := addIgnoreRules(ignorePath, newPatterns)
 		if err != nil {
 			return err
 		}
