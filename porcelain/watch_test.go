@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"context"
 	"testing"
 	"time"
 
@@ -16,17 +17,17 @@ import (
 func setupTestStore(t *testing.T) *memory.MemoryStorage {
 	t.Helper()
 	store := memory.NewMemoryStorage()
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
 	})
-	store.SetIndex(&core.Index{
+	store.SetIndex(context.Background(), &core.Index{
 		Entries:   []core.IndexEntry{},
 		UpdatedAt: time.Now().Unix(),
 	})
@@ -61,7 +62,7 @@ func TestPruneAutoSnapshots(t *testing.T) {
 		t.Errorf("expected 2 deleted, got %d", deleted)
 	}
 
-	snaps, err := store.ListSnapshots(nil)
+	snaps, err := store.ListSnapshots(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListSnapshots failed: %v", err)
 	}

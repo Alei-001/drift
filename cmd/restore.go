@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -14,6 +15,7 @@ var restoreCmd = &cobra.Command{
 	Use:   "restore <snapshot-id> [<file>]",
 	Short: "Restore files from a snapshot",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		if len(args) < 1 {
 			return fmt.Errorf("snapshot id required")
 		}
@@ -25,7 +27,7 @@ var restoreCmd = &cobra.Command{
 		}
 		defer store.Close()
 
-		snapshot := resolveSnapshot(store, args[0])
+		snapshot := resolveSnapshot(ctx, store, args[0])
 		if snapshot == nil {
 			statusFailed("Restore", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
 			return fmt.Errorf("snapshot not found: %s", args[0])
@@ -53,7 +55,7 @@ var restoreCmd = &cobra.Command{
 			}
 		} else {
 			// Full restore: show added/modified/deleted files
-			add, mod, del := computeChanges(store, snapshot)
+			add, mod, del := computeChanges(ctx, store, snapshot)
 			fmt.Printf(">>> Restored to %s [ok]\n", snapshot.ShortID())
 			printFileListWithSize(add, mod, del)
 			total := len(add) + len(mod) + len(del)

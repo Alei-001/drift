@@ -3,6 +3,7 @@ package porcelain
 import (
 	"os"
 	"path/filepath"
+	"context"
 	"testing"
 )
 
@@ -58,7 +59,7 @@ func TestRestore_FullRestoreDeletesExtraFiles(t *testing.T) {
 	}
 
 	// Verify HEAD points to snap1
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 	}
 
 	// Verify HEAD still points to snap2 (single-file restore must not move HEAD)
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 	}
 
 	// Verify index contains all file entries (file1, file2, file3, .driftignore)
-	idx, err := store.GetIndex()
+	idx, err := store.GetIndex(context.Background())
 	if err != nil {
 		t.Fatalf("GetIndex failed: %v", err)
 	}

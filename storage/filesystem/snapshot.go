@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +20,7 @@ func (fs *FSStorage) snapshotPath(id core.SnapshotID) string {
 }
 
 // GetSnapshot reads a snapshot from disk.
-func (fs *FSStorage) GetSnapshot(id core.SnapshotID) (*core.Snapshot, error) {
+func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error) {
 	path := fs.snapshotPath(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -33,7 +34,7 @@ func (fs *FSStorage) GetSnapshot(id core.SnapshotID) (*core.Snapshot, error) {
 }
 
 // PutSnapshot writes a snapshot to disk.
-func (fs *FSStorage) PutSnapshot(snapshot *core.Snapshot) error {
+func (fs *FSStorage) PutSnapshot(ctx context.Context, snapshot *core.Snapshot) error {
 	p := snapshotToProto(snapshot)
 	data, err := proto.Marshal(p)
 	if err != nil {
@@ -49,7 +50,7 @@ func (fs *FSStorage) PutSnapshot(snapshot *core.Snapshot) error {
 
 // DeleteSnapshot removes a snapshot from disk. It is idempotent:
 // a missing file is not an error.
-func (fs *FSStorage) DeleteSnapshot(id core.SnapshotID) error {
+func (fs *FSStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID) error {
 	path := fs.snapshotPath(id)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
@@ -59,7 +60,7 @@ func (fs *FSStorage) DeleteSnapshot(id core.SnapshotID) error {
 
 // ListSnapshots lists all snapshots, sorted by timestamp descending,
 // with optional limit/offset and branch filter.
-func (fs *FSStorage) ListSnapshots(opts *storage.ListOptions) ([]*core.Snapshot, error) {
+func (fs *FSStorage) ListSnapshots(ctx context.Context, opts *storage.ListOptions) ([]*core.Snapshot, error) {
 	snapDir := filepath.Join(fs.root, SnapshotsDir)
 	var snapshots []*core.Snapshot
 

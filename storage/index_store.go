@@ -1,9 +1,13 @@
 package storage
 
-import "github.com/your-org/drift/core"
+import (
+	"context"
+
+	"github.com/your-org/drift/core"
+)
 
 // IndexStorer provides access to the staging index.
 type IndexStorer interface {
-	GetIndex() (*core.Index, error)
-	SetIndex(index *core.Index) error
+	GetIndex(ctx context.Context) (*core.Index, error)
+	SetIndex(ctx context.Context, index *core.Index) error
 }

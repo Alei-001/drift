@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -71,14 +72,15 @@ func printFileListWithSize(added, modified []core.FileEntry, deleted []string) {
 
 // printFileListWithLineCount prints file list with sizes and line counts (for log -v).
 func printFileListWithLineCount(added, modified []core.FileEntry, deleted []string, store interface {
-	GetChunk(core.Hash) (*core.Chunk, error)
+	GetChunk(context.Context, core.Hash) (*core.Chunk, error)
 }) {
+	ctx := context.Background()
 	fmt.Println()
 	for _, f := range added {
 		fmt.Printf("  +  %s      %s\n", f.Path, formatSize(f.Size))
 	}
 	for _, f := range modified {
-		lines := countLinesFromChunks(store, f)
+		lines := countLinesFromChunks(ctx, store, f)
 		if lines > 0 {
 			fmt.Printf("  ~  %s      %s  (%d lines)\n", f.Path, formatSize(f.Size), lines)
 		} else {
@@ -91,12 +93,12 @@ func printFileListWithLineCount(added, modified []core.FileEntry, deleted []stri
 }
 
 // countLinesFromChunks reads chunk data and counts newlines.
-func countLinesFromChunks(store interface {
-	GetChunk(core.Hash) (*core.Chunk, error)
+func countLinesFromChunks(ctx context.Context, store interface {
+	GetChunk(context.Context, core.Hash) (*core.Chunk, error)
 }, entry core.FileEntry) int {
 	var data []byte
 	for _, h := range entry.Chunks {
-		chunk, err := store.GetChunk(h)
+		chunk, err := store.GetChunk(ctx, h)
 		if err != nil {
 			return 0
 		}

@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,7 +11,7 @@ import (
 )
 
 // GetConfig reads the drift configuration from the config file.
-func (fs *FSStorage) GetConfig() (*core.Config, error) {
+func (fs *FSStorage) GetConfig(ctx context.Context) (*core.Config, error) {
 	path := filepath.Join(fs.root, ConfigFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -39,7 +40,7 @@ func (fs *FSStorage) GetConfig() (*core.Config, error) {
 }
 
 // SetConfig writes the drift configuration to the config file.
-func (fs *FSStorage) SetConfig(config *core.Config) error {
+func (fs *FSStorage) SetConfig(ctx context.Context, config *core.Config) error {
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err

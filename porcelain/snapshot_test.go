@@ -3,6 +3,7 @@ package porcelain
 import (
 	"os"
 	"path/filepath"
+	"context"
 	"testing"
 	"time"
 
@@ -13,17 +14,17 @@ import (
 func TestCreateSnapshot_FirstCommit(t *testing.T) {
 	store := memory.NewMemoryStorage()
 	// Set up initial state: HEAD symref -> heads/main, empty index
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
 	})
-	store.SetIndex(&core.Index{
+	store.SetIndex(context.Background(), &core.Index{
 		Entries:   []core.IndexEntry{},
 		UpdatedAt: time.Now().Unix(),
 	})
@@ -71,7 +72,7 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 	}
 
 	// Verify HEAD was updated
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 	}
 
 	// Verify snapshot was stored
-	stored, err := store.GetSnapshot(snap.ID)
+	stored, err := store.GetSnapshot(context.Background(), snap.ID)
 	if err != nil {
 		t.Fatalf("GetSnapshot failed: %v", err)
 	}
@@ -89,7 +90,7 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 	}
 
 	// Verify index was updated
-	idx, err := store.GetIndex()
+	idx, err := store.GetIndex(context.Background())
 	if err != nil {
 		t.Fatalf("GetIndex failed: %v", err)
 	}
@@ -100,17 +101,17 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 
 func TestCreateSnapshot_SecondCommit(t *testing.T) {
 	store := memory.NewMemoryStorage()
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
 	})
-	store.SetIndex(&core.Index{
+	store.SetIndex(context.Background(), &core.Index{
 		Entries:   []core.IndexEntry{},
 		UpdatedAt: time.Now().Unix(),
 	})
@@ -145,17 +146,17 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 	}
 
 	// Both snapshots should be retrievable
-	_, err = store.GetSnapshot(snap1.ID)
+	_, err = store.GetSnapshot(context.Background(), snap1.ID)
 	if err != nil {
 		t.Fatalf("GetSnapshot for first snapshot failed: %v", err)
 	}
-	_, err = store.GetSnapshot(snap2.ID)
+	_, err = store.GetSnapshot(context.Background(), snap2.ID)
 	if err != nil {
 		t.Fatalf("GetSnapshot for second snapshot failed: %v", err)
 	}
 
 	// HEAD should point to snap2
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}
@@ -166,17 +167,17 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 
 func TestCreateSnapshot_NothingChanged(t *testing.T) {
 	store := memory.NewMemoryStorage()
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
 	})
-	store.SetIndex(&core.Index{
+	store.SetIndex(context.Background(), &core.Index{
 		Entries:   []core.IndexEntry{},
 		UpdatedAt: time.Now().Unix(),
 	})
@@ -200,17 +201,17 @@ func TestCreateSnapshot_NothingChanged(t *testing.T) {
 
 func TestCreateSnapshot_DefaultAuthor(t *testing.T) {
 	store := memory.NewMemoryStorage()
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
 	})
-	store.SetIndex(&core.Index{
+	store.SetIndex(context.Background(), &core.Index{
 		Entries:   []core.IndexEntry{},
 		UpdatedAt: time.Now().Unix(),
 	})

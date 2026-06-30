@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -10,7 +11,7 @@ import (
 )
 
 // GetIndex reads the staging index from disk.
-func (fs *FSStorage) GetIndex() (*core.Index, error) {
+func (fs *FSStorage) GetIndex(ctx context.Context) (*core.Index, error) {
 	path := filepath.Join(fs.root, IndexFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -27,7 +28,7 @@ func (fs *FSStorage) GetIndex() (*core.Index, error) {
 }
 
 // SetIndex writes the staging index to disk.
-func (fs *FSStorage) SetIndex(index *core.Index) error {
+func (fs *FSStorage) SetIndex(ctx context.Context, index *core.Index) error {
 	p := indexToProto(index)
 	data, err := proto.Marshal(p)
 	if err != nil {

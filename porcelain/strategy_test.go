@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"context"
 	"testing"
 	"time"
 
@@ -173,17 +174,17 @@ func TestChunkerFor_BoundaryValues(t *testing.T) {
 func newTestStore(t *testing.T) *memory.MemoryStorage {
 	t.Helper()
 	store := memory.NewMemoryStorage()
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
 	})
-	store.SetIndex(&core.Index{
+	store.SetIndex(context.Background(), &core.Index{
 		Entries:   []core.IndexEntry{},
 		UpdatedAt: time.Now().Unix(),
 	})

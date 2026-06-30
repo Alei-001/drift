@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -25,14 +26,14 @@ func (fs *FSStorage) chunkPath(hash core.Hash) string {
 }
 
 // HasChunk returns true if the chunk exists on disk.
-func (fs *FSStorage) HasChunk(hash core.Hash) bool {
+func (fs *FSStorage) HasChunk(ctx context.Context, hash core.Hash) bool {
 	path := fs.chunkPath(hash)
 	_, err := os.Stat(path)
 	return err == nil
 }
 
 // GetChunk reads a chunk from disk, returning the decompressed data.
-func (fs *FSStorage) GetChunk(hash core.Hash) (*core.Chunk, error) {
+func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk, error) {
 	if ch, ok := fs.chunkCache.Get(hash); ok {
 		return ch, nil
 	}
@@ -65,8 +66,8 @@ func (fs *FSStorage) GetChunk(hash core.Hash) (*core.Chunk, error) {
 }
 
 // PutChunk compresses and writes a chunk to disk.
-func (fs *FSStorage) PutChunk(chunk *core.Chunk) error {
-	if fs.HasChunk(chunk.Hash) {
+func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
+	if fs.HasChunk(ctx, chunk.Hash) {
 		return nil
 	}
 
@@ -88,7 +89,7 @@ func (fs *FSStorage) PutChunk(chunk *core.Chunk) error {
 
 // DeleteChunk removes a chunk from disk and the in-memory cache. It is
 // idempotent: a missing file is not an error.
-func (fs *FSStorage) DeleteChunk(hash core.Hash) error {
+func (fs *FSStorage) DeleteChunk(ctx context.Context, hash core.Hash) error {
 	path := fs.chunkPath(hash)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
@@ -99,7 +100,7 @@ func (fs *FSStorage) DeleteChunk(hash core.Hash) error {
 
 // ListChunks returns the hashes of all chunks stored on disk. The order
 // of the returned slice is not guaranteed.
-func (fs *FSStorage) ListChunks() ([]core.Hash, error) {
+func (fs *FSStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 	chunksDir := fs.chunksDir()
 	var hashes []core.Hash
 	err := filepath.WalkDir(chunksDir, func(path string, d os.DirEntry, err error) error {

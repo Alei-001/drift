@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"testing"
 
 	"github.com/your-org/drift/core"
@@ -16,9 +17,9 @@ func gcHash(b byte) core.Hash {
 func TestCollectGarbage_AllReachable(t *testing.T) {
 	store := memory.NewMemoryStorage()
 	snapHash := gcHash(0x01)
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snapHash})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snapHash}, PrevID: nil})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snapHash})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snapHash}, PrevID: nil})
 
 	report, err := CollectGarbage(store, false)
 	if err != nil {
@@ -42,28 +43,28 @@ func TestCollectGarbage_ReclaimsUnreachable(t *testing.T) {
 	chunk2 := gcHash(0x11)
 	chunk3 := gcHash(0x12)
 
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap2})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap2})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 
-	store.PutSnapshot(&core.Snapshot{
+	store.PutSnapshot(context.Background(), &core.Snapshot{
 		ID:     core.SnapshotID{Hash: snap1},
 		PrevID: nil,
 		Files:  []core.FileEntry{{Path: "a", Chunks: []core.Hash{chunk1}}},
 	})
-	store.PutSnapshot(&core.Snapshot{
+	store.PutSnapshot(context.Background(), &core.Snapshot{
 		ID:     core.SnapshotID{Hash: snap2},
 		PrevID: &core.SnapshotID{Hash: snap1},
 		Files:  []core.FileEntry{{Path: "b", Chunks: []core.Hash{chunk2}}},
 	})
-	store.PutSnapshot(&core.Snapshot{
+	store.PutSnapshot(context.Background(), &core.Snapshot{
 		ID:     core.SnapshotID{Hash: snap3},
 		PrevID: nil,
 		Files:  []core.FileEntry{{Path: "c", Chunks: []core.Hash{chunk3}}},
 	})
 
-	store.PutChunk(&core.Chunk{Hash: chunk1, Size: 100, Data: []byte("chunk1")})
-	store.PutChunk(&core.Chunk{Hash: chunk2, Size: 200, Data: []byte("chunk2")})
-	store.PutChunk(&core.Chunk{Hash: chunk3, Size: 300, Data: []byte("chunk3")})
+	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk1, Size: 100, Data: []byte("chunk1")})
+	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk2, Size: 200, Data: []byte("chunk2")})
+	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk3, Size: 300, Data: []byte("chunk3")})
 
 	report, err := CollectGarbage(store, false)
 	if err != nil {
@@ -80,23 +81,23 @@ func TestCollectGarbage_ReclaimsUnreachable(t *testing.T) {
 	}
 
 	// snap1 and snap2 preserved; snap3 gone.
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap1}); err != nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap1}); err != nil {
 		t.Errorf("snap1 should be preserved: %v", err)
 	}
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap2}); err != nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap2}); err != nil {
 		t.Errorf("snap2 should be preserved: %v", err)
 	}
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap3}); err == nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap3}); err == nil {
 		t.Error("snap3 should have been removed")
 	}
 	// chunk1 and chunk2 preserved; chunk3 gone.
-	if !store.HasChunk(chunk1) {
+	if !store.HasChunk(context.Background(), chunk1) {
 		t.Error("chunk1 should be preserved")
 	}
-	if !store.HasChunk(chunk2) {
+	if !store.HasChunk(context.Background(), chunk2) {
 		t.Error("chunk2 should be preserved")
 	}
-	if store.HasChunk(chunk3) {
+	if store.HasChunk(context.Background(), chunk3) {
 		t.Error("chunk3 should have been removed")
 	}
 }
@@ -108,21 +109,21 @@ func TestCollectGarbage_SharedChunkPreserved(t *testing.T) {
 	snap3 := gcHash(0x03) // orphan
 	chunkA := gcHash(0x20)
 
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap1})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap1})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 
 	// Both snapshots reference the same chunkA.
-	store.PutSnapshot(&core.Snapshot{
+	store.PutSnapshot(context.Background(), &core.Snapshot{
 		ID:     core.SnapshotID{Hash: snap1},
 		PrevID: nil,
 		Files:  []core.FileEntry{{Path: "a", Chunks: []core.Hash{chunkA}}},
 	})
-	store.PutSnapshot(&core.Snapshot{
+	store.PutSnapshot(context.Background(), &core.Snapshot{
 		ID:     core.SnapshotID{Hash: snap3},
 		PrevID: nil,
 		Files:  []core.FileEntry{{Path: "c", Chunks: []core.Hash{chunkA}}},
 	})
-	store.PutChunk(&core.Chunk{Hash: chunkA, Size: 150, Data: []byte("shared")})
+	store.PutChunk(context.Background(), &core.Chunk{Hash: chunkA, Size: 150, Data: []byte("shared")})
 
 	report, err := CollectGarbage(store, false)
 	if err != nil {
@@ -135,10 +136,10 @@ func TestCollectGarbage_SharedChunkPreserved(t *testing.T) {
 		t.Errorf("expected 0 chunks removed (chunkA still referenced), got %d", report.ChunksRemoved)
 	}
 
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap3}); err == nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap3}); err == nil {
 		t.Error("snap3 should have been removed")
 	}
-	if !store.HasChunk(chunkA) {
+	if !store.HasChunk(context.Background(), chunkA) {
 		t.Error("chunkA should be preserved because snap1 still references it")
 	}
 }
@@ -151,21 +152,21 @@ func TestCollectGarbage_DryRunNoDelete(t *testing.T) {
 	chunk1 := gcHash(0x10)
 	chunk2 := gcHash(0x11) // only referenced by orphan snap2
 
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap1})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap1})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 
-	store.PutSnapshot(&core.Snapshot{
+	store.PutSnapshot(context.Background(), &core.Snapshot{
 		ID:     core.SnapshotID{Hash: snap1},
 		PrevID: nil,
 		Files:  []core.FileEntry{{Path: "a", Chunks: []core.Hash{chunk1}}},
 	})
-	store.PutSnapshot(&core.Snapshot{
+	store.PutSnapshot(context.Background(), &core.Snapshot{
 		ID:     core.SnapshotID{Hash: snap2},
 		PrevID: nil,
 		Files:  []core.FileEntry{{Path: "b", Chunks: []core.Hash{chunk2}}},
 	})
-	store.PutChunk(&core.Chunk{Hash: chunk1, Size: 100, Data: []byte("chunk1")})
-	store.PutChunk(&core.Chunk{Hash: chunk2, Size: 250, Data: []byte("chunk2")})
+	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk1, Size: 100, Data: []byte("chunk1")})
+	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk2, Size: 250, Data: []byte("chunk2")})
 
 	report, err := CollectGarbage(store, true)
 	if err != nil {
@@ -182,10 +183,10 @@ func TestCollectGarbage_DryRunNoDelete(t *testing.T) {
 	}
 
 	// Nothing should actually be deleted.
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap2}); err != nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap2}); err != nil {
 		t.Errorf("snap2 should still exist after dry-run: %v", err)
 	}
-	if !store.HasChunk(chunk2) {
+	if !store.HasChunk(context.Background(), chunk2) {
 		t.Error("chunk2 should still exist after dry-run")
 	}
 }
@@ -198,13 +199,13 @@ func TestCollectGarbage_PrevIDChain(t *testing.T) {
 	snap3 := gcHash(0x03)
 	snap4 := gcHash(0x04) // orphan
 
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap3})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap3})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap1}, PrevID: nil})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: &core.SnapshotID{Hash: snap1}})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap3}, PrevID: &core.SnapshotID{Hash: snap2}})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap4}, PrevID: nil})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap1}, PrevID: nil})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: &core.SnapshotID{Hash: snap1}})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap3}, PrevID: &core.SnapshotID{Hash: snap2}})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap4}, PrevID: nil})
 
 	report, err := CollectGarbage(store, false)
 	if err != nil {
@@ -215,11 +216,11 @@ func TestCollectGarbage_PrevIDChain(t *testing.T) {
 	}
 
 	for _, h := range []core.Hash{snap1, snap2, snap3} {
-		if _, err := store.GetSnapshot(core.SnapshotID{Hash: h}); err != nil {
+		if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: h}); err != nil {
 			t.Errorf("snapshot %x should be preserved: %v", h, err)
 		}
 	}
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap4}); err == nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap4}); err == nil {
 		t.Error("snap4 should have been removed")
 	}
 }
@@ -230,12 +231,12 @@ func TestCollectGarbage_TagKeepsSnapshot(t *testing.T) {
 	snap1 := gcHash(0x01) // reachable only via tag
 	snap2 := gcHash(0x02) // reachable via main
 
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap2})
-	store.SetRef("tags/v1", &core.Reference{Name: "tags/v1", Type: core.RefTypeTag, Target: snap1})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap2})
+	store.SetRef(context.Background(), "tags/v1", &core.Reference{Name: "tags/v1", Type: core.RefTypeTag, Target: snap1})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap1}, PrevID: nil})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: nil})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap1}, PrevID: nil})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: nil})
 
 	report, err := CollectGarbage(store, false)
 	if err != nil {
@@ -245,10 +246,10 @@ func TestCollectGarbage_TagKeepsSnapshot(t *testing.T) {
 		t.Errorf("expected 0 snapshots removed (snap1 kept by tag), got %d", report.SnapshotsRemoved)
 	}
 
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap1}); err != nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap1}); err != nil {
 		t.Errorf("snap1 should be preserved by tags/v1: %v", err)
 	}
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snap2}); err != nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap2}); err != nil {
 		t.Errorf("snap2 should be preserved by heads/main: %v", err)
 	}
 }
@@ -259,9 +260,9 @@ func TestCollectGarbage_ZeroTargetSkipped(t *testing.T) {
 	// main with zero target (freshly initialized, no commits) plus an orphan.
 	snapOrphan := gcHash(0x0f)
 
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: core.Hash{}})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snapOrphan}, PrevID: nil})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: core.Hash{}})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snapOrphan}, PrevID: nil})
 
 	report, err := CollectGarbage(store, false)
 	if err != nil {
@@ -270,7 +271,7 @@ func TestCollectGarbage_ZeroTargetSkipped(t *testing.T) {
 	if report.SnapshotsRemoved != 1 {
 		t.Errorf("expected 1 snapshot removed (orphan), got %d", report.SnapshotsRemoved)
 	}
-	if _, err := store.GetSnapshot(core.SnapshotID{Hash: snapOrphan}); err == nil {
+	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snapOrphan}); err == nil {
 		t.Error("orphan snapshot should have been removed")
 	}
 }
@@ -282,12 +283,12 @@ func TestCountUnreachableSnapshots(t *testing.T) {
 	snap2 := gcHash(0x02) // orphan
 	snap3 := gcHash(0x03) // orphan
 
-	store.SetRef("heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap1})
-	store.SetRef("HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
+	store.SetRef(context.Background(), "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: snap1})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap1}, PrevID: nil})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: nil})
-	store.PutSnapshot(&core.Snapshot{ID: core.SnapshotID{Hash: snap3}, PrevID: nil})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap1}, PrevID: nil})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: nil})
+	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap3}, PrevID: nil})
 
 	count, err := CountUnreachableSnapshots(store)
 	if err != nil {

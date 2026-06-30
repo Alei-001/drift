@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"sort"
@@ -30,13 +31,13 @@ func NewMemoryStorage() *MemoryStorage {
 }
 
 // HasChunk returns whether a chunk exists.
-func (ms *MemoryStorage) HasChunk(hash core.Hash) bool {
+func (ms *MemoryStorage) HasChunk(ctx context.Context, hash core.Hash) bool {
 	_, ok := ms.chunks.Load(hash.FullString())
 	return ok
 }
 
 // GetChunk retrieves a chunk.
-func (ms *MemoryStorage) GetChunk(hash core.Hash) (*core.Chunk, error) {
+func (ms *MemoryStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk, error) {
 	v, ok := ms.chunks.Load(hash.FullString())
 	if !ok {
 		return nil, errors.New("chunk not found")
@@ -45,20 +46,20 @@ func (ms *MemoryStorage) GetChunk(hash core.Hash) (*core.Chunk, error) {
 }
 
 // PutChunk stores a chunk.
-func (ms *MemoryStorage) PutChunk(chunk *core.Chunk) error {
+func (ms *MemoryStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 	ms.chunks.Store(chunk.Hash.FullString(), cloneChunk(chunk))
 	return nil
 }
 
 // DeleteChunk removes a chunk. It is idempotent.
-func (ms *MemoryStorage) DeleteChunk(hash core.Hash) error {
+func (ms *MemoryStorage) DeleteChunk(ctx context.Context, hash core.Hash) error {
 	ms.chunks.Delete(hash.FullString())
 	return nil
 }
 
 // ListChunks returns the hashes of all stored chunks. The order of the
 // returned slice is not guaranteed.
-func (ms *MemoryStorage) ListChunks() ([]core.Hash, error) {
+func (ms *MemoryStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 	var hashes []core.Hash
 	ms.chunks.Range(func(key, value any) bool {
 		b, err := hex.DecodeString(key.(string))
@@ -74,7 +75,7 @@ func (ms *MemoryStorage) ListChunks() ([]core.Hash, error) {
 }
 
 // GetSnapshot retrieves a snapshot.
-func (ms *MemoryStorage) GetSnapshot(id core.SnapshotID) (*core.Snapshot, error) {
+func (ms *MemoryStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error) {
 	v, ok := ms.snapshots.Load(id.Hash.FullString())
 	if !ok {
 		return nil, errors.New("snapshot not found")
@@ -83,20 +84,20 @@ func (ms *MemoryStorage) GetSnapshot(id core.SnapshotID) (*core.Snapshot, error)
 }
 
 // PutSnapshot stores a snapshot.
-func (ms *MemoryStorage) PutSnapshot(snapshot *core.Snapshot) error {
+func (ms *MemoryStorage) PutSnapshot(ctx context.Context, snapshot *core.Snapshot) error {
 	ms.snapshots.Store(snapshot.ID.Hash.FullString(), cloneSnapshot(snapshot))
 	return nil
 }
 
 // DeleteSnapshot removes a snapshot. It is idempotent.
-func (ms *MemoryStorage) DeleteSnapshot(id core.SnapshotID) error {
+func (ms *MemoryStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID) error {
 	ms.snapshots.Delete(id.Hash.FullString())
 	return nil
 }
 
 // ListSnapshots lists all snapshots, sorted by timestamp descending,
 // with optional limit/offset and branch filter.
-func (ms *MemoryStorage) ListSnapshots(opts *storage.ListOptions) ([]*core.Snapshot, error) {
+func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOptions) ([]*core.Snapshot, error) {
 	var snapshots []*core.Snapshot
 	ms.snapshots.Range(func(key, value any) bool {
 		snapshots = append(snapshots, value.(*core.Snapshot))
@@ -140,14 +141,14 @@ func (ms *MemoryStorage) ListSnapshots(opts *storage.ListOptions) ([]*core.Snaps
 
 // GetRef reads a reference. If the reference is a symbolic reference,
 // Target is resolved by recursively reading the referenced ref.
-func (ms *MemoryStorage) GetRef(name string) (*core.Reference, error) {
+func (ms *MemoryStorage) GetRef(ctx context.Context, name string) (*core.Reference, error) {
 	v, ok := ms.refs.Load(name)
 	if !ok {
 		return nil, errors.New("reference not found")
 	}
 	ref := v.(*core.Reference)
 	if ref.SymRef != "" {
-		target, err := ms.GetRef(ref.SymRef)
+		target, err := ms.GetRef(ctx, ref.SymRef)
 		if err != nil {
 			return nil, err
 		}
@@ -159,13 +160,13 @@ func (ms *MemoryStorage) GetRef(name string) (*core.Reference, error) {
 }
 
 // SetRef writes a reference.
-func (ms *MemoryStorage) SetRef(name string, ref *core.Reference) error {
+func (ms *MemoryStorage) SetRef(ctx context.Context, name string, ref *core.Reference) error {
 	ms.refs.Store(name, ref)
 	return nil
 }
 
 // ListRefs lists all references matching the given prefix.
-func (ms *MemoryStorage) ListRefs(prefix string) ([]*core.Reference, error) {
+func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {
 	var refs []*core.Reference
 	ms.refs.Range(func(key, value any) bool {
 		name := key.(string)
@@ -178,13 +179,13 @@ func (ms *MemoryStorage) ListRefs(prefix string) ([]*core.Reference, error) {
 }
 
 // DeleteRef removes a reference.
-func (ms *MemoryStorage) DeleteRef(name string) error {
+func (ms *MemoryStorage) DeleteRef(ctx context.Context, name string) error {
 	ms.refs.Delete(name)
 	return nil
 }
 
 // GetIndex retrieves the staging index.
-func (ms *MemoryStorage) GetIndex() (*core.Index, error) {
+func (ms *MemoryStorage) GetIndex(ctx context.Context) (*core.Index, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	if ms.index == nil {
@@ -194,7 +195,7 @@ func (ms *MemoryStorage) GetIndex() (*core.Index, error) {
 }
 
 // SetIndex stores the staging index.
-func (ms *MemoryStorage) SetIndex(index *core.Index) error {
+func (ms *MemoryStorage) SetIndex(ctx context.Context, index *core.Index) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.index = index
@@ -202,17 +203,17 @@ func (ms *MemoryStorage) SetIndex(index *core.Index) error {
 }
 
 // GetPreview is a noop stub (Phase 1).
-func (ms *MemoryStorage) GetPreview(hash core.Hash, size int) ([]byte, error) {
+func (ms *MemoryStorage) GetPreview(ctx context.Context, hash core.Hash, size int) ([]byte, error) {
 	return nil, nil
 }
 
 // PutPreview is a noop stub (Phase 1).
-func (ms *MemoryStorage) PutPreview(hash core.Hash, size int, data []byte) error {
+func (ms *MemoryStorage) PutPreview(ctx context.Context, hash core.Hash, size int, data []byte) error {
 	return nil
 }
 
 // GetConfig retrieves the configuration.
-func (ms *MemoryStorage) GetConfig() (*core.Config, error) {
+func (ms *MemoryStorage) GetConfig(ctx context.Context) (*core.Config, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 	if ms.config == nil {
@@ -222,7 +223,7 @@ func (ms *MemoryStorage) GetConfig() (*core.Config, error) {
 }
 
 // SetConfig stores the configuration.
-func (ms *MemoryStorage) SetConfig(config *core.Config) error {
+func (ms *MemoryStorage) SetConfig(ctx context.Context, config *core.Config) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 	ms.config = cloneConfig(config)

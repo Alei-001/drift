@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -23,6 +24,7 @@ var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: "Show snapshot history",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -31,7 +33,7 @@ var logCmd = &cobra.Command{
 		defer store.Close()
 
 		if logVerbose != "" {
-			return logVerboseMode(store, logVerbose)
+			return logVerboseMode(ctx, store, logVerbose)
 		}
 
 		var snapshots []*core.Snapshot
@@ -39,7 +41,7 @@ var logCmd = &cobra.Command{
 
 		if logBranch != "" {
 			// Branch-filtered: walk PrevID chain from branch tip
-			snapshots, err = walkBranchHistory(store, logBranch)
+			snapshots, err = walkBranchHistory(ctx, store, logBranch)
 			if err != nil {
 				return err
 			}
@@ -50,11 +52,11 @@ var logCmd = &cobra.Command{
 		} else {
 			// Global: list all, build branch map for the column
 			opts := &storage.ListOptions{Limit: logLimit, Offset: 0}
-			snapshots, err = store.ListSnapshots(opts)
+			snapshots, err = store.ListSnapshots(ctx, opts)
 			if err != nil {
 				return err
 			}
-			branchMap, _ = buildBranchMap(store)
+			branchMap, _ = buildBranchMap(ctx, store)
 		}
 
 		// Filter auto-saves unless --all
@@ -81,7 +83,7 @@ var logCmd = &cobra.Command{
 		}
 
 		if logJSON {
-			return logJSONMode(store, filtered, branchMap)
+			return logJSONMode(ctx, store, filtered, branchMap)
 		}
 
 		// Default table format
@@ -96,7 +98,7 @@ var logCmd = &cobra.Command{
 		fmt.Printf(">>> %s\n", label)
 		for _, s := range filtered {
 			timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
-			add, mod, del := countSnapshotChanges(store, s)
+			add, mod, del := countSnapshotChanges(ctx, store, s)
 			changes := fmt.Sprintf("+%d ~%d", add, mod)
 			if del > 0 {
 				changes += fmt.Sprintf(" -%d", del)
@@ -140,8 +142,8 @@ var logCmd = &cobra.Command{
 	},
 }
 
-func logVerboseMode(store storage.Storer, id string) error {
-	snapshot := resolveSnapshot(store, id)
+func logVerboseMode(ctx context.Context, store storage.Storer, id string) error {
+	snapshot := resolveSnapshot(ctx, store, id)
 	if snapshot == nil {
 		return fmt.Errorf("snapshot not found: %s", id)
 	}
@@ -150,14 +152,14 @@ func logVerboseMode(store storage.Storer, id string) error {
 	timeStr := time.Unix(snapshot.Timestamp, 0).Format("2006-01-02 15:04")
 	fmt.Printf("%s  %s\n", timeStr, snapshot.Message)
 
-	add, mod, del := computeVerboseChanges(store, snapshot)
+	add, mod, del := computeVerboseChanges(ctx, store, snapshot)
 	printFileListWithLineCount(add, mod, del, store)
 	total := len(add) + len(mod) + len(del)
 	summaryLine(total, len(add), len(mod), len(del))
 	return nil
 }
 
-func computeVerboseChanges(store storage.Storer, snapshot *core.Snapshot) (added, modified []core.FileEntry, deleted []string) {
+func computeVerboseChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added, modified []core.FileEntry, deleted []string) {
 	currFiles := make(map[string]core.FileEntry)
 	for _, f := range snapshot.Files {
 		currFiles[f.Path] = f
@@ -165,7 +167,7 @@ func computeVerboseChanges(store storage.Storer, snapshot *core.Snapshot) (added
 
 	var prevFiles map[string]core.FileEntry
 	if snapshot.PrevID != nil {
-		prevSnap, err := store.GetSnapshot(*snapshot.PrevID)
+		prevSnap, err := store.GetSnapshot(ctx, *snapshot.PrevID)
 		if err == nil {
 			prevFiles = make(map[string]core.FileEntry)
 			for _, f := range prevSnap.Files {
@@ -196,12 +198,12 @@ func computeVerboseChanges(store storage.Storer, snapshot *core.Snapshot) (added
 	return
 }
 
-func countSnapshotChanges(store storage.Storer, snapshot *core.Snapshot) (added, modified, deleted int) {
-	a, m, d := computeVerboseChanges(store, snapshot)
+func countSnapshotChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added, modified, deleted int) {
+	a, m, d := computeVerboseChanges(ctx, store, snapshot)
 	return len(a), len(m), len(d)
 }
 
-func logJSONMode(store storage.Storer, snapshots []*core.Snapshot, branchMap map[string][]string) error {
+func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.Snapshot, branchMap map[string][]string) error {
 	type jsonEntry struct {
 		ID      string   `json:"id"`
 		Time    string   `json:"time"`
@@ -213,7 +215,7 @@ func logJSONMode(store storage.Storer, snapshots []*core.Snapshot, branchMap map
 
 	var entries []jsonEntry
 	for _, s := range snapshots {
-		add, mod, del := countSnapshotChanges(store, s)
+		add, mod, del := countSnapshotChanges(ctx, store, s)
 		changes := fmt.Sprintf("+%d ~%d -%d", add, mod, del)
 		entry := jsonEntry{
 			ID:      s.ShortID(),
@@ -243,8 +245,8 @@ func logJSONMode(store storage.Storer, snapshots []*core.Snapshot, branchMap map
 
 // walkBranchHistory walks the PrevID chain from a branch's tip snapshot and
 // returns all reachable snapshots in newest-first order.
-func walkBranchHistory(store storage.Storer, branchName string) ([]*core.Snapshot, error) {
-	ref, err := store.GetRef("heads/" + branchName)
+func walkBranchHistory(ctx context.Context, store storage.Storer, branchName string) ([]*core.Snapshot, error) {
+	ref, err := store.GetRef(ctx, "heads/"+branchName)
 	if err != nil {
 		return nil, fmt.Errorf("branch '%s' not found", branchName)
 	}
@@ -255,7 +257,7 @@ func walkBranchHistory(store storage.Storer, branchName string) ([]*core.Snapsho
 	var snapshots []*core.Snapshot
 	current := &core.SnapshotID{Hash: ref.Target}
 	for current != nil {
-		snap, err := store.GetSnapshot(*current)
+		snap, err := store.GetSnapshot(ctx, *current)
 		if err != nil {
 			break
 		}
@@ -271,7 +273,7 @@ func walkBranchHistory(store storage.Storer, branchName string) ([]*core.Snapsho
 
 // buildBranchMap builds a map from snapshot hash to the list of branch names
 // whose history (PrevID chain) contains that snapshot.
-func buildBranchMap(store storage.Storer) (map[string][]string, error) {
+func buildBranchMap(ctx context.Context, store storage.Storer) (map[string][]string, error) {
 	branches, _, err := porcelain.ListBranches(store)
 	if err != nil {
 		return nil, err
@@ -285,7 +287,7 @@ func buildBranchMap(store storage.Storer) (map[string][]string, error) {
 		}
 		current := &core.SnapshotID{Hash: b.Target}
 		for current != nil {
-			snap, err := store.GetSnapshot(*current)
+			snap, err := store.GetSnapshot(ctx, *current)
 			if err != nil {
 				break
 			}

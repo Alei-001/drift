@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -17,6 +18,7 @@ var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Verify repository integrity",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -25,7 +27,7 @@ var checkCmd = &cobra.Command{
 		}
 		defer store.Close()
 
-		snapshots, err := store.ListSnapshots(&storage.ListOptions{})
+		snapshots, err := store.ListSnapshots(ctx, &storage.ListOptions{})
 		if err != nil {
 			return err
 		}
@@ -45,11 +47,11 @@ var checkCmd = &cobra.Command{
 		missing := 0
 
 		for hash := range hashSet {
-			if !store.HasChunk(hash) {
+			if !store.HasChunk(ctx, hash) {
 				missing++
 				continue
 			}
-			chunk, err := store.GetChunk(hash)
+			chunk, err := store.GetChunk(ctx, hash)
 			if err != nil {
 				corrupt++
 				continue

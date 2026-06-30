@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -17,6 +18,7 @@ var saveCmd = &cobra.Command{
 	Use:   "save",
 	Short: "Save a snapshot of current workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 
 		store, cfg, err := porcelain.OpenProject(cwd)
@@ -50,7 +52,7 @@ var saveCmd = &cobra.Command{
 		}
 
 		// Compute added/modified/deleted by comparing with the previous snapshot
-		add, mod, del := computeChanges(store, snapshot)
+		add, mod, del := computeChanges(ctx, store, snapshot)
 
 		sid := snapshot.ShortID()
 		msgLine := snapshot.Message
@@ -60,7 +62,7 @@ var saveCmd = &cobra.Command{
 				Name:   saveTag,
 				Target: snapshot.ID.Hash,
 			}
-			if err := store.SetRef("tags/"+saveTag, ref); err != nil {
+			if err := store.SetRef(ctx, "tags/"+saveTag, ref); err != nil {
 				return err
 			}
 			msgLine += "  [" + saveTag + "]"
@@ -80,7 +82,7 @@ var saveCmd = &cobra.Command{
 	},
 }
 
-func computeChanges(store storage.Storer, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string) {
+func computeChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string) {
 	currFiles := make(map[string]core.FileEntry)
 	for _, f := range snapshot.Files {
 		currFiles[f.Path] = f
@@ -89,7 +91,7 @@ func computeChanges(store storage.Storer, snapshot *core.Snapshot) (added []core
 	// Get previous snapshot files
 	var prevFiles map[string]core.FileEntry
 	if snapshot.PrevID != nil {
-		prevSnap, err := store.GetSnapshot(*snapshot.PrevID)
+		prevSnap, err := store.GetSnapshot(ctx, *snapshot.PrevID)
 		if err == nil {
 			prevFiles = make(map[string]core.FileEntry)
 			for _, f := range prevSnap.Files {

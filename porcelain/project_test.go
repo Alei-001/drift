@@ -3,6 +3,7 @@ package porcelain
 import (
 	"os"
 	"path/filepath"
+	"context"
 	"testing"
 )
 
@@ -63,7 +64,7 @@ func TestOpenProject(t *testing.T) {
 	}
 
 	// Verify HEAD reference exists
-	ref, err := store.GetRef("HEAD")
+	ref, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}

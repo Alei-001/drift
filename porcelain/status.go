@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +20,8 @@ type ChangeSummary struct {
 
 // DetectChanges compares the workspace against the stored index and returns changes.
 func DetectChanges(store storage.Storer, workDir string) (*ChangeSummary, error) {
-	index, err := store.GetIndex()
+	ctx := context.Background()
+	index, err := store.GetIndex(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"context"
 	"testing"
 
 	"github.com/your-org/drift/core"
@@ -12,12 +13,12 @@ import (
 
 func setupSwitchStore() *memory.MemoryStorage {
 	store := memory.NewMemoryStorage()
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
@@ -57,7 +58,7 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 		t.Errorf("expected fromBranch 'main', got '%s'", fromBranch)
 	}
 
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 		t.Error("expected diffCount > 0, got 0")
 	}
 
-	mainRef, err := store.GetRef("heads/main")
+	mainRef, err := store.GetRef(context.Background(), "heads/main")
 	if err != nil {
 		t.Fatalf("GetRef heads/main failed: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 		t.Error("expected main branch to have auto-save snapshot, but it still points to snap1")
 	}
 
-	featureRef, err := store.GetRef("heads/feature")
+	featureRef, err := store.GetRef(context.Background(), "heads/feature")
 	if err != nil {
 		t.Fatalf("GetRef heads/feature failed: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestSwitchBranch_CreateNew(t *testing.T) {
 		t.Errorf("expected fromBranch 'main', got '%s'", fromBranch)
 	}
 
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestSwitchBranch_CreateNew(t *testing.T) {
 		t.Errorf("expected HEAD symref 'heads/experimental', got '%s'", headRef.SymRef)
 	}
 
-	expRef, err := store.GetRef("heads/experimental")
+	expRef, err := store.GetRef(context.Background(), "heads/experimental")
 	if err != nil {
 		t.Fatalf("GetRef heads/experimental failed: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestSwitchBranch_NoChanges(t *testing.T) {
 		t.Errorf("expected fromBranch 'main', got '%s'", fromBranch)
 	}
 
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(context.Background(), "HEAD")
 	if err != nil {
 		t.Fatalf("GetRef HEAD failed: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestSwitchBranch_NoChanges(t *testing.T) {
 		t.Errorf("expected diffCount 0, got %d", diffCount)
 	}
 
-	featureRef, err := store.GetRef("heads/feature")
+	featureRef, err := store.GetRef(context.Background(), "heads/feature")
 	if err != nil {
 		t.Fatalf("GetRef heads/feature failed: %v", err)
 	}

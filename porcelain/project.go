@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 // InitProject initializes a new drift repository at the given path.
 // Creates .drift/ directory structure, default config, HEAD reference, and empty index.
 func InitProject(path string) error {
+	ctx := context.Background()
 	driftPath := filepath.Join(path, ".drift")
 
 	if _, err := os.Stat(driftPath); err == nil {
@@ -26,7 +28,7 @@ func InitProject(path string) error {
 	}
 	defer store.Close()
 
-	if err := store.SetConfig(core.DefaultConfig()); err != nil {
+	if err := store.SetConfig(ctx, core.DefaultConfig()); err != nil {
 		return fmt.Errorf("set config: %w", err)
 	}
 
@@ -36,7 +38,7 @@ func InitProject(path string) error {
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	}
-	if err := store.SetRef("heads/main", mainRef); err != nil {
+	if err := store.SetRef(ctx, "heads/main", mainRef); err != nil {
 		return fmt.Errorf("set main branch: %w", err)
 	}
 
@@ -46,7 +48,7 @@ func InitProject(path string) error {
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
 	}
-	if err := store.SetRef("HEAD", headRef); err != nil {
+	if err := store.SetRef(ctx, "HEAD", headRef); err != nil {
 		return fmt.Errorf("set HEAD: %w", err)
 	}
 
@@ -54,7 +56,7 @@ func InitProject(path string) error {
 		Entries:   []core.IndexEntry{},
 		UpdatedAt: time.Now().Unix(),
 	}
-	if err := store.SetIndex(index); err != nil {
+	if err := store.SetIndex(ctx, index); err != nil {
 		return fmt.Errorf("set index: %w", err)
 	}
 
@@ -87,6 +89,7 @@ desktop.ini
 // OpenProject opens an existing drift repository at the given path.
 // Returns the storage backend, configuration, and any error.
 func OpenProject(path string) (storage.Storer, *core.Config, error) {
+	ctx := context.Background()
 	driftPath := filepath.Join(path, ".drift")
 
 	if _, err := os.Stat(driftPath); err != nil {
@@ -98,7 +101,7 @@ func OpenProject(path string) (storage.Storer, *core.Config, error) {
 		return nil, nil, fmt.Errorf("open storage: %w", err)
 	}
 
-	config, err := store.GetConfig()
+	config, err := store.GetConfig(ctx)
 	if err != nil {
 		store.Close()
 		return nil, nil, fmt.Errorf("get config: %w", err)

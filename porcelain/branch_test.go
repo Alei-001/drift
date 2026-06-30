@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -10,12 +11,12 @@ import (
 
 func setupBranchStore() *memory.MemoryStorage {
 	store := memory.NewMemoryStorage()
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: core.Hash{},
 	})
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/main",
@@ -27,7 +28,7 @@ func TestCreateBranch_FromHead(t *testing.T) {
 	store := setupBranchStore()
 
 	targetHash := core.Hash{0x12, 0xab}
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: targetHash,
@@ -38,7 +39,7 @@ func TestCreateBranch_FromHead(t *testing.T) {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
-	ref, err := store.GetRef("heads/feature")
+	ref, err := store.GetRef(context.Background(), "heads/feature")
 	if err != nil {
 		t.Fatalf("GetRef heads/feature failed: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestDeleteBranch_Success(t *testing.T) {
 		t.Fatalf("DeleteBranch failed: %v", err)
 	}
 
-	if _, err := store.GetRef("heads/feature"); err == nil {
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err == nil {
 		t.Error("expected heads/feature to be deleted, but it still exists")
 	}
 }
@@ -132,7 +133,7 @@ func TestDeleteBranch_NotFound(t *testing.T) {
 func TestDeleteBranch_CurrentBranch(t *testing.T) {
 	store := setupBranchStore()
 	CreateBranch(store, "feature")
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/feature",
@@ -150,7 +151,7 @@ func TestDeleteBranch_CurrentBranch(t *testing.T) {
 func TestDeleteBranch_MainProtected(t *testing.T) {
 	store := setupBranchStore()
 	CreateBranch(store, "other")
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/other",
@@ -185,10 +186,10 @@ func TestRenameBranch_NonCurrent(t *testing.T) {
 		t.Fatalf("RenameBranch failed: %v", err)
 	}
 
-	if _, err := store.GetRef("heads/feature"); err == nil {
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err == nil {
 		t.Error("expected heads/feature to be removed, but it still exists")
 	}
-	newRef, err := store.GetRef("heads/dev")
+	newRef, err := store.GetRef(context.Background(), "heads/dev")
 	if err != nil {
 		t.Fatalf("GetRef heads/dev failed: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestRenameBranch_NonCurrent(t *testing.T) {
 	}
 
 	// HEAD should be unchanged (still points to main).
-	headRef, _ := store.GetRef("HEAD")
+	headRef, _ := store.GetRef(context.Background(), "HEAD")
 	if headRef.SymRef != "heads/main" {
 		t.Errorf("expected HEAD still at 'heads/main', got '%s'", headRef.SymRef)
 	}
@@ -206,7 +207,7 @@ func TestRenameBranch_NonCurrent(t *testing.T) {
 func TestRenameBranch_CurrentBranch_UpdatesHEAD(t *testing.T) {
 	store := setupBranchStore()
 	CreateBranch(store, "feature")
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/feature",
@@ -217,13 +218,13 @@ func TestRenameBranch_CurrentBranch_UpdatesHEAD(t *testing.T) {
 		t.Fatalf("RenameBranch failed: %v", err)
 	}
 
-	if _, err := store.GetRef("heads/feature"); err == nil {
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err == nil {
 		t.Error("expected heads/feature to be removed, but it still exists")
 	}
-	if _, err := store.GetRef("heads/dev"); err != nil {
+	if _, err := store.GetRef(context.Background(), "heads/dev"); err != nil {
 		t.Errorf("expected heads/dev to exist, got error: %v", err)
 	}
-	headRef, _ := store.GetRef("HEAD")
+	headRef, _ := store.GetRef(context.Background(), "HEAD")
 	if headRef.SymRef != "heads/dev" {
 		t.Errorf("expected HEAD SymRef 'heads/dev', got '%s'", headRef.SymRef)
 	}
@@ -243,7 +244,7 @@ func TestRenameBranch_TargetExists(t *testing.T) {
 	}
 
 	// Both original branches should still be intact.
-	if _, err := store.GetRef("heads/feature"); err != nil {
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err != nil {
 		t.Error("heads/feature should still exist after failed rename")
 	}
 }
@@ -263,7 +264,7 @@ func TestRenameBranch_NotFound(t *testing.T) {
 func TestRenameBranch_MainProtected(t *testing.T) {
 	store := setupBranchStore()
 	CreateBranch(store, "other")
-	store.SetRef("HEAD", &core.Reference{
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/other",
@@ -286,7 +287,7 @@ func TestRenameBranch_SameName_NoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rename to same name should be a no-op, got: %v", err)
 	}
-	if _, err := store.GetRef("heads/feature"); err != nil {
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err != nil {
 		t.Error("heads/feature should still exist after same-name rename")
 	}
 }
@@ -320,14 +321,14 @@ func TestRenameBranch_InvalidNewName(t *testing.T) {
 func TestRenameBranch_PreservesTarget(t *testing.T) {
 	store := setupBranchStore()
 	targetHash := core.Hash{0x12, 0xab}
-	store.SetRef("heads/main", &core.Reference{
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
 		Target: targetHash,
 	})
 	CreateBranch(store, "feature")
 	// Point feature at a distinct target.
-	store.SetRef("heads/feature", &core.Reference{
+	store.SetRef(context.Background(), "heads/feature", &core.Reference{
 		Name:   "heads/feature",
 		Type:   core.RefTypeBranch,
 		Target: targetHash,
@@ -336,7 +337,7 @@ func TestRenameBranch_PreservesTarget(t *testing.T) {
 	if err := RenameBranch(store, "feature", "dev"); err != nil {
 		t.Fatalf("RenameBranch failed: %v", err)
 	}
-	devRef, _ := store.GetRef("heads/dev")
+	devRef, _ := store.GetRef(context.Background(), "heads/dev")
 	if devRef.Target != targetHash {
 		t.Errorf("expected target %x preserved, got %x", targetHash, devRef.Target)
 	}

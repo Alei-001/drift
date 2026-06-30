@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"testing"
 
 	"github.com/your-org/drift/core"
@@ -28,15 +29,15 @@ func TestRef_PathTraversal(t *testing.T) {
 	for _, name := range maliciousNames {
 		t.Run(name, func(t *testing.T) {
 			// GetRef should fail.
-			if _, err := fs.GetRef(name); err == nil {
+			if _, err := fs.GetRef(context.Background(), name); err == nil {
 				t.Errorf("GetRef(%q) should fail", name)
 			}
 			// SetRef should fail.
-			if err := fs.SetRef(name, &core.Reference{Name: name, Target: core.Hash{}}); err == nil {
+			if err := fs.SetRef(context.Background(), name, &core.Reference{Name: name, Target: core.Hash{}}); err == nil {
 				t.Errorf("SetRef(%q) should fail", name)
 			}
 			// DeleteRef should fail.
-			if err := fs.DeleteRef(name); err == nil {
+			if err := fs.DeleteRef(context.Background(), name); err == nil {
 				t.Errorf("DeleteRef(%q) should fail", name)
 			}
 		})

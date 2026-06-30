@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -190,11 +191,12 @@ func RunDaemonLoop(store storage.Storer, cwd string, interval int, keep int) {
 // pruneAutoSnapshots deletes old auto-saved snapshots, keeping at most `keep`.
 // It returns the number of snapshots deleted.
 func pruneAutoSnapshots(store storage.Storer, keep int) (int, error) {
+	ctx := context.Background()
 	if keep <= 0 {
 		return 0, nil
 	}
 
-	snapshots, err := store.ListSnapshots(nil)
+	snapshots, err := store.ListSnapshots(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -216,7 +218,7 @@ func pruneAutoSnapshots(store storage.Storer, keep int) (int, error) {
 
 	deleted := 0
 	for i := keep; i < len(autoSnaps); i++ {
-		if err := store.DeleteSnapshot(autoSnaps[i].ID); err != nil {
+		if err := store.DeleteSnapshot(ctx, autoSnaps[i].ID); err != nil {
 			continue
 		}
 		deleted++

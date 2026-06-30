@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -32,7 +33,7 @@ func validateRefName(name string) error {
 // For HEAD, if the file contains a symbolic reference ("ref: heads/main"),
 // the SymRef field is populated and Target is resolved by recursively
 // reading the referenced branch.
-func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
+func (fs *FSStorage) GetRef(ctx context.Context, name string) (*core.Reference, error) {
 	if err := validateRefName(name); err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
 
 	if name == "HEAD" && strings.HasPrefix(content, "ref: ") {
 		symRef := strings.TrimSpace(content[len("ref: "):])
-		target, err := fs.GetRef(symRef)
+		target, err := fs.GetRef(ctx, symRef)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +75,7 @@ func (fs *FSStorage) GetRef(name string) (*core.Reference, error) {
 // SetRef writes a reference to the refs directory.
 // If ref.SymRef is non-empty, a symbolic reference ("ref: <target>") is
 // written instead of a hash.
-func (fs *FSStorage) SetRef(name string, ref *core.Reference) error {
+func (fs *FSStorage) SetRef(ctx context.Context, name string, ref *core.Reference) error {
 	if err := validateRefName(name); err != nil {
 		return err
 	}
@@ -91,7 +92,7 @@ func (fs *FSStorage) SetRef(name string, ref *core.Reference) error {
 }
 
 // ListRefs lists all references matching the given prefix.
-func (fs *FSStorage) ListRefs(prefix string) ([]*core.Reference, error) {
+func (fs *FSStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {
 	refsRoot := filepath.Join(fs.root, RefsDir)
 	var refs []*core.Reference
 	err := filepath.WalkDir(refsRoot, func(path string, d os.DirEntry, err error) error {
@@ -109,7 +110,7 @@ func (fs *FSStorage) ListRefs(prefix string) ([]*core.Reference, error) {
 		if !strings.HasPrefix(rel, prefix) {
 			return nil
 		}
-		ref, err := fs.GetRef(rel)
+		ref, err := fs.GetRef(ctx, rel)
 		if err != nil {
 			return err
 		}
@@ -126,7 +127,7 @@ func (fs *FSStorage) ListRefs(prefix string) ([]*core.Reference, error) {
 }
 
 // DeleteRef removes a reference file.
-func (fs *FSStorage) DeleteRef(name string) error {
+func (fs *FSStorage) DeleteRef(ctx context.Context, name string) error {
 	if err := validateRefName(name); err != nil {
 		return err
 	}

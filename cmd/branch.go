@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -23,6 +24,7 @@ var branchCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -72,7 +74,7 @@ var branchCmd = &cobra.Command{
 			var oldName, newName string
 			if len(args) == 1 {
 				// Rename the current branch.
-				headRef, err := store.GetRef("HEAD")
+				headRef, err := store.GetRef(ctx, "HEAD")
 				if err != nil {
 					return fmt.Errorf("read HEAD: %w", err)
 				}
@@ -141,10 +143,10 @@ var branchCmd = &cobra.Command{
 			statusFailed("Branch", err.Error(), "")
 			return err
 		}
-		headRef, _ := store.GetRef("HEAD")
+		headRef, _ := store.GetRef(ctx, "HEAD")
 		sid := "no commits yet"
 		if !headRef.Target.IsZero() {
-			snap, _ := store.GetSnapshot(core.SnapshotID{Hash: headRef.Target})
+			snap, _ := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
 			if snap != nil {
 				sid = snap.ShortID()
 			} else {

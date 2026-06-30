@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,13 +18,14 @@ import (
 // If filePath is non-empty, only restore that specific file.
 // If noBackup is false, a backup snapshot is created before restoring.
 func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool) (string, error) {
+	ctx := context.Background()
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return "", err
 	}
 	defer ReleaseWorkspaceLock(workDir)
 
 	// Get target snapshot
-	snap, err := store.GetSnapshot(snapshotID)
+	snap, err := store.GetSnapshot(ctx, snapshotID)
 	if err != nil {
 		return "", fmt.Errorf("get snapshot: %w", err)
 	}
@@ -55,7 +57,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		// operation, not a new commit. The backup snapshot (created above)
 		// already advanced the branch ref; removing this block preserves
 		// the linear history so a subsequent save continues from the backup.
-		if err := restoreFilesToWorkspace(store, workDir, snap); err != nil {
+		if err := restoreFilesToWorkspace(ctx, store, workDir, snap); err != nil {
 			return "", err
 		}
 	} else {
@@ -88,7 +90,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 			// Assemble file content from chunks
 			var assembled []byte
 			for _, h := range entry.Chunks {
-				chunk, err := store.GetChunk(h)
+				chunk, err := store.GetChunk(ctx, h)
 				if err != nil {
 					return "", fmt.Errorf("get chunk %s for %s: %w", h.String(), entry.Path, err)
 				}
@@ -120,7 +122,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 		}
 
 		if restoredEntry != nil {
-			existingIndex, err := store.GetIndex()
+			existingIndex, err := store.GetIndex(ctx)
 			if err != nil {
 				existingIndex = &core.Index{}
 			}
@@ -144,7 +146,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 					Chunks:  restoredEntry.Chunks,
 				})
 			}
-			if err := store.SetIndex(existingIndex); err != nil {
+			if err := store.SetIndex(ctx, existingIndex); err != nil {
 				return "", fmt.Errorf("update index: %w", err)
 			}
 		}
@@ -156,7 +158,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 // restoreFilesToWorkspace writes snapshot files to the workspace, removes extra
 // files, and rebuilds the index. It does NOT update HEAD or any branch ref —
 // the caller is responsible for that.
-func restoreFilesToWorkspace(store storage.Storer, workDir string, snap *core.Snapshot) error {
+func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir string, snap *core.Snapshot) error {
 	absWorkDir, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve workDir: %w", err)
@@ -183,7 +185,7 @@ func restoreFilesToWorkspace(store storage.Storer, workDir string, snap *core.Sn
 		// Assemble file content from chunks
 		var assembled []byte
 		for _, h := range entry.Chunks {
-			chunk, err := store.GetChunk(h)
+			chunk, err := store.GetChunk(ctx, h)
 			if err != nil {
 				return fmt.Errorf("get chunk %s for %s: %w", h.String(), entry.Path, err)
 			}
@@ -246,7 +248,7 @@ func restoreFilesToWorkspace(store storage.Storer, workDir string, snap *core.Sn
 			Chunks:  entry.Chunks,
 		})
 	}
-	if err := store.SetIndex(newIndex); err != nil {
+	if err := store.SetIndex(ctx, newIndex); err != nil {
 		return fmt.Errorf("update index: %w", err)
 	}
 

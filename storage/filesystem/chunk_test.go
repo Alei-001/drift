@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,12 +37,12 @@ func TestGetChunk_IntegrityCheck(t *testing.T) {
 	}
 
 	// Store the chunk.
-	if err := fs.PutChunk(chunk); err != nil {
+	if err := fs.PutChunk(context.Background(), chunk); err != nil {
 		t.Fatalf("PutChunk: %v", err)
 	}
 
 	// Retrieve the chunk — should succeed and match the original data.
-	retrieved, err := fs.GetChunk(hash)
+	retrieved, err := fs.GetChunk(context.Background(), hash)
 	if err != nil {
 		t.Fatalf("GetChunk: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestGetChunk_IntegrityCheck(t *testing.T) {
 	}
 
 	// GetChunk must now report an error from the integrity check.
-	_, err = fs.GetChunk(hash)
+	_, err = fs.GetChunk(context.Background(), hash)
 	if err == nil {
 		t.Fatal("expected error for corrupted chunk, got nil")
 	}
@@ -86,7 +87,7 @@ func TestDeleteChunk_Idempotent(t *testing.T) {
 	copy(hash[:], sum[:])
 
 	// Deleting a chunk that was never stored must not error.
-	if err := fs.DeleteChunk(hash); err != nil {
+	if err := fs.DeleteChunk(context.Background(), hash); err != nil {
 		t.Fatalf("DeleteChunk on non-existent chunk: expected nil, got %v", err)
 	}
 }
@@ -113,12 +114,12 @@ func TestDeleteChunk_ClearsCache(t *testing.T) {
 		Data: data,
 	}
 
-	if err := fs.PutChunk(chunk); err != nil {
+	if err := fs.PutChunk(context.Background(), chunk); err != nil {
 		t.Fatalf("PutChunk: %v", err)
 	}
 
 	// Read the chunk back so it enters the cache.
-	retrieved, err := fs.GetChunk(hash)
+	retrieved, err := fs.GetChunk(context.Background(), hash)
 	if err != nil {
 		t.Fatalf("GetChunk before delete: %v", err)
 	}
@@ -127,13 +128,13 @@ func TestDeleteChunk_ClearsCache(t *testing.T) {
 	}
 
 	// Delete the chunk — this must clear both the file and the cache.
-	if err := fs.DeleteChunk(hash); err != nil {
+	if err := fs.DeleteChunk(context.Background(), hash); err != nil {
 		t.Fatalf("DeleteChunk: %v", err)
 	}
 
 	// GetChunk must now fail: the file is gone and the cache entry was
 	// removed.
-	if _, err := fs.GetChunk(hash); err == nil {
+	if _, err := fs.GetChunk(context.Background(), hash); err == nil {
 		t.Fatal("expected error after DeleteChunk (cache should be cleared), got nil")
 	}
 }
@@ -150,7 +151,7 @@ func TestListChunks(t *testing.T) {
 	defer fs.Close()
 
 	// Empty storage: expect an empty slice with no error.
-	hashes, err := fs.ListChunks()
+	hashes, err := fs.ListChunks(context.Background())
 	if err != nil {
 		t.Fatalf("ListChunks on empty storage: %v", err)
 	}
@@ -170,14 +171,14 @@ func TestListChunks(t *testing.T) {
 	chunk1 := &core.Chunk{Hash: hash1, Size: uint32(len(data1)), Data: data1}
 	chunk2 := &core.Chunk{Hash: hash2, Size: uint32(len(data2)), Data: data2}
 
-	if err := fs.PutChunk(chunk1); err != nil {
+	if err := fs.PutChunk(context.Background(), chunk1); err != nil {
 		t.Fatalf("PutChunk 1: %v", err)
 	}
-	if err := fs.PutChunk(chunk2); err != nil {
+	if err := fs.PutChunk(context.Background(), chunk2); err != nil {
 		t.Fatalf("PutChunk 2: %v", err)
 	}
 
-	hashes, err = fs.ListChunks()
+	hashes, err = fs.ListChunks(context.Background())
 	if err != nil {
 		t.Fatalf("ListChunks: %v", err)
 	}
@@ -210,7 +211,7 @@ func TestListChunks_SkipsInvalidFiles(t *testing.T) {
 	var hash core.Hash
 	sum := blake3.Sum256(data)
 	copy(hash[:], sum[:])
-	if err := fs.PutChunk(&core.Chunk{Hash: hash, Size: uint32(len(data)), Data: data}); err != nil {
+	if err := fs.PutChunk(context.Background(), &core.Chunk{Hash: hash, Size: uint32(len(data)), Data: data}); err != nil {
 		t.Fatalf("PutChunk: %v", err)
 	}
 
@@ -227,7 +228,7 @@ func TestListChunks_SkipsInvalidFiles(t *testing.T) {
 		t.Fatalf("write junk: %v", err)
 	}
 
-	hashes, err := fs.ListChunks()
+	hashes, err := fs.ListChunks(context.Background())
 	if err != nil {
 		t.Fatalf("ListChunks should skip invalid files, got error: %v", err)
 	}

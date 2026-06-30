@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ var diffCmd = &cobra.Command{
 	Use:   "diff [<id1>] [<id2>] [<file>]",
 	Short: "Show changes between snapshots or workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -27,7 +29,7 @@ var diffCmd = &cobra.Command{
 		defer store.Close()
 
 		if len(args) == 0 {
-			snap := resolveHeadSnapshot(store)
+			snap := resolveHeadSnapshot(ctx, store)
 			if snap == nil {
 				statusFailed("Diff", "no snapshot to compare against.", "use 'drift save -m \"message\"' to create one first.")
 				return fmt.Errorf("no HEAD snapshot")
@@ -35,38 +37,38 @@ var diffCmd = &cobra.Command{
 			diffWorkspaceVsSnapshot(store, cwd, snap)
 		} else if len(args) == 1 {
 			// Try as snapshot ID first
-			snap1 := resolveSnapshot(store, args[0])
+			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 != nil {
 				diffWorkspaceVsSnapshot(store, cwd, snap1)
 				return nil
 			}
 			// Fall back: treat as file path, compare with HEAD
-			headSnap := resolveHeadSnapshot(store)
+			headSnap := resolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
 				statusFailed("Diff", "no snapshot to compare against.", "use 'drift save -m \"message\"' to create one first.")
 				return fmt.Errorf("no HEAD snapshot")
 			}
-			return diffWorkspaceFileVsSnapshot(store, cwd, headSnap, args[0])
+			return diffWorkspaceFileVsSnapshot(ctx, store, cwd, headSnap, args[0])
 		} else if len(args) == 3 {
-			snap1 := resolveSnapshot(store, args[0])
+			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
 				return fmt.Errorf("snapshot not found: %s", args[0])
 			}
-			snap2 := resolveSnapshot(store, args[1])
+			snap2 := resolveSnapshot(ctx, store, args[1])
 			if snap2 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[1]), "use 'drift log' to list available snapshots.")
 				return fmt.Errorf("snapshot not found: %s", args[1])
 			}
 			filePath := args[2]
-			diffFileInSnapshots(store, cwd, snap1, snap2, filePath)
+			diffFileInSnapshots(ctx, store, cwd, snap1, snap2, filePath)
 		} else {
-			snap1 := resolveSnapshot(store, args[0])
+			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
 				return fmt.Errorf("snapshot not found: %s", args[0])
 			}
-			snap2 := resolveSnapshot(store, args[1])
+			snap2 := resolveSnapshot(ctx, store, args[1])
 			if snap2 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[1]), "use 'drift log' to list available snapshots.")
 				return fmt.Errorf("snapshot not found: %s", args[1])
@@ -78,15 +80,15 @@ var diffCmd = &cobra.Command{
 }
 
 // resolveHeadSnapshot returns the HEAD snapshot, or nil if none exists.
-func resolveHeadSnapshot(store storage.Storer) *core.Snapshot {
-	headRef, err := store.GetRef("HEAD")
+func resolveHeadSnapshot(ctx context.Context, store storage.Storer) *core.Snapshot {
+	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return nil
 	}
 	if headRef.Target.IsZero() {
 		return nil
 	}
-	snap, err := store.GetSnapshot(core.SnapshotID{Hash: headRef.Target})
+	snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
 	if err != nil {
 		return nil
 	}
@@ -148,7 +150,7 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 }
 
 // diffWorkspaceFileVsSnapshot shows content-level diff for a single file: workspace vs snapshot.
-func diffWorkspaceFileVsSnapshot(store storage.Storer, workDir string, snapshot *core.Snapshot, filePath string) error {
+func diffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshot *core.Snapshot, filePath string) error {
 	// Normalize path and resolve absolute paths
 	filePath, err := pathutil.RelToWorkDir(workDir, filePath)
 	if err != nil {
@@ -198,7 +200,7 @@ func diffWorkspaceFileVsSnapshot(store storage.Storer, workDir string, snapshot 
 		workHash := blake3.Sum256(workData)
 		snapHasher := blake3.New()
 		for _, h := range snapEntry.Chunks {
-			chunk, err := store.GetChunk(h)
+			chunk, err := store.GetChunk(ctx, h)
 			if err != nil {
 				return fmt.Errorf("read chunk %s for %s: %w", h.String(), filePath, err)
 			}
@@ -216,7 +218,7 @@ func diffWorkspaceFileVsSnapshot(store storage.Storer, workDir string, snapshot 
 assemble:
 	// Assemble snapshot data for diff
 	for _, h := range snapEntry.Chunks {
-		chunk, err := store.GetChunk(h)
+		chunk, err := store.GetChunk(ctx, h)
 		if err != nil {
 			return fmt.Errorf("read chunk %s for %s: %w", h.String(), filePath, err)
 		}
@@ -287,7 +289,7 @@ func diffSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot) {
 	fmt.Printf("\n  %d files: +%d ~%d -%d\n", total, len(added), len(modified), len(deleted))
 }
 
-func diffFileInSnapshots(store storage.Storer, workDir string, snap1, snap2 *core.Snapshot, filePath string) {
+func diffFileInSnapshots(ctx context.Context, store storage.Storer, workDir string, snap1, snap2 *core.Snapshot, filePath string) {
 	filePath, err := pathutil.RelToWorkDir(workDir, filePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: cannot resolve path: %v\n", err)
@@ -325,7 +327,7 @@ func diffFileInSnapshots(store storage.Storer, workDir string, snap1, snap2 *cor
 	if entry1.Size != entry2.Size || !chunkHashesEqual(entry1.Chunks, entry2.Chunks) {
 		var data1, data2 []byte
 		for _, h := range entry1.Chunks {
-			chunk, err := store.GetChunk(h)
+			chunk, err := store.GetChunk(ctx, h)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  warning: cannot read chunk %s: %v\n", h.String(), err)
 				continue
@@ -333,7 +335,7 @@ func diffFileInSnapshots(store storage.Storer, workDir string, snap1, snap2 *cor
 			data1 = append(data1, chunk.Data...)
 		}
 		for _, h := range entry2.Chunks {
-			chunk, err := store.GetChunk(h)
+			chunk, err := store.GetChunk(ctx, h)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "  warning: cannot read chunk %s: %v\n", h.String(), err)
 				continue

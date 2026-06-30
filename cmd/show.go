@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,6 +24,7 @@ var showCmd = &cobra.Command{
 	Short: "Show file content from a snapshot",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -32,7 +34,7 @@ var showCmd = &cobra.Command{
 
 		var idStr, filePath string
 		if len(args) == 1 {
-			headSnap := resolveHeadSnapshot(store)
+			headSnap := resolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
 				statusFailed("Show", "no snapshot to show from.", "use 'drift save -m \"message\"' to create one first.")
 				return fmt.Errorf("no HEAD snapshot")
@@ -44,7 +46,7 @@ var showCmd = &cobra.Command{
 			filePath = args[1]
 		}
 
-		snapshot := resolveSnapshot(store, idStr)
+		snapshot := resolveSnapshot(ctx, store, idStr)
 		if snapshot == nil {
 			statusFailed("Show", fmt.Sprintf("snapshot not found: %s.", idStr), "use 'drift log' to list available snapshots.")
 			return fmt.Errorf("snapshot not found: %s", idStr)
@@ -71,7 +73,7 @@ var showCmd = &cobra.Command{
 
 		var data []byte
 		for _, hash := range targetEntry.Chunks {
-			chunk, err := store.GetChunk(hash)
+			chunk, err := store.GetChunk(ctx, hash)
 			if err != nil {
 				return fmt.Errorf("missing chunk %s: %w", hash.String(), err)
 			}
@@ -166,15 +168,15 @@ func init() {
 	rootCmd.AddCommand(showCmd)
 }
 
-func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
+func resolveSnapshot(ctx context.Context, store storage.Storer, id string) *core.Snapshot {
 	// @tag:<name> — resolve via tags/<name> reference
 	if strings.HasPrefix(id, "@tag:") {
 		tagName := id[5:]
-		tagRef, err := store.GetRef("tags/" + tagName)
+		tagRef, err := store.GetRef(ctx, "tags/"+tagName)
 		if err != nil {
 			return nil
 		}
-		snap, err := store.GetSnapshot(core.SnapshotID{Hash: tagRef.Target})
+		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: tagRef.Target})
 		if err != nil {
 			return nil
 		}
@@ -182,7 +184,7 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 	}
 
 	// Branch name resolution: "main" or the current branch name
-	headRef, headErr := store.GetRef("HEAD")
+	headRef, headErr := store.GetRef(ctx, "HEAD")
 	if headErr == nil && headRef.SymRef != "" {
 		branchName := strings.TrimPrefix(headRef.SymRef, "heads/")
 		if id == branchName || id == "main" {
@@ -190,9 +192,9 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 			if id != branchName {
 				refName = "heads/main"
 			}
-			branchRef, err := store.GetRef(refName)
+			branchRef, err := store.GetRef(ctx, refName)
 			if err == nil && !branchRef.Target.IsZero() {
-				snap, err := store.GetSnapshot(core.SnapshotID{Hash: branchRef.Target})
+				snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: branchRef.Target})
 				if err == nil {
 					return snap
 				}
@@ -201,11 +203,11 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 	}
 
 	if id == "HEAD" {
-		headRef, err := store.GetRef("HEAD")
+		headRef, err := store.GetRef(ctx, "HEAD")
 		if err != nil {
 			return nil
 		}
-		snap, err := store.GetSnapshot(core.SnapshotID{Hash: headRef.Target})
+		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
 		if err != nil {
 			return nil
 		}
@@ -222,7 +224,7 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 			}
 			hash[i] = b
 		}
-		snap, err := store.GetSnapshot(core.SnapshotID{Hash: hash})
+		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: hash})
 		if err != nil {
 			return nil
 		}
@@ -230,7 +232,7 @@ func resolveSnapshot(store storage.Storer, id string) *core.Snapshot {
 	}
 
 	// Short hash prefix (or tag name)
-	snapshots, err := store.ListSnapshots(&storage.ListOptions{})
+	snapshots, err := store.ListSnapshots(ctx, &storage.ListOptions{})
 	if err != nil {
 		return nil
 	}

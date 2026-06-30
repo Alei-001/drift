@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 // CreateBranch creates a new branch pointing at the current HEAD snapshot.
 func CreateBranch(store storage.Storer, name string) error {
+	ctx := context.Background()
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
@@ -20,16 +22,16 @@ func CreateBranch(store storage.Storer, name string) error {
 		return fmt.Errorf("invalid branch name: %q contains path separator", name)
 	}
 
-	if ref, err := store.GetRef("heads/" + name); err == nil && ref != nil {
+	if ref, err := store.GetRef(ctx, "heads/"+name); err == nil && ref != nil {
 		return fmt.Errorf("branch '%s' already exists", name)
 	}
 
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return fmt.Errorf("read HEAD: %w", err)
 	}
 
-	return store.SetRef("heads/"+name, &core.Reference{
+	return store.SetRef(ctx, "heads/"+name, &core.Reference{
 		Type:   core.RefTypeBranch,
 		Name:   "heads/" + name,
 		Target: headRef.Target,
@@ -40,13 +42,14 @@ func CreateBranch(store storage.Storer, name string) error {
 // branch (without the "heads/" prefix). If HEAD is not a symbolic reference
 // the current branch name is empty.
 func ListBranches(store storage.Storer) ([]*core.Reference, string, error) {
-	refs, err := store.ListRefs("heads/")
+	ctx := context.Background()
+	refs, err := store.ListRefs(ctx, "heads/")
 	if err != nil {
 		return nil, "", err
 	}
 
 	current := ""
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return nil, "", fmt.Errorf("read HEAD: %w", err)
 	}
@@ -62,12 +65,13 @@ func ListBranches(store storage.Storer) ([]*core.Reference, string, error) {
 // Returns autosave snapshot short ID (empty if nothing to save), the source branch name,
 // and the number of files that differ between the source and target branch snapshots.
 func SwitchBranch(store storage.Storer, workDir string, name string, create bool, author string) (string, string, int, error) {
+	ctx := context.Background()
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return "", "", 0, err
 	}
 	defer ReleaseWorkspaceLock(workDir)
 
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return "", "", 0, fmt.Errorf("read HEAD: %w", err)
 	}
@@ -81,7 +85,7 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 			return "", "", 0, err
 		}
 	} else {
-		if _, err := store.GetRef("heads/" + name); err != nil {
+		if _, err := store.GetRef(ctx, "heads/"+name); err != nil {
 			return "", "", 0, fmt.Errorf("branch '%s' not found", name)
 		}
 	}
@@ -97,7 +101,7 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 	}
 
 	// Read target branch ref (before any modification).
-	targetRef, err := store.GetRef("heads/" + name)
+	targetRef, err := store.GetRef(ctx, "heads/"+name)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("read target branch: %w", err)
 	}
@@ -114,13 +118,13 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 		if autosaveSnap != nil {
 			sourceTarget = autosaveSnap.ID.Hash
 		} else if fromBranch != "" {
-			if fromRef, refErr := store.GetRef("heads/" + fromBranch); refErr == nil && fromRef != nil {
+			if fromRef, refErr := store.GetRef(ctx, "heads/"+fromBranch); refErr == nil && fromRef != nil {
 				sourceTarget = fromRef.Target
 			}
 		}
 		if !sourceTarget.IsZero() {
 			targetRef.Target = sourceTarget
-			if err := store.SetRef("heads/"+name, targetRef); err != nil {
+			if err := store.SetRef(ctx, "heads/"+name, targetRef); err != nil {
 				return "", "", 0, fmt.Errorf("init target branch: %w", err)
 			}
 		}
@@ -131,7 +135,7 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 		Type:   core.RefTypeHead,
 		SymRef: "heads/" + name,
 	}
-	if err := store.SetRef("HEAD", newHeadRef); err != nil {
+	if err := store.SetRef(ctx, "HEAD", newHeadRef); err != nil {
 		return "", "", 0, fmt.Errorf("update HEAD: %w", err)
 	}
 
@@ -139,24 +143,24 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 	// (workspace already matches the inherited snapshot via auto-save, so
 	// restoring would be redundant).
 	if !targetWasEmpty && !targetRef.Target.IsZero() {
-		targetSnap, err := store.GetSnapshot(core.SnapshotID{Hash: targetRef.Target})
+		targetSnap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: targetRef.Target})
 		if err != nil {
 			return "", "", 0, fmt.Errorf("get target snapshot: %w", err)
 		}
-		if err := restoreFilesToWorkspace(store, workDir, targetSnap); err != nil {
+		if err := restoreFilesToWorkspace(ctx, store, workDir, targetSnap); err != nil {
 			return "", "", 0, fmt.Errorf("restore workspace: %w", err)
 		}
 	}
 
 	var fromSnap, toSnap *core.Snapshot
 	if fromBranch != "" {
-		fromRef, refErr := store.GetRef("heads/" + fromBranch)
+		fromRef, refErr := store.GetRef(ctx, "heads/"+fromBranch)
 		if refErr == nil && !fromRef.Target.IsZero() {
-			fromSnap, _ = store.GetSnapshot(core.SnapshotID{Hash: fromRef.Target})
+			fromSnap, _ = store.GetSnapshot(ctx, core.SnapshotID{Hash: fromRef.Target})
 		}
 	}
 	if !targetRef.Target.IsZero() {
-		toSnap, _ = store.GetSnapshot(core.SnapshotID{Hash: targetRef.Target})
+		toSnap, _ = store.GetSnapshot(ctx, core.SnapshotID{Hash: targetRef.Target})
 	}
 	diffCount := countSnapshotDiff(fromSnap, toSnap)
 
@@ -202,6 +206,7 @@ func countSnapshotDiff(from, to *core.Snapshot) int {
 // Only the reference is removed; snapshots remain in storage and can be
 // reclaimed later by a future prune/GC command.
 func DeleteBranch(store storage.Storer, name string) error {
+	ctx := context.Background()
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
@@ -209,11 +214,11 @@ func DeleteBranch(store storage.Storer, name string) error {
 		return fmt.Errorf("cannot delete 'main'")
 	}
 
-	if _, err := store.GetRef("heads/" + name); err != nil {
+	if _, err := store.GetRef(ctx, "heads/"+name); err != nil {
 		return fmt.Errorf("branch '%s' not found", name)
 	}
 
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return fmt.Errorf("read HEAD: %w", err)
 	}
@@ -221,7 +226,7 @@ func DeleteBranch(store storage.Storer, name string) error {
 		return fmt.Errorf("cannot delete the current branch '%s'", name)
 	}
 
-	return store.DeleteRef("heads/" + name)
+	return store.DeleteRef(ctx, "heads/"+name)
 }
 
 // RenameBranch renames a branch from oldName to newName. It refuses to rename:
@@ -236,6 +241,7 @@ func DeleteBranch(store storage.Storer, name string) error {
 // The operation is ordered as SetRef(new) then DeleteRef(old) so that a crash
 // leaves a duplicate rather than a missing branch, which is safer to recover.
 func RenameBranch(store storage.Storer, oldName, newName string) error {
+	ctx := context.Background()
 	if oldName == "" {
 		return fmt.Errorf("old branch name is empty")
 	}
@@ -249,7 +255,7 @@ func RenameBranch(store storage.Storer, oldName, newName string) error {
 	// Verify the source branch exists before any other check (including the
 	// same-name no-op), so that a typo'd branch name is always reported rather
 	// than silently treated as a successful no-op.
-	oldRef, err := store.GetRef("heads/" + oldName)
+	oldRef, err := store.GetRef(ctx, "heads/"+oldName)
 	if err != nil {
 		return fmt.Errorf("branch '%s' not found", oldName)
 	}
@@ -266,7 +272,7 @@ func RenameBranch(store storage.Storer, oldName, newName string) error {
 		return fmt.Errorf("invalid branch name: %q contains path separator", newName)
 	}
 
-	if _, err := store.GetRef("heads/" + newName); err == nil {
+	if _, err := store.GetRef(ctx, "heads/"+newName); err == nil {
 		return fmt.Errorf("branch '%s' already exists", newName)
 	}
 
@@ -278,24 +284,24 @@ func RenameBranch(store storage.Storer, oldName, newName string) error {
 		Name:   "heads/" + newName,
 		Target: oldRef.Target,
 	}
-	if err := store.SetRef("heads/"+newName, newRef); err != nil {
+	if err := store.SetRef(ctx, "heads/"+newName, newRef); err != nil {
 		return fmt.Errorf("create renamed branch: %w", err)
 	}
 
 	// Update HEAD if renaming the current branch.
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return fmt.Errorf("read HEAD: %w", err)
 	}
 	if headRef.SymRef == "heads/"+oldName {
 		headRef.SymRef = "heads/" + newName
-		if err := store.SetRef("HEAD", headRef); err != nil {
+		if err := store.SetRef(ctx, "HEAD", headRef); err != nil {
 			return fmt.Errorf("update HEAD: %w", err)
 		}
 	}
 
 	// Finally remove the old reference.
-	if err := store.DeleteRef("heads/" + oldName); err != nil {
+	if err := store.DeleteRef(ctx, "heads/"+oldName); err != nil {
 		return fmt.Errorf("remove old branch: %w", err)
 	}
 

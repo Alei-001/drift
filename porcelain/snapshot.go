@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -61,6 +62,7 @@ func computeFileHashFromChunks(chunks []*core.Chunk) core.Hash {
 // If message is empty, the caller should open an editor to get one.
 // tags are optional labels attached to the snapshot (e.g. --tag "v1").
 func CreateSnapshot(store storage.Storer, workDir string, message string, author string, tags []string) (*core.Snapshot, error) {
+	ctx := context.Background()
 	if message == "" {
 		return nil, fmt.Errorf("message is required")
 	}
@@ -70,7 +72,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 
 	// Get HEAD reference to find current HEAD hash
 	var headHash core.Hash
-	headRef, err := store.GetRef("HEAD")
+	headRef, err := store.GetRef(ctx, "HEAD")
 	if err == nil {
 		headHash = headRef.Target
 	} else if !os.IsNotExist(err) {
@@ -79,7 +81,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 	}
 
 	// Get current index
-	oldIndex, err := store.GetIndex()
+	oldIndex, err := store.GetIndex(ctx)
 	if err != nil {
 		oldIndex = &core.Index{}
 	}
@@ -170,8 +172,8 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		// stored exactly like any other.
 		var chunkHashes []core.Hash
 		for _, c := range chunks {
-			if !store.HasChunk(c.Hash) {
-				if err := store.PutChunk(c); err != nil {
+			if !store.HasChunk(ctx, c.Hash) {
+				if err := store.PutChunk(ctx, c); err != nil {
 					return nil, fmt.Errorf("store chunk: %w", err)
 				}
 			}
@@ -239,12 +241,12 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 	snap.ID = core.SnapshotID{Hash: core.Hash(hash)}
 
 	// Save snapshot
-	if err := store.PutSnapshot(snap); err != nil {
+	if err := store.PutSnapshot(ctx, snap); err != nil {
 		return nil, fmt.Errorf("save snapshot: %w", err)
 	}
 
 	// Update the current branch ref (HEAD is a symref, e.g. heads/main)
-	headRef, err = store.GetRef("HEAD")
+	headRef, err = store.GetRef(ctx, "HEAD")
 	symRef := "heads/main"
 	if err == nil && headRef.SymRef != "" {
 		symRef = headRef.SymRef
@@ -254,7 +256,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		Type:   core.RefTypeBranch,
 		Target: snap.ID.Hash,
 	}
-	if err := store.SetRef(symRef, branchRef); err != nil {
+	if err := store.SetRef(ctx, symRef, branchRef); err != nil {
 		return nil, fmt.Errorf("update branch: %w", err)
 	}
 
@@ -271,7 +273,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			Hash:    entry.Hash,
 		})
 	}
-	if err := store.SetIndex(newIndex); err != nil {
+	if err := store.SetIndex(ctx, newIndex); err != nil {
 		return nil, fmt.Errorf("update index: %w", err)
 	}
 
