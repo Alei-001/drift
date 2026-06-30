@@ -84,8 +84,18 @@ func computeReachability(ctx context.Context, store storage.Storer) (map[core.Ha
 // from any branch or tag reference. When dryRun is true nothing is deleted;
 // the report reflects what would be reclaimed. FreedBytes is computed in
 // both modes (best-effort via GetChunk) and is an estimate when dryRun.
-func CollectGarbage(store storage.Storer, dryRun bool) (GCReport, error) {
-	ctx := context.Background()
+//
+// GC does not touch workspace files, but it must not run concurrently with
+// CreateSnapshot: a save in progress may be about to link a chunk that GC
+// would otherwise delete as unreachable. Acquiring the workspace lock
+// serializes GC against save/switch/restore, which are the only operations
+// that add new chunks or snapshots.
+func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, dryRun bool) (GCReport, error) {
+	if err := AcquireWorkspaceLock(workDir); err != nil {
+		return GCReport{}, fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(workDir)
+
 	var report GCReport
 
 	reachable, allSnapshots, err := computeReachability(ctx, store)
@@ -149,8 +159,7 @@ func CollectGarbage(store storage.Storer, dryRun bool) (GCReport, error) {
 
 // CountUnreachableSnapshots returns the number of snapshots that are not
 // reachable from any branch or tag reference.
-func CountUnreachableSnapshots(store storage.Storer) (int, error) {
-	ctx := context.Background()
+func CountUnreachableSnapshots(ctx context.Context, store storage.Storer) (int, error) {
 	reachable, allSnapshots, err := computeReachability(ctx, store)
 	if err != nil {
 		return 0, err

@@ -12,6 +12,7 @@ message FileEntryProto {
   int64 mod_time = 4;
   repeated bytes chunk_hashes = 5; // each is 32 bytes BLAKE3 hash
   optional string mime_type = 6;
+  bytes file_hash = 7; // 32 bytes BLAKE3 hash of the file
 }
 
 // SnapshotProto is the protobuf representation of a snapshot.

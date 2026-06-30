@@ -1,10 +1,10 @@
 package porcelain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
-	"context"
 	"testing"
 	"time"
 
@@ -238,7 +238,7 @@ func TestComputeFileHash_ConsistencyWithCreateSnapshot(t *testing.T) {
 			}
 
 			// CreateSnapshot stores the file hash in the snapshot entry.
-			snap, err := CreateSnapshot(store, dir, "test "+tc.name, "test", nil)
+			snap, err := CreateSnapshot(context.Background(), store, dir, "test "+tc.name, "test", nil)
 			if err != nil {
 				t.Fatalf("CreateSnapshot failed: %v", err)
 			}

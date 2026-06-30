@@ -3,10 +3,12 @@ package filesystem
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/your-org/drift/core"
+	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/util/fsutil"
 )
 
@@ -22,7 +24,7 @@ func (fs *FSStorage) GetConfig(ctx context.Context) (*core.Config, error) {
 	}
 	cfg := &core.Config{}
 	if err := json.Unmarshal(data, cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshal config: %w", storage.ErrCorrupted)
 	}
 	if cfg.Core.ChunkMinSize <= 0 {
 		cfg.Core.ChunkMinSize = 131072

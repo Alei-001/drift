@@ -2,13 +2,14 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
-	"github.com/spf13/cobra"
 )
 
 var saveMessage string
@@ -30,7 +31,7 @@ var saveCmd = &cobra.Command{
 		message := saveMessage
 		if message == "" {
 			statusFailed("Save", "-m <message> is required.", "use 'drift save -m \"your message\"' to describe this snapshot.")
-			return fmt.Errorf("message required")
+			return nil
 		}
 
 		author := cfg.User.Name
@@ -42,11 +43,11 @@ var saveCmd = &cobra.Command{
 		if saveTag != "" {
 			tags = []string{saveTag}
 		}
-		snapshot, err := porcelain.CreateSnapshot(store, cwd, message, author, tags)
+		snapshot, err := porcelain.CreateSnapshot(ctx, store, cwd, message, author, tags)
 		if err != nil {
-			if err.Error() == "nothing to save" {
+			if errors.Is(err, porcelain.ErrNothingToSave) {
 				statusFailed("Save", "nothing to save.", "modify some files first to create a meaningful checkpoint.")
-				return fmt.Errorf("nothing to save")
+				return nil
 			}
 			return err
 		}
@@ -57,13 +58,9 @@ var saveCmd = &cobra.Command{
 		sid := snapshot.ShortID()
 		msgLine := snapshot.Message
 		if saveTag != "" {
-			ref := &core.Reference{
-				Type:   core.RefTypeTag,
-				Name:   saveTag,
-				Target: snapshot.ID.Hash,
-			}
-			if err := store.SetRef(ctx, "tags/"+saveTag, ref); err != nil {
-				return err
+			if err := porcelain.SaveTag(ctx, store, saveTag, snapshot.ID.Hash); err != nil {
+				statusFailed("Save", err.Error(), "")
+				return nil
 			}
 			msgLine += "  [" + saveTag + "]"
 		}

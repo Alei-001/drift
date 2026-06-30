@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/util/fsutil"
 )
 
@@ -19,6 +20,12 @@ var ignoreCmd = &cobra.Command{
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, _ := os.Getwd()
+		store, _, err := porcelain.OpenProject(cwd)
+		if err != nil {
+			statusFailed("Ignore", ".drift/ directory not found.", "run 'drift init' first.")
+			return nil
+		}
+		defer store.Close()
 		ignorePath := filepath.Join(cwd, ".driftignore")
 
 		if ignoreList {
@@ -36,7 +43,7 @@ var ignoreCmd = &cobra.Command{
 		if ignoreRemove != "" {
 			if err := removeIgnoreRule(ignorePath, ignoreRemove); err != nil {
 				statusFailed("Ignore", fmt.Sprintf("pattern '%s' not found.", ignoreRemove), "use 'drift ignore --list' to see current rules.")
-				return err
+				return nil
 			}
 			statusOK("Ignore updated")
 			fmt.Printf("- %s\n", ignoreRemove)

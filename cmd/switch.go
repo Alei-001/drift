@@ -1,9 +1,10 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/porcelain"
@@ -16,6 +17,7 @@ var switchCmd = &cobra.Command{
 	Short: "Switch to a branch",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, cfg, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -25,18 +27,18 @@ var switchCmd = &cobra.Command{
 
 		name := args[0]
 		author := cfg.User.Name
-		autosaveID, fromBranch, diffCount, err := porcelain.SwitchBranch(store, cwd, name, switchCreate, author)
+		autosaveID, fromBranch, diffCount, err := porcelain.SwitchBranch(ctx, store, cwd, name, switchCreate, author)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, porcelain.ErrBranchNotFound) {
 				statusFailed("Switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch' to list existing branches.")
-				return err
+				return nil
 			}
-			if strings.Contains(err.Error(), "already exists") {
+			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				statusFailed("Switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
-				return err
+				return nil
 			}
 			statusFailed("Switch", err.Error(), "")
-			return err
+			return nil
 		}
 
 		statusOK("Switched to '%s'", name)

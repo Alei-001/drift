@@ -1,10 +1,10 @@
 package porcelain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
-	"context"
 	"testing"
 
 	"github.com/your-org/drift/core"
@@ -33,12 +33,12 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	snap1, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
-	if err := CreateBranch(store, "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
@@ -46,7 +46,7 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 		t.Fatalf("modify file: %v", err)
 	}
 
-	autosaveID, fromBranch, diffCount, err := SwitchBranch(store, dir, "feature", false, "test")
+	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "feature", false, "test")
 	if err != nil {
 		t.Fatalf("SwitchBranch failed: %v", err)
 	}
@@ -102,12 +102,12 @@ func TestSwitchBranch_CreateNew(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	snap1, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
-	autosaveID, fromBranch, diffCount, err := SwitchBranch(store, dir, "experimental", true, "test")
+	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "experimental", true, "test")
 	if err != nil {
 		t.Fatalf("SwitchBranch failed: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestSwitchBranch_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	store := setupSwitchStore()
 
-	_, _, _, err := SwitchBranch(store, dir, "nonexistent", false, "test")
+	_, _, _, err := SwitchBranch(context.Background(), store, dir, "nonexistent", false, "test")
 	if err == nil {
 		t.Fatal("expected error for non-existent branch, got nil")
 	}
@@ -168,16 +168,16 @@ func TestSwitchBranch_NoChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	snap1, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
-	if err := CreateBranch(store, "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
-	autosaveID, fromBranch, diffCount, err := SwitchBranch(store, dir, "feature", false, "test")
+	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "feature", false, "test")
 	if err != nil {
 		t.Fatalf("SwitchBranch failed: %v", err)
 	}

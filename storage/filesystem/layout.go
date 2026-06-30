@@ -9,7 +9,11 @@ const (
 	PreviewsDir  = "previews"
 	HeadsDir     = "heads"
 	TagsDir      = "tags"
+	LogsDir      = "logs"
 	IndexFile    = "index"
 	ConfigFile   = "config"
-	HeadFile     = "HEAD"
+	// StorageLockFile is the process-level lock file that serializes
+	// mutating operations across drift processes. It is created with
+	// O_CREATE|O_EXCL and holds the PID of the lock holder.
+	StorageLockFile = "storage.lock"
 )

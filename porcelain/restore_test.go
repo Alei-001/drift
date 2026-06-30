@@ -1,9 +1,9 @@
 package porcelain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
-	"context"
 	"testing"
 )
 
@@ -25,7 +25,7 @@ func TestRestore_FullRestoreDeletesExtraFiles(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	snap1, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestRestore_FullRestoreDeletesExtraFiles(t *testing.T) {
 	}
 
 	// Full restore to first snapshot (noBackup=true to skip backup)
-	if _, err := RestoreSnapshot(store, dir, snap1.ID, "", true); err != nil {
+	if _, err := RestoreSnapshot(context.Background(), store, dir, snap1.ID, "", true); err != nil {
 		t.Fatalf("RestoreSnapshot failed: %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 		t.Fatalf("write file3: %v", err)
 	}
 
-	snap1, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
@@ -104,13 +104,13 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 		t.Fatalf("modify file2: %v", err)
 	}
 
-	snap2, err := CreateSnapshot(store, dir, "second commit", "test", nil)
+	snap2, err := CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot failed: %v", err)
 	}
 
 	// Single-file restore file2.txt to first snapshot (noBackup=true)
-	if _, err := RestoreSnapshot(store, dir, snap1.ID, "file2.txt", true); err != nil {
+	if _, err := RestoreSnapshot(context.Background(), store, dir, snap1.ID, "file2.txt", true); err != nil {
 		t.Fatalf("RestoreSnapshot failed: %v", err)
 	}
 

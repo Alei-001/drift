@@ -2,10 +2,12 @@ package filesystem
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/your-org/drift/core"
+	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/util/fsutil"
 	"google.golang.org/protobuf/proto"
 )
@@ -22,7 +24,7 @@ func (fs *FSStorage) GetIndex(ctx context.Context) (*core.Index, error) {
 	}
 	p := &core.IndexProto{}
 	if err := proto.Unmarshal(data, p); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshal index: %w", storage.ErrCorrupted)
 	}
 	return indexFromProto(p), nil
 }

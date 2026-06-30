@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,8 +11,7 @@ import (
 )
 
 // CreateBranch creates a new branch pointing at the current HEAD snapshot.
-func CreateBranch(store storage.Storer, name string) error {
-	ctx := context.Background()
+func CreateBranch(ctx context.Context, store storage.Storer, name string) error {
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
@@ -23,12 +23,22 @@ func CreateBranch(store storage.Storer, name string) error {
 	}
 
 	if ref, err := store.GetRef(ctx, "heads/"+name); err == nil && ref != nil {
-		return fmt.Errorf("branch '%s' already exists", name)
+		return fmt.Errorf("branch '%s' already exists: %w", name, ErrBranchAlreadyExists)
 	}
 
 	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return fmt.Errorf("read HEAD: %w", err)
+	}
+
+	// When HEAD's target is zero (a fresh project with no commits, or a
+	// detached HEAD pointing at nothing), the new branch is created empty.
+	// This is allowed: cmd/branch.go detects the zero target and prints
+	// "no commits yet" instead of a snapshot ID, so the user is informed
+	// rather than misled. Switching to such an empty branch from a detached
+	// HEAD is guarded by SwitchBranch to avoid severing history.
+	if headRef.Target.IsZero() {
+		// new branch will be empty; caller (cmd/branch.go) surfaces this
 	}
 
 	return store.SetRef(ctx, "heads/"+name, &core.Reference{
@@ -41,8 +51,7 @@ func CreateBranch(store storage.Storer, name string) error {
 // ListBranches returns all branch references and the name of the current
 // branch (without the "heads/" prefix). If HEAD is not a symbolic reference
 // the current branch name is empty.
-func ListBranches(store storage.Storer) ([]*core.Reference, string, error) {
-	ctx := context.Background()
+func ListBranches(ctx context.Context, store storage.Storer) ([]*core.Reference, string, error) {
 	refs, err := store.ListRefs(ctx, "heads/")
 	if err != nil {
 		return nil, "", err
@@ -64,8 +73,7 @@ func ListBranches(store storage.Storer) ([]*core.Reference, string, error) {
 // It auto-saves current changes, updates HEAD symref, and restores the target snapshot to workspace.
 // Returns autosave snapshot short ID (empty if nothing to save), the source branch name,
 // and the number of files that differ between the source and target branch snapshots.
-func SwitchBranch(store storage.Storer, workDir string, name string, create bool, author string) (string, string, int, error) {
-	ctx := context.Background()
+func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, name string, create bool, author string) (string, string, int, error) {
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return "", "", 0, err
 	}
@@ -81,19 +89,19 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 	}
 
 	if create {
-		if err := CreateBranch(store, name); err != nil {
+		if err := CreateBranch(ctx, store, name); err != nil {
 			return "", "", 0, err
 		}
 	} else {
 		if _, err := store.GetRef(ctx, "heads/"+name); err != nil {
-			return "", "", 0, fmt.Errorf("branch '%s' not found", name)
+			return "", "", 0, fmt.Errorf("branch '%s' not found: %w", name, ErrBranchNotFound)
 		}
 	}
 
 	autosaveID := ""
-	autosaveSnap, err := CreateSnapshot(store, workDir, "auto - switch backup", author, nil)
+	autosaveSnap, err := createSnapshotInLock(ctx, store, workDir, "auto - switch backup", author, nil)
 	if err != nil {
-		if err.Error() != "nothing to save" {
+		if !errors.Is(err, ErrNothingToSave) {
 			return "", "", 0, fmt.Errorf("auto-save: %w", err)
 		}
 	} else {
@@ -106,6 +114,17 @@ func SwitchBranch(store storage.Storer, workDir string, name string, create bool
 		return "", "", 0, fmt.Errorf("read target branch: %w", err)
 	}
 	targetWasEmpty := targetRef.Target.IsZero()
+
+	// Detached HEAD switching to an empty branch with no changes to save
+	// would leave the target branch pointing at a zero hash: autosave has
+	// nothing to link (autosaveSnap == nil) and there is no source branch
+	// to inherit from (SymRef == ""). The next save on such a branch would
+	// create a root snapshot (PrevID=nil), severing the workspace's history
+	// from any prior snapshots. Refuse the switch so the user can either
+	// save first (which links via autosave) or switch to a non-empty branch.
+	if headRef.SymRef == "" && targetWasEmpty && autosaveSnap == nil {
+		return "", "", 0, fmt.Errorf("cannot switch to empty branch from detached HEAD without changes to save")
+	}
 
 	// If target branch is empty (no commits), inherit the source branch's
 	// current snapshot as the target's initial state. This makes the first
@@ -205,8 +224,7 @@ func countSnapshotDiff(from, to *core.Snapshot) int {
 //
 // Only the reference is removed; snapshots remain in storage and can be
 // reclaimed later by a future prune/GC command.
-func DeleteBranch(store storage.Storer, name string) error {
-	ctx := context.Background()
+func DeleteBranch(ctx context.Context, store storage.Storer, name string) error {
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
@@ -215,7 +233,7 @@ func DeleteBranch(store storage.Storer, name string) error {
 	}
 
 	if _, err := store.GetRef(ctx, "heads/"+name); err != nil {
-		return fmt.Errorf("branch '%s' not found", name)
+		return fmt.Errorf("branch '%s' not found: %w", name, ErrBranchNotFound)
 	}
 
 	headRef, err := store.GetRef(ctx, "HEAD")
@@ -240,8 +258,7 @@ func DeleteBranch(store storage.Storer, name string) error {
 //
 // The operation is ordered as SetRef(new) then DeleteRef(old) so that a crash
 // leaves a duplicate rather than a missing branch, which is safer to recover.
-func RenameBranch(store storage.Storer, oldName, newName string) error {
-	ctx := context.Background()
+func RenameBranch(ctx context.Context, store storage.Storer, oldName, newName string) error {
 	if oldName == "" {
 		return fmt.Errorf("old branch name is empty")
 	}
@@ -257,7 +274,7 @@ func RenameBranch(store storage.Storer, oldName, newName string) error {
 	// than silently treated as a successful no-op.
 	oldRef, err := store.GetRef(ctx, "heads/"+oldName)
 	if err != nil {
-		return fmt.Errorf("branch '%s' not found", oldName)
+		return fmt.Errorf("branch '%s' not found: %w", oldName, ErrBranchNotFound)
 	}
 
 	if oldName == newName {
@@ -273,7 +290,7 @@ func RenameBranch(store storage.Storer, oldName, newName string) error {
 	}
 
 	if _, err := store.GetRef(ctx, "heads/"+newName); err == nil {
-		return fmt.Errorf("branch '%s' already exists", newName)
+		return fmt.Errorf("branch '%s' already exists: %w", newName, ErrBranchAlreadyExists)
 	}
 
 	// Create the new reference first. If this fails, the old one is intact.

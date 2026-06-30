@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -14,6 +15,7 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show working tree status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -21,7 +23,7 @@ var statusCmd = &cobra.Command{
 		}
 		defer store.Close()
 
-		changes, err := porcelain.DetectChanges(store, cwd)
+		changes, err := porcelain.DetectChanges(ctx, store, cwd)
 		if err != nil {
 			return err
 		}

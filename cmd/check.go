@@ -12,8 +12,6 @@ import (
 	"github.com/zeebo/blake3"
 )
 
-var checkFix bool
-
 var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Verify repository integrity",
@@ -23,7 +21,7 @@ var checkCmd = &cobra.Command{
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			statusFailed("Check", ".drift/ directory not found.", "run 'drift init' first.")
-			return err
+			return nil
 		}
 		defer store.Close()
 
@@ -67,7 +65,7 @@ var checkCmd = &cobra.Command{
 			fmt.Printf("%d blocks passed.\n", totalBlocks)
 
 			// 追加不可达快照提示
-			unreachable, err := porcelain.CountUnreachableSnapshots(store)
+			unreachable, err := porcelain.CountUnreachableSnapshots(ctx, store)
 			if err == nil && unreachable > 0 {
 				fmt.Printf("  hint: %d unreachable snapshots detected. use 'drift gc --dry-run' to review.\n", unreachable)
 			}
@@ -80,22 +78,16 @@ var checkCmd = &cobra.Command{
 		fmt.Printf("  corrupt: %d\n", corrupt)
 		fmt.Printf("  missing: %d\n", missing)
 		fmt.Println()
-		if checkFix {
-			fmt.Println("  Attempted repair:")
-			if corrupt > 0 {
-				fmt.Println("  corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <id>'.")
-			}
-			if missing > 0 {
-				fmt.Println("  missing chunks indicate data loss. Restore from a known-good snapshot using 'drift restore <id>'.")
-			}
-		} else {
-			fmt.Println("  hint: corrupt chunks cannot be auto-repaired. Restore from a known-good snapshot.")
+		if corrupt > 0 {
+			fmt.Println("  corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <id>'.")
+		}
+		if missing > 0 {
+			fmt.Println("  missing chunks indicate data loss. Restore from a known-good snapshot using 'drift restore <id>'.")
 		}
 		return nil
 	},
 }
 
 func init() {
-	checkCmd.Flags().BoolVar(&checkFix, "fix", false, "attempt to repair corrupt blocks")
 	rootCmd.AddCommand(checkCmd)
 }

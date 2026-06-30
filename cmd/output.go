@@ -8,6 +8,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"os"
 	"strings"
 
 	"github.com/your-org/drift/core"
@@ -35,10 +36,10 @@ func statusActive(format string, args ...interface{}) {
 
 // statusFailed prints the error block: status line + Error + hint.
 func statusFailed(action string, errMsg string, hint string) {
-	fmt.Printf(">>> %s [failed]\n", action)
-	fmt.Printf("Error: %s\n", errMsg)
+	fmt.Fprintf(os.Stderr, ">>> %s [failed]\n", action)
+	fmt.Fprintf(os.Stderr, "Error: %s\n", errMsg)
 	if hint != "" {
-		fmt.Printf("  hint: %s\n", hint)
+		fmt.Fprintf(os.Stderr, "  hint: %s\n", hint)
 	}
 }
 

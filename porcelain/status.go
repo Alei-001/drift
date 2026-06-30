@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,8 +20,17 @@ type ChangeSummary struct {
 }
 
 // DetectChanges compares the workspace against the stored index and returns changes.
-func DetectChanges(store storage.Storer, workDir string) (*ChangeSummary, error) {
-	ctx := context.Background()
+//
+// It acquires the workspace lock so that the workspace scan and the index it
+// is compared against cannot be mutated mid-comparison by a concurrent save,
+// switch, or restore (which would otherwise produce a tear: half the files
+// from the old state, half from the new).
+func DetectChanges(ctx context.Context, store storage.Storer, workDir string) (*ChangeSummary, error) {
+	if err := AcquireWorkspaceLock(workDir); err != nil {
+		return nil, fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(workDir)
+
 	index, err := store.GetIndex(ctx)
 	if err != nil {
 		return nil, err
@@ -44,7 +54,7 @@ func DetectChanges(store storage.Storer, workDir string) (*ChangeSummary, error)
 
 	for _, entry := range index.Entries {
 		if info, ok := workspaceFiles[entry.Path]; ok {
-			if info.Size() != entry.Size || info.ModTime().Unix() != entry.ModTime {
+			if info.Size() != entry.Size || info.ModTime().UnixNano() != entry.ModTime {
 				summary.Modified = append(summary.Modified, entry.Path)
 			} else {
 				fileHash, hashErr := ComputeFileHash(filepath.Join(workDir, entry.Path))

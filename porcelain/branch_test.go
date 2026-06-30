@@ -34,7 +34,7 @@ func TestCreateBranch_FromHead(t *testing.T) {
 		Target: targetHash,
 	})
 
-	err := CreateBranch(store, "feature")
+	err := CreateBranch(context.Background(), store, "feature")
 	if err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
@@ -51,12 +51,12 @@ func TestCreateBranch_FromHead(t *testing.T) {
 func TestCreateBranch_AlreadyExists(t *testing.T) {
 	store := setupBranchStore()
 
-	err := CreateBranch(store, "feature")
+	err := CreateBranch(context.Background(), store, "feature")
 	if err != nil {
 		t.Fatalf("first CreateBranch failed: %v", err)
 	}
 
-	err = CreateBranch(store, "feature")
+	err = CreateBranch(context.Background(), store, "feature")
 	if err == nil {
 		t.Fatal("expected error for duplicate branch, got nil")
 	}
@@ -65,15 +65,15 @@ func TestCreateBranch_AlreadyExists(t *testing.T) {
 func TestCreateBranch_InvalidName(t *testing.T) {
 	store := setupBranchStore()
 
-	if err := CreateBranch(store, ""); err == nil {
+	if err := CreateBranch(context.Background(), store, ""); err == nil {
 		t.Error("expected error for empty name, got nil")
 	}
 
-	if err := CreateBranch(store, "foo..bar"); err == nil {
+	if err := CreateBranch(context.Background(), store, "foo..bar"); err == nil {
 		t.Error("expected error for name with '..', got nil")
 	}
 
-	if err := CreateBranch(store, "foo/bar"); err == nil {
+	if err := CreateBranch(context.Background(), store, "foo/bar"); err == nil {
 		t.Error("expected error for name with path separator, got nil")
 	}
 }
@@ -81,14 +81,14 @@ func TestCreateBranch_InvalidName(t *testing.T) {
 func TestListBranches(t *testing.T) {
 	store := setupBranchStore()
 
-	if err := CreateBranch(store, "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, "feature"); err != nil {
 		t.Fatalf("CreateBranch feature failed: %v", err)
 	}
-	if err := CreateBranch(store, "dev"); err != nil {
+	if err := CreateBranch(context.Background(), store, "dev"); err != nil {
 		t.Fatalf("CreateBranch dev failed: %v", err)
 	}
 
-	branches, current, err := ListBranches(store)
+	branches, current, err := ListBranches(context.Background(), store)
 	if err != nil {
 		t.Fatalf("ListBranches failed: %v", err)
 	}
@@ -104,11 +104,11 @@ func TestListBranches(t *testing.T) {
 
 func TestDeleteBranch_Success(t *testing.T) {
 	store := setupBranchStore()
-	if err := CreateBranch(store, "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
-	err := DeleteBranch(store, "feature")
+	err := DeleteBranch(context.Background(), store, "feature")
 	if err != nil {
 		t.Fatalf("DeleteBranch failed: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestDeleteBranch_Success(t *testing.T) {
 func TestDeleteBranch_NotFound(t *testing.T) {
 	store := setupBranchStore()
 
-	err := DeleteBranch(store, "nonexistent")
+	err := DeleteBranch(context.Background(), store, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for non-existent branch, got nil")
 	}
@@ -132,14 +132,14 @@ func TestDeleteBranch_NotFound(t *testing.T) {
 
 func TestDeleteBranch_CurrentBranch(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "feature")
+	CreateBranch(context.Background(), store, "feature")
 	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/feature",
 	})
 
-	err := DeleteBranch(store, "feature")
+	err := DeleteBranch(context.Background(), store, "feature")
 	if err == nil {
 		t.Fatal("expected error for deleting current branch, got nil")
 	}
@@ -150,14 +150,14 @@ func TestDeleteBranch_CurrentBranch(t *testing.T) {
 
 func TestDeleteBranch_MainProtected(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "other")
+	CreateBranch(context.Background(), store, "other")
 	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/other",
 	})
 
-	err := DeleteBranch(store, "main")
+	err := DeleteBranch(context.Background(), store, "main")
 	if err == nil {
 		t.Fatal("expected error for deleting main, got nil")
 	}
@@ -169,7 +169,7 @@ func TestDeleteBranch_MainProtected(t *testing.T) {
 func TestDeleteBranch_EmptyName(t *testing.T) {
 	store := setupBranchStore()
 
-	err := DeleteBranch(store, "")
+	err := DeleteBranch(context.Background(), store, "")
 	if err == nil {
 		t.Fatal("expected error for empty name, got nil")
 	}
@@ -177,11 +177,11 @@ func TestDeleteBranch_EmptyName(t *testing.T) {
 
 func TestRenameBranch_NonCurrent(t *testing.T) {
 	store := setupBranchStore()
-	if err := CreateBranch(store, "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
-	err := RenameBranch(store, "feature", "dev")
+	err := RenameBranch(context.Background(), store, "feature", "dev")
 	if err != nil {
 		t.Fatalf("RenameBranch failed: %v", err)
 	}
@@ -206,14 +206,14 @@ func TestRenameBranch_NonCurrent(t *testing.T) {
 
 func TestRenameBranch_CurrentBranch_UpdatesHEAD(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "feature")
+	CreateBranch(context.Background(), store, "feature")
 	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/feature",
 	})
 
-	err := RenameBranch(store, "feature", "dev")
+	err := RenameBranch(context.Background(), store, "feature", "dev")
 	if err != nil {
 		t.Fatalf("RenameBranch failed: %v", err)
 	}
@@ -232,10 +232,10 @@ func TestRenameBranch_CurrentBranch_UpdatesHEAD(t *testing.T) {
 
 func TestRenameBranch_TargetExists(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "feature")
-	CreateBranch(store, "dev")
+	CreateBranch(context.Background(), store, "feature")
+	CreateBranch(context.Background(), store, "dev")
 
-	err := RenameBranch(store, "feature", "dev")
+	err := RenameBranch(context.Background(), store, "feature", "dev")
 	if err == nil {
 		t.Fatal("expected error for existing target name, got nil")
 	}
@@ -252,7 +252,7 @@ func TestRenameBranch_TargetExists(t *testing.T) {
 func TestRenameBranch_NotFound(t *testing.T) {
 	store := setupBranchStore()
 
-	err := RenameBranch(store, "nonexistent", "dev")
+	err := RenameBranch(context.Background(), store, "nonexistent", "dev")
 	if err == nil {
 		t.Fatal("expected error for non-existent source branch, got nil")
 	}
@@ -263,14 +263,14 @@ func TestRenameBranch_NotFound(t *testing.T) {
 
 func TestRenameBranch_MainProtected(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "other")
+	CreateBranch(context.Background(), store, "other")
 	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
 		SymRef: "heads/other",
 	})
 
-	err := RenameBranch(store, "main", "trunk")
+	err := RenameBranch(context.Background(), store, "main", "trunk")
 	if err == nil {
 		t.Fatal("expected error for renaming main, got nil")
 	}
@@ -281,9 +281,9 @@ func TestRenameBranch_MainProtected(t *testing.T) {
 
 func TestRenameBranch_SameName_NoOp(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "feature")
+	CreateBranch(context.Background(), store, "feature")
 
-	err := RenameBranch(store, "feature", "feature")
+	err := RenameBranch(context.Background(), store, "feature", "feature")
 	if err != nil {
 		t.Fatalf("rename to same name should be a no-op, got: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestRenameBranch_SameName_NonExistent(t *testing.T) {
 
 	// Renaming a non-existent branch to itself must NOT silently succeed;
 	// the source branch existence check runs before the same-name no-op.
-	err := RenameBranch(store, "ghost", "ghost")
+	err := RenameBranch(context.Background(), store, "ghost", "ghost")
 	if err == nil {
 		t.Fatal("expected error for non-existent branch, got nil")
 	}
@@ -308,12 +308,12 @@ func TestRenameBranch_SameName_NonExistent(t *testing.T) {
 
 func TestRenameBranch_InvalidNewName(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "feature")
+	CreateBranch(context.Background(), store, "feature")
 
-	if err := RenameBranch(store, "feature", "foo..bar"); err == nil {
+	if err := RenameBranch(context.Background(), store, "feature", "foo..bar"); err == nil {
 		t.Error("expected error for new name with '..', got nil")
 	}
-	if err := RenameBranch(store, "feature", "foo/bar"); err == nil {
+	if err := RenameBranch(context.Background(), store, "feature", "foo/bar"); err == nil {
 		t.Error("expected error for new name with path separator, got nil")
 	}
 }
@@ -326,7 +326,7 @@ func TestRenameBranch_PreservesTarget(t *testing.T) {
 		Type:   core.RefTypeBranch,
 		Target: targetHash,
 	})
-	CreateBranch(store, "feature")
+	CreateBranch(context.Background(), store, "feature")
 	// Point feature at a distinct target.
 	store.SetRef(context.Background(), "heads/feature", &core.Reference{
 		Name:   "heads/feature",
@@ -334,7 +334,7 @@ func TestRenameBranch_PreservesTarget(t *testing.T) {
 		Target: targetHash,
 	})
 
-	if err := RenameBranch(store, "feature", "dev"); err != nil {
+	if err := RenameBranch(context.Background(), store, "feature", "dev"); err != nil {
 		t.Fatalf("RenameBranch failed: %v", err)
 	}
 	devRef, _ := store.GetRef(context.Background(), "heads/dev")
@@ -345,12 +345,12 @@ func TestRenameBranch_PreservesTarget(t *testing.T) {
 
 func TestRenameBranch_EmptyNames(t *testing.T) {
 	store := setupBranchStore()
-	CreateBranch(store, "feature")
+	CreateBranch(context.Background(), store, "feature")
 
-	if err := RenameBranch(store, "", "dev"); err == nil {
+	if err := RenameBranch(context.Background(), store, "", "dev"); err == nil {
 		t.Error("expected error for empty old name, got nil")
 	}
-	if err := RenameBranch(store, "feature", ""); err == nil {
+	if err := RenameBranch(context.Background(), store, "feature", ""); err == nil {
 		t.Error("expected error for empty new name, got nil")
 	}
 }

@@ -32,7 +32,7 @@ var diffCmd = &cobra.Command{
 			snap := resolveHeadSnapshot(ctx, store)
 			if snap == nil {
 				statusFailed("Diff", "no snapshot to compare against.", "use 'drift save -m \"message\"' to create one first.")
-				return fmt.Errorf("no HEAD snapshot")
+				return nil
 			}
 			diffWorkspaceVsSnapshot(store, cwd, snap)
 		} else if len(args) == 1 {
@@ -46,19 +46,19 @@ var diffCmd = &cobra.Command{
 			headSnap := resolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
 				statusFailed("Diff", "no snapshot to compare against.", "use 'drift save -m \"message\"' to create one first.")
-				return fmt.Errorf("no HEAD snapshot")
+				return nil
 			}
 			return diffWorkspaceFileVsSnapshot(ctx, store, cwd, headSnap, args[0])
 		} else if len(args) == 3 {
 			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
-				return fmt.Errorf("snapshot not found: %s", args[0])
+				return nil
 			}
 			snap2 := resolveSnapshot(ctx, store, args[1])
 			if snap2 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[1]), "use 'drift log' to list available snapshots.")
-				return fmt.Errorf("snapshot not found: %s", args[1])
+				return nil
 			}
 			filePath := args[2]
 			diffFileInSnapshots(ctx, store, cwd, snap1, snap2, filePath)
@@ -66,12 +66,12 @@ var diffCmd = &cobra.Command{
 			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
-				return fmt.Errorf("snapshot not found: %s", args[0])
+				return nil
 			}
 			snap2 := resolveSnapshot(ctx, store, args[1])
 			if snap2 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[1]), "use 'drift log' to list available snapshots.")
-				return fmt.Errorf("snapshot not found: %s", args[1])
+				return nil
 			}
 			diffSnapshots(store, snap1, snap2)
 		}

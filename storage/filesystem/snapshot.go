@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,18 +25,22 @@ func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core
 	path := fs.snapshotPath(id)
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("get snapshot %x: %w", id.Hash[:8], storage.ErrNotFound)
+		}
 		return nil, err
 	}
 	p := &core.SnapshotProto{}
 	if err := proto.Unmarshal(data, p); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshal snapshot %x: %w", id.Hash[:8], storage.ErrCorrupted)
 	}
 	return snapshotFromProto(p), nil
 }
 
 // PutSnapshot writes a snapshot to disk.
 func (fs *FSStorage) PutSnapshot(ctx context.Context, snapshot *core.Snapshot) error {
-	p := snapshotToProto(snapshot)
+	// withIDHash=true: the ID is already assigned, so persist it.
+	p := core.SnapshotToProto(snapshot, true)
 	data, err := proto.Marshal(p)
 	if err != nil {
 		return err
@@ -77,7 +82,7 @@ func (fs *FSStorage) ListSnapshots(ctx context.Context, opts *storage.ListOption
 		}
 		p := &core.SnapshotProto{}
 		if err := proto.Unmarshal(data, p); err != nil {
-			return err
+			return fmt.Errorf("unmarshal snapshot: %w", storage.ErrCorrupted)
 		}
 		snapshots = append(snapshots, snapshotFromProto(p))
 		return nil
@@ -127,39 +132,10 @@ func (fs *FSStorage) ListSnapshots(ctx context.Context, opts *storage.ListOption
 
 // --- protobuf conversion helpers ---
 
-func snapshotToProto(s *core.Snapshot) *core.SnapshotProto {
-	if s == nil {
-		return nil
-	}
-	p := &core.SnapshotProto{
-		IdHash:    s.ID.Hash[:],
-		Message:   s.Message,
-		Author:    s.Author,
-		Timestamp: s.Timestamp,
-		Tags:      s.Tags,
-		TotalSize: s.TotalSize,
-	}
-	if s.PrevID != nil {
-		p.PrevIdHash = s.PrevID.Hash[:]
-	}
-	for _, f := range s.Files {
-		fe := &core.FileEntryProto{
-			Path:    f.Path,
-			Mode:    uint32(f.Mode),
-			Size:    f.Size,
-			ModTime: f.ModTime,
-		}
-		for _, ch := range f.Chunks {
-			fe.ChunkHashes = append(fe.ChunkHashes, copyBytes(ch[:]))
-		}
-		if f.Metadata != nil {
-			mime := f.Metadata.MimeType
-			fe.MimeType = &mime
-		}
-		p.Files = append(p.Files, fe)
-	}
-	return p
-}
+// snapshotToProto now lives in the core package (core.SnapshotToProto) so the
+// porcelain and storage layers share a single, drift-stable serialization.
+// snapshotFromProto stays here because only the storage layer needs to decode
+// persisted snapshots.
 
 func snapshotFromProto(p *core.SnapshotProto) *core.Snapshot {
 	if p == nil {
@@ -187,13 +163,19 @@ func snapshotFromProto(p *core.SnapshotProto) *core.Snapshot {
 		for _, ch := range fe.ChunkHashes {
 			f.Chunks = append(f.Chunks, bytesToHash(ch))
 		}
-		// Compute file-level hash from chunk hashes (same method as
-		// CreateSnapshot) since it is not stored explicitly in the proto.
-		fileHasher := blake3.New()
-		for _, h := range f.Chunks {
-			fileHasher.Write(h[:])
+		if len(fe.FileHash) == 32 {
+			// New snapshots store the file-level hash directly; use it
+			// as-is to avoid recomputing from chunk hashes.
+			copy(f.Hash[:], fe.FileHash)
+		} else {
+			// Old snapshots (no file_hash): recompute from chunk hashes
+			// for backward compatibility (same method as CreateSnapshot).
+			fileHasher := blake3.New()
+			for _, h := range f.Chunks {
+				fileHasher.Write(h[:])
+			}
+			copy(f.Hash[:], fileHasher.Sum(nil))
 		}
-		copy(f.Hash[:], fileHasher.Sum(nil))
 		if fe.MimeType != nil {
 			f.Metadata = &core.FileMetadata{MimeType: *fe.MimeType}
 		}

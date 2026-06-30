@@ -1,9 +1,10 @@
 package porcelain
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"context"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 		}
 	}
 
-	snap, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	snap, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 
 	// First commit
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644)
-	snap1, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v2 - modified"), 0644)
 	os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("new file"), 0644)
 
-	snap2, err := CreateSnapshot(store, dir, "second commit", "test", nil)
+	snap2, err := CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot failed: %v", err)
 	}
@@ -185,17 +186,17 @@ func TestCreateSnapshot_NothingChanged(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
 
-	_, err := CreateSnapshot(store, dir, "first commit", "test", nil)
+	_, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
 
-	_, err = CreateSnapshot(store, dir, "second commit", "test", nil)
+	_, err = CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil)
 	if err == nil {
 		t.Fatal("expected 'nothing to save' error, got nil")
 	}
-	if err.Error() != "nothing to save" {
-		t.Errorf("expected 'nothing to save', got '%s'", err.Error())
+	if !errors.Is(err, ErrNothingToSave) {
+		t.Errorf("expected ErrNothingToSave, got '%s'", err.Error())
 	}
 }
 
@@ -219,7 +220,7 @@ func TestCreateSnapshot_DefaultAuthor(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
 
-	snap, err := CreateSnapshot(store, dir, "test", "", nil)
+	snap, err := CreateSnapshot(context.Background(), store, dir, "test", "", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -232,11 +233,43 @@ func TestCreateSnapshot_EmptyMessage(t *testing.T) {
 	store := memory.NewMemoryStorage()
 	dir := t.TempDir()
 
-	_, err := CreateSnapshot(store, dir, "", "test", nil)
+	_, err := CreateSnapshot(context.Background(), store, dir, "", "test", nil)
 	if err == nil {
 		t.Fatal("expected error for empty message, got nil")
 	}
 	if err.Error() != "message is required" {
 		t.Errorf("expected 'message is required', got '%s'", err.Error())
+	}
+}
+
+// TestComputeFileHash_EmptyFile verifies that empty files of different
+// types (text vs binary) produce identical hashes. Without the empty-file
+// guard in chunkFile, empty .txt would go through the whole-file single-
+// chunk path (TextEngine.ChunkerFor returns nil) while empty .bin would
+// go through FastCDC (which skips zero-length data), yielding different
+// chunk counts and therefore different file hashes.
+func TestComputeFileHash_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+
+	txtPath := filepath.Join(dir, "empty.txt")
+	binPath := filepath.Join(dir, "empty.bin")
+	if err := os.WriteFile(txtPath, []byte{}, 0644); err != nil {
+		t.Fatalf("write empty.txt: %v", err)
+	}
+	if err := os.WriteFile(binPath, []byte{}, 0644); err != nil {
+		t.Fatalf("write empty.bin: %v", err)
+	}
+
+	txtHash, err := ComputeFileHash(txtPath)
+	if err != nil {
+		t.Fatalf("ComputeFileHash empty.txt: %v", err)
+	}
+	binHash, err := ComputeFileHash(binPath)
+	if err != nil {
+		t.Fatalf("ComputeFileHash empty.bin: %v", err)
+	}
+
+	if txtHash != binHash {
+		t.Errorf("empty file hash mismatch across engines: txt=%x bin=%x", txtHash, binHash)
 	}
 }

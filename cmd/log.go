@@ -79,7 +79,7 @@ var logCmd = &cobra.Command{
 				hint = fmt.Sprintf("branch '%s' has no snapshots yet.", logBranch)
 			}
 			statusFailed("Log", "no snapshots yet.", hint)
-			return fmt.Errorf("no snapshots")
+			return nil
 		}
 
 		if logJSON {
@@ -274,7 +274,7 @@ func walkBranchHistory(ctx context.Context, store storage.Storer, branchName str
 // buildBranchMap builds a map from snapshot hash to the list of branch names
 // whose history (PrevID chain) contains that snapshot.
 func buildBranchMap(ctx context.Context, store storage.Storer) (map[string][]string, error) {
-	branches, _, err := porcelain.ListBranches(store)
+	branches, _, err := porcelain.ListBranches(ctx, store)
 	if err != nil {
 		return nil, err
 	}

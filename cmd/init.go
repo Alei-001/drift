@@ -29,7 +29,7 @@ var initCmd = &cobra.Command{
 		driftDir := filepath.Join(target, ".drift")
 		if _, err := os.Stat(driftDir); err == nil {
 			statusFailed("Init", "already a drift repository.", "use 'drift status' to check current state.")
-			return fmt.Errorf("already initialized")
+			return nil
 		}
 
 		err := porcelain.InitProject(target)

@@ -366,8 +366,6 @@ drift/
 │   │   └── layout.go             # .drift/ 目录布局定义
 │   ├── memory/                   # 内存存储（测试用）
 │   │   └── storage.go
-│   └── transactional/            # 事务包装器
-│       └── txn.go
 │
 ├── core/                         # 核心数据类型
 │   ├── hash.go                   # BLAKE3 哈希类型
@@ -507,19 +505,19 @@ type Storer interface {
 
 // ChunkStorer 块存储 —— 内容寻址
 type ChunkStorer interface {
-    HasChunk(hash core.Hash) bool
-    GetChunk(hash core.Hash) (*core.Chunk, error)
-    PutChunk(chunk *core.Chunk) error
-    DeleteChunk(hash core.Hash) error
-    ListChunks() ([]core.Hash, error)
+    HasChunk(ctx context.Context, hash core.Hash) bool
+    GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk, error)
+    PutChunk(ctx context.Context, chunk *core.Chunk) error
+    DeleteChunk(ctx context.Context, hash core.Hash) error
+    ListChunks(ctx context.Context) ([]core.Hash, error)
 }
 
 // SnapshotStorer 快照存储
 type SnapshotStorer interface {
-    GetSnapshot(id core.SnapshotID) (*core.Snapshot, error)
-    PutSnapshot(snap *core.Snapshot) error
-    DeleteSnapshot(id core.SnapshotID) error
-    ListSnapshots(opts *ListOptions) ([]*core.Snapshot, error)
+    GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error)
+    PutSnapshot(ctx context.Context, snap *core.Snapshot) error
+    DeleteSnapshot(ctx context.Context, id core.SnapshotID) error
+    ListSnapshots(ctx context.Context, opts *ListOptions) ([]*core.Snapshot, error)
 }
 
 // ListOptions 控制快照列表的分页与分支过滤
@@ -531,28 +529,28 @@ type ListOptions struct {
 
 // ReferenceStorer 引用存储
 type ReferenceStorer interface {
-    GetRef(name string) (*core.Reference, error)
-    SetRef(name string, ref *core.Reference) error
-    ListRefs(prefix string) ([]*core.Reference, error)
-    DeleteRef(name string) error
+    GetRef(ctx context.Context, name string) (*core.Reference, error)
+    SetRef(ctx context.Context, name string, ref *core.Reference) error
+    ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error)
+    DeleteRef(ctx context.Context, name string) error
 }
 
 // PreviewStorer 预览缓存
 type PreviewStorer interface {
-    GetPreview(hash core.Hash, size int) ([]byte, error)
-    PutPreview(hash core.Hash, size int, data []byte) error
+    GetPreview(ctx context.Context, hash core.Hash, size int) ([]byte, error)
+    PutPreview(ctx context.Context, hash core.Hash, size int, data []byte) error
 }
 
 // IndexStorer 工作区索引（文件 → 块的映射）
 type IndexStorer interface {
-    GetIndex() (*core.Index, error)
-    SetIndex(idx *core.Index) error
+    GetIndex(ctx context.Context) (*core.Index, error)
+    SetIndex(ctx context.Context, idx *core.Index) error
 }
 
 // ConfigStorer 项目配置读写
 type ConfigStorer interface {
-    GetConfig() (*core.Config, error)
-    SetConfig(cfg *core.Config) error
+    GetConfig(ctx context.Context) (*core.Config, error)
+    SetConfig(ctx context.Context, cfg *core.Config) error
 }
 ```
 

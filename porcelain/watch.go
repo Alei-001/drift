@@ -25,11 +25,12 @@ type WatchState struct {
 	LastSaveTime    int64  `json:"last_save_time"`
 	LastSaveChanges string `json:"last_save_changes"`
 	Pruned          int    `json:"pruned"`
+	LastError       string `json:"last_error"`
 }
 
 // StartDaemon starts a background watch daemon for the project at cwd.
 // It returns the PID of the started process.
-func StartDaemon(cwd string, interval int, keep int) (int, error) {
+func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, error) {
 	driftDir := filepath.Join(cwd, ".drift")
 	pidPath := filepath.Join(driftDir, "watch.pid")
 
@@ -62,7 +63,7 @@ func StartDaemon(cwd string, interval int, keep int) (int, error) {
 
 // StopDaemon stops the watch daemon for the project at cwd.
 // Returns the number of auto-saves created and snapshots pruned during the session.
-func StopDaemon(cwd string) (int, int, error) {
+func StopDaemon(ctx context.Context, cwd string) (int, int, error) {
 	driftDir := filepath.Join(cwd, ".drift")
 	pidPath := filepath.Join(driftDir, "watch.pid")
 	statePath := filepath.Join(driftDir, "watch.state")
@@ -90,6 +91,12 @@ func StopDaemon(cwd string) (int, int, error) {
 
 	os.Remove(pidPath)
 	os.Remove(statePath)
+	// The daemon may have been killed while holding the workspace lock.
+	// Remove it best-effort so subsequent commands are not blocked until
+	// the stale-lock timeout elapses. Errors are ignored: if another
+	// operation now holds the lock, AcquireWorkspaceLock will re-create
+	// it, and the worst case is a missed coordination cycle.
+	os.Remove(filepath.Join(driftDir, "workspace.lock"))
 
 	return autoSaves, pruned, nil
 }
@@ -97,7 +104,7 @@ func StopDaemon(cwd string) (int, int, error) {
 // DaemonStatus checks whether a watch daemon is running for the project at cwd.
 // If the daemon is alive, it returns the state and true.
 // If the daemon is not running, it cleans up stale files and returns nil, false, nil.
-func DaemonStatus(cwd string) (*WatchState, bool, error) {
+func DaemonStatus(ctx context.Context, cwd string) (*WatchState, bool, error) {
 	driftDir := filepath.Join(cwd, ".drift")
 	pidPath := filepath.Join(driftDir, "watch.pid")
 	statePath := filepath.Join(driftDir, "watch.state")
@@ -132,7 +139,7 @@ func DaemonStatus(cwd string) (*WatchState, bool, error) {
 // RunDaemonLoop runs the watch daemon loop. It periodically detects workspace
 // changes and creates auto-snapshots when changes are found. It prunes old
 // auto-snapshots to keep at most `keep` entries.
-func RunDaemonLoop(store storage.Storer, cwd string, interval int, keep int) {
+func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interval int, keep int) {
 	driftDir := filepath.Join(cwd, ".drift")
 	pidPath := filepath.Join(driftDir, "watch.pid")
 	statePath := filepath.Join(driftDir, "watch.state")
@@ -155,10 +162,10 @@ func RunDaemonLoop(store storage.Storer, cwd string, interval int, keep int) {
 			os.Remove(statePath)
 			return
 		case <-ticker.C:
-			if IsWorkspaceLocked(cwd) {
-				continue
-			}
-			changes, err := DetectChanges(store, cwd)
+			// DetectChanges acquires+releases the workspace lock; if another
+			// operation holds it, detection simply fails and we retry next
+			// tick. This replaces the former IsWorkspaceLocked pre-check.
+			changes, err := DetectChanges(ctx, store, cwd)
 			if err != nil {
 				continue
 			}
@@ -167,8 +174,16 @@ func RunDaemonLoop(store storage.Storer, cwd string, interval int, keep int) {
 				continue
 			}
 
+			// Acquire the lock for the save itself. If contention occurs,
+			// record it and wait for the next period rather than blocking.
+			if err := AcquireWorkspaceLock(cwd); err != nil {
+				state.LastError = err.Error()
+				writeState(statePath, state)
+				continue
+			}
 			msg := "auto - " + time.Now().Format("2006-01-02 15:04")
-			_, err = CreateSnapshot(store, cwd, msg, "drift", nil)
+			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", nil)
+			ReleaseWorkspaceLock(cwd)
 			if err != nil {
 				continue
 			}
@@ -177,6 +192,7 @@ func RunDaemonLoop(store storage.Storer, cwd string, interval int, keep int) {
 			state.LastSaveTime = time.Now().Unix()
 			state.LastSaveChanges = fmt.Sprintf("+%d ~%d -%d",
 				len(changes.Added), len(changes.Modified), len(changes.Deleted))
+			state.LastError = ""
 			writeState(statePath, state)
 
 			if keep > 0 {

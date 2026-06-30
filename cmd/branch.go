@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -44,11 +45,11 @@ var branchCmd = &cobra.Command{
 				return fmt.Errorf("branch delete accepts at most one argument")
 			}
 			name := args[0]
-			err := porcelain.DeleteBranch(store, name)
+			err := porcelain.DeleteBranch(ctx, store, name)
 			if err != nil {
 				var hint string
 				switch {
-				case strings.Contains(err.Error(), "not found"):
+				case errors.Is(err, porcelain.ErrBranchNotFound):
 					hint = "use 'drift branch' to list existing branches."
 					statusFailed("Branch", fmt.Sprintf("branch '%s' not found.", name), hint)
 				case strings.Contains(err.Error(), "cannot delete the current branch"):
@@ -60,7 +61,7 @@ var branchCmd = &cobra.Command{
 				default:
 					statusFailed("Branch", err.Error(), "")
 				}
-				return err
+				return nil
 			}
 			statusOK("Branch deleted")
 			fmt.Printf("'%s' has been removed.\n", name)
@@ -87,14 +88,14 @@ var branchCmd = &cobra.Command{
 				oldName = args[0]
 				newName = args[1]
 			}
-			err := porcelain.RenameBranch(store, oldName, newName)
+			err := porcelain.RenameBranch(ctx, store, oldName, newName)
 			if err != nil {
 				var hint string
 				switch {
-				case strings.Contains(err.Error(), "not found"):
+				case errors.Is(err, porcelain.ErrBranchNotFound):
 					hint = "use 'drift branch' to list existing branches."
 					statusFailed("Branch", fmt.Sprintf("branch '%s' not found.", oldName), hint)
-				case strings.Contains(err.Error(), "already exists"):
+				case errors.Is(err, porcelain.ErrBranchAlreadyExists):
 					hint = "use 'drift branch' to list existing branches."
 					statusFailed("Branch", err.Error(), hint)
 				case strings.Contains(err.Error(), "cannot rename 'main'"):
@@ -103,7 +104,7 @@ var branchCmd = &cobra.Command{
 				default:
 					statusFailed("Branch", err.Error(), "")
 				}
-				return err
+				return nil
 			}
 			statusOK("Branch renamed")
 			fmt.Printf("'%s' has been renamed to '%s'.\n", oldName, newName)
@@ -111,7 +112,7 @@ var branchCmd = &cobra.Command{
 		}
 
 		if len(args) == 0 {
-			branches, current, err := porcelain.ListBranches(store)
+			branches, current, err := porcelain.ListBranches(ctx, store)
 			if err != nil {
 				return err
 			}
@@ -134,20 +135,20 @@ var branchCmd = &cobra.Command{
 			return fmt.Errorf("too many arguments for branch creation")
 		}
 		name := args[0]
-		err = porcelain.CreateBranch(store, name)
+		err = porcelain.CreateBranch(ctx, store, name)
 		if err != nil {
-			if strings.Contains(err.Error(), "already exists") {
+			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				statusFailed("Branch", fmt.Sprintf("'%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
-				return err
+				return nil
 			}
 			statusFailed("Branch", err.Error(), "")
-			return err
+			return nil
 		}
-		headRef, _ := store.GetRef(ctx, "HEAD")
 		sid := "no commits yet"
-		if !headRef.Target.IsZero() {
-			snap, _ := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
-			if snap != nil {
+		headRef, err := store.GetRef(ctx, "HEAD")
+		if err == nil && headRef != nil && !headRef.Target.IsZero() {
+			snap, snapErr := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
+			if snapErr == nil && snap != nil {
 				sid = snap.ShortID()
 			} else {
 				sid = headRef.Target.String()

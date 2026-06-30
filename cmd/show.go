@@ -37,7 +37,7 @@ var showCmd = &cobra.Command{
 			headSnap := resolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
 				statusFailed("Show", "no snapshot to show from.", "use 'drift save -m \"message\"' to create one first.")
-				return fmt.Errorf("no HEAD snapshot")
+				return nil
 			}
 			idStr = headSnap.ShortID()
 			filePath = args[0]
@@ -49,7 +49,7 @@ var showCmd = &cobra.Command{
 		snapshot := resolveSnapshot(ctx, store, idStr)
 		if snapshot == nil {
 			statusFailed("Show", fmt.Sprintf("snapshot not found: %s.", idStr), "use 'drift log' to list available snapshots.")
-			return fmt.Errorf("snapshot not found: %s", idStr)
+			return nil
 		}
 
 		var targetEntry *core.FileEntry
@@ -57,7 +57,7 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			statusFailed("Show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
 				"use a relative path from the project root.")
-			return fmt.Errorf("invalid path: %s", filePath)
+			return nil
 		}
 		for i := range snapshot.Files {
 			if snapshot.Files[i].Path == normalizedPath {
@@ -68,7 +68,7 @@ var showCmd = &cobra.Command{
 		if targetEntry == nil {
 			statusFailed("Show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, snapshot.ShortID()),
 				fmt.Sprintf("use 'drift log -v %s' to list files in this snapshot.", snapshot.ShortID()))
-			return fmt.Errorf("file not found in snapshot: %s", filePath)
+			return nil
 		}
 
 		var data []byte
@@ -100,7 +100,7 @@ var showCmd = &cobra.Command{
 				fmt.Printf("  Dimensions: %s\n", dims)
 			}
 			if targetEntry.ModTime > 0 {
-				modTimeStr := time.Unix(targetEntry.ModTime, 0).Format("01-02 15:04")
+				modTimeStr := time.Unix(0, targetEntry.ModTime).Format("01-02 15:04")
 				fmt.Printf("  Modified:   %s\n", modTimeStr)
 			}
 			fmt.Println()

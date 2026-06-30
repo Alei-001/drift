@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,8 +18,7 @@ import (
 // RestoreSnapshot restores workspace to a snapshot.
 // If filePath is non-empty, only restore that specific file.
 // If noBackup is false, a backup snapshot is created before restoring.
-func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool) (string, error) {
-	ctx := context.Background()
+func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool) (string, error) {
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return "", err
 	}
@@ -34,9 +34,16 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 	var backupID string
 	if !noBackup {
 		backupMsg := fmt.Sprintf("backup: restore to %s", snapshotID.Hash.String())
-		backupSnap, backupErr := CreateSnapshot(store, workDir, backupMsg, "drift", nil)
+		backupSnap, backupErr := createSnapshotInLock(ctx, store, workDir, backupMsg, "drift", nil)
 		if backupErr != nil {
-			if backupErr.Error() != "nothing to save" {
+			// Distinguish "nothing to save" from real failures:
+			//   - ErrNothingToSave: workspace has no changes since the last
+			//     snapshot, so there is nothing to back up. Continue with the
+			//     restore and leave backupID empty (the caller already
+			//     handles an empty backupID by not printing a backup line).
+			//   - any other error: backup creation failed. Abort the restore
+			//     so the user is not misled into thinking a backup exists.
+			if !errors.Is(backupErr, ErrNothingToSave) {
 				return "", fmt.Errorf("create backup: %w", backupErr)
 			}
 		} else {
@@ -113,7 +120,7 @@ func RestoreSnapshot(store storage.Storer, workDir string, snapshotID core.Snaps
 			}
 
 			// Restore original modification time
-			if err := os.Chtimes(fullPath, time.Unix(entry.ModTime, 0), time.Unix(entry.ModTime, 0)); err != nil {
+			if err := os.Chtimes(fullPath, time.Unix(0, entry.ModTime), time.Unix(0, entry.ModTime)); err != nil {
 				return "", fmt.Errorf("set modtime %s: %w", fullPath, err)
 			}
 
@@ -208,7 +215,7 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir 
 		}
 
 		// Restore original modification time
-		if err := os.Chtimes(fullPath, time.Unix(entry.ModTime, 0), time.Unix(entry.ModTime, 0)); err != nil {
+		if err := os.Chtimes(fullPath, time.Unix(0, entry.ModTime), time.Unix(0, entry.ModTime)); err != nil {
 			return fmt.Errorf("set modtime %s: %w", fullPath, err)
 		}
 

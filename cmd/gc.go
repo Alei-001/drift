@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -14,18 +15,19 @@ var gcCmd = &cobra.Command{
 	Use:   "gc",
 	Short: "Reclaim unreachable snapshots and chunks",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			statusFailed("GC", ".drift/ directory not found.", "run 'drift init' first.")
-			return err
+			return nil
 		}
 		defer store.Close()
 
-		report, err := porcelain.CollectGarbage(store, gcDryRun)
+		report, err := porcelain.CollectGarbage(ctx, store, cwd, gcDryRun)
 		if err != nil {
 			statusFailed("GC", err.Error(), "")
-			return err
+			return nil
 		}
 
 		if report.SnapshotsRemoved == 0 && report.ChunksRemoved == 0 {

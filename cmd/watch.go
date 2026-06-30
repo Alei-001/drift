@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -21,11 +22,12 @@ var watchOnCmd = &cobra.Command{
 	Use:   "on",
 	Short: "Start background watching",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
-		pid, err := porcelain.StartDaemon(cwd, watchInterval, watchKeep)
+		pid, err := porcelain.StartDaemon(ctx, cwd, watchInterval, watchKeep)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "use 'drift watch off' to stop it first.")
-			return err
+			return nil
 		}
 		statusActive("Watching")
 		fmt.Printf("Daemon started (PID %d). Auto-save every %ds.\n", pid, watchInterval)
@@ -39,11 +41,12 @@ var watchOffCmd = &cobra.Command{
 	Use:   "off",
 	Short: "Stop background watching",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
-		autoSaves, pruned, err := porcelain.StopDaemon(cwd)
+		autoSaves, pruned, err := porcelain.StopDaemon(ctx, cwd)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "")
-			return err
+			return nil
 		}
 		statusOK("Stopped")
 		fmt.Printf("Daemon stopped. %d auto-saves created.\n", autoSaves)
@@ -58,8 +61,9 @@ var watchStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show watch daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
-		state, active, err := porcelain.DaemonStatus(cwd)
+		state, active, err := porcelain.DaemonStatus(ctx, cwd)
 		if err != nil {
 			return err
 		}
@@ -86,13 +90,14 @@ var watchDaemonCmd = &cobra.Command{
 	Use:    "_watch_daemon",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
 		cwd, _ := os.Getwd()
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
 		}
 		defer store.Close()
-		porcelain.RunDaemonLoop(store, cwd, watchInterval, watchKeep)
+		porcelain.RunDaemonLoop(ctx, store, cwd, watchInterval, watchKeep)
 		return nil
 	},
 }

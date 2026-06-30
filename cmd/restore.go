@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/your-org/drift/porcelain"
 	"github.com/spf13/cobra"
+	"github.com/your-org/drift/porcelain"
 )
 
 var restoreNoBackup bool
@@ -30,7 +30,7 @@ var restoreCmd = &cobra.Command{
 		snapshot := resolveSnapshot(ctx, store, args[0])
 		if snapshot == nil {
 			statusFailed("Restore", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
-			return fmt.Errorf("snapshot not found: %s", args[0])
+			return nil
 		}
 
 		var filePath string
@@ -38,10 +38,10 @@ var restoreCmd = &cobra.Command{
 			filePath = args[1]
 		}
 
-		backupID, err := porcelain.RestoreSnapshot(store, cwd, snapshot.ID, filePath, restoreNoBackup)
+		backupID, err := porcelain.RestoreSnapshot(ctx, store, cwd, snapshot.ID, filePath, restoreNoBackup)
 		if err != nil {
-			statusFailed("Restore", "uncommitted changes would be overwritten.", "use 'drift save' first, or restore a single file.")
-			return err
+			statusFailed("Restore", err.Error(), "use 'drift save' first, or restore a single file.")
+			return nil
 		}
 
 		if filePath != "" {

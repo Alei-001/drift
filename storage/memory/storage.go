@@ -3,7 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/hex"
-	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -40,7 +40,7 @@ func (ms *MemoryStorage) HasChunk(ctx context.Context, hash core.Hash) bool {
 func (ms *MemoryStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk, error) {
 	v, ok := ms.chunks.Load(hash.FullString())
 	if !ok {
-		return nil, errors.New("chunk not found")
+		return nil, fmt.Errorf("get chunk %s: %w", hash.FullString(), storage.ErrNotFound)
 	}
 	return cloneChunk(v.(*core.Chunk)), nil
 }
@@ -78,7 +78,7 @@ func (ms *MemoryStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 func (ms *MemoryStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error) {
 	v, ok := ms.snapshots.Load(id.Hash.FullString())
 	if !ok {
-		return nil, errors.New("snapshot not found")
+		return nil, fmt.Errorf("get snapshot %s: %w", id.Hash.FullString(), storage.ErrNotFound)
 	}
 	return cloneSnapshot(v.(*core.Snapshot)), nil
 }
@@ -100,7 +100,7 @@ func (ms *MemoryStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID)
 func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOptions) ([]*core.Snapshot, error) {
 	var snapshots []*core.Snapshot
 	ms.snapshots.Range(func(key, value any) bool {
-		snapshots = append(snapshots, value.(*core.Snapshot))
+		snapshots = append(snapshots, cloneSnapshot(value.(*core.Snapshot)))
 		return true
 	})
 
@@ -139,16 +139,29 @@ func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOp
 	return snapshots, nil
 }
 
+// maxSymRefDepth bounds the number of symbolic-reference hops GetRef will
+// follow before giving up. It guards against malformed or malicious
+// self-referential symrefs (e.g. HEAD -> HEAD) that would otherwise cause
+// unbounded recursion.
+const maxSymRefDepth = 8
+
 // GetRef reads a reference. If the reference is a symbolic reference,
 // Target is resolved by recursively reading the referenced ref.
 func (ms *MemoryStorage) GetRef(ctx context.Context, name string) (*core.Reference, error) {
+	return ms.getRefRecursive(ctx, name, 0)
+}
+
+func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth int) (*core.Reference, error) {
+	if depth > maxSymRefDepth {
+		return nil, fmt.Errorf("symref recursion limit exceeded at %q: %w", name, storage.ErrInvalidRef)
+	}
 	v, ok := ms.refs.Load(name)
 	if !ok {
-		return nil, errors.New("reference not found")
+		return nil, fmt.Errorf("get ref %q: %w", name, storage.ErrNotFound)
 	}
 	ref := v.(*core.Reference)
 	if ref.SymRef != "" {
-		target, err := ms.GetRef(ctx, ref.SymRef)
+		target, err := ms.getRefRecursive(ctx, ref.SymRef, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -156,12 +169,12 @@ func (ms *MemoryStorage) GetRef(ctx context.Context, name string) (*core.Referen
 		resolved.Target = target.Target
 		return resolved, nil
 	}
-	return ref, nil
+	return cloneReference(ref), nil
 }
 
 // SetRef writes a reference.
 func (ms *MemoryStorage) SetRef(ctx context.Context, name string, ref *core.Reference) error {
-	ms.refs.Store(name, ref)
+	ms.refs.Store(name, cloneReference(ref))
 	return nil
 }
 
@@ -171,7 +184,7 @@ func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.R
 	ms.refs.Range(func(key, value any) bool {
 		name := key.(string)
 		if strings.HasPrefix(name, prefix) {
-			refs = append(refs, value.(*core.Reference))
+			refs = append(refs, cloneReference(value.(*core.Reference)))
 		}
 		return true
 	})
@@ -191,14 +204,14 @@ func (ms *MemoryStorage) GetIndex(ctx context.Context) (*core.Index, error) {
 	if ms.index == nil {
 		return &core.Index{}, nil
 	}
-	return ms.index, nil
+	return cloneIndex(ms.index), nil
 }
 
 // SetIndex stores the staging index.
 func (ms *MemoryStorage) SetIndex(ctx context.Context, index *core.Index) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	ms.index = index
+	ms.index = cloneIndex(index)
 	return nil
 }
 

@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,15 @@ import (
 // layout—and therefore the file hash—stays identical between them.
 func chunkFile(r io.Reader, engine filetype.Engine, fileSize int64) ([]*core.Chunk, error) {
 	c := engine.ChunkerFor(fileSize)
+	// Empty files always go through the whole-file single-chunk path
+	// regardless of engine, so that empty .txt and empty .bin produce
+	// identical chunk layouts (and therefore identical file hashes).
+	// Without this, TextEngine returns nil (whole-file) for size 0 while
+	// BinaryEngine returns a FastCDC chunker whose Chunk() skips
+	// zero-length data, yielding zero chunks and a different file hash.
+	if fileSize == 0 {
+		c = nil
+	}
 	if c == nil {
 		data, err := io.ReadAll(r)
 		if err != nil {
@@ -61,8 +71,26 @@ func computeFileHashFromChunks(chunks []*core.Chunk) core.Hash {
 // CreateSnapshot creates a snapshot of the current workspace state.
 // If message is empty, the caller should open an editor to get one.
 // tags are optional labels attached to the snapshot (e.g. --tag "v1").
-func CreateSnapshot(store storage.Storer, workDir string, message string, author string, tags []string) (*core.Snapshot, error) {
-	ctx := context.Background()
+//
+// It acquires the workspace lock for the duration of the snapshot so that
+// concurrent workspace-modifying operations (switch, restore, daemon save,
+// gc) cannot observe or mutate a half-written index. Callers that already
+// hold the workspace lock must call createSnapshotInLock instead to avoid
+// re-entrant locking.
+func CreateSnapshot(ctx context.Context, store storage.Storer, workDir string, message string, author string, tags []string) (*core.Snapshot, error) {
+	if err := AcquireWorkspaceLock(workDir); err != nil {
+		return nil, fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(workDir)
+	return createSnapshotInLock(ctx, store, workDir, message, author, tags)
+}
+
+// createSnapshotInLock is the lock-free inner half of CreateSnapshot. It
+// performs the actual workspace scan, chunking, and snapshot persistence.
+// The caller MUST already hold the workspace lock — this function does not
+// acquire it, to allow callers that already hold the lock (SwitchBranch,
+// RestoreSnapshot, RunDaemonLoop) to compose without re-entrant locking.
+func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir string, message string, author string, tags []string) (*core.Snapshot, error) {
 	if message == "" {
 		return nil, fmt.Errorf("message is required")
 	}
@@ -75,7 +103,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 	headRef, err := store.GetRef(ctx, "HEAD")
 	if err == nil {
 		headHash = headRef.Target
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, storage.ErrNotFound) {
 		// HEAD exists but can't be read — this is a real error
 		return nil, fmt.Errorf("read HEAD reference: %w", err)
 	}
@@ -121,21 +149,31 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			relPath = f.path
 		}
 
-		// Check if file is unchanged — skip chunking and reuse old chunks
+		// Check if file is unchanged — skip chunking and reuse old chunks.
+		// When size and mtime match, additionally verify the content hash so
+		// that CreateSnapshot stays consistent with DetectChanges (which
+		// always hashes). Without this, status could report a file modified
+		// while save reports "nothing to save". ModTime uses UnixNano for
+		// sub-second resolution so same-second edits are not missed.
 		if oldEntry, ok := oldIndexMap[relPath]; ok &&
 			oldEntry.Size == f.info.Size() &&
-			oldEntry.ModTime == f.info.ModTime().Unix() {
-			entry := core.FileEntry{
-				Path:    relPath,
-				Mode:    core.FileMode(f.info.Mode()),
-				Size:    f.info.Size(),
-				ModTime: f.info.ModTime().Unix(),
-				Chunks:  oldEntry.Chunks,
-				Hash:    oldEntry.Hash,
+			oldEntry.ModTime == f.info.ModTime().UnixNano() {
+			currentHash, hashErr := ComputeFileHash(f.path)
+			if hashErr == nil && currentHash == oldEntry.Hash {
+				entry := core.FileEntry{
+					Path:    relPath,
+					Mode:    core.FileMode(f.info.Mode()),
+					Size:    f.info.Size(),
+					ModTime: f.info.ModTime().UnixNano(),
+					Chunks:  oldEntry.Chunks,
+					Hash:    oldEntry.Hash,
+				}
+				fileEntries = append(fileEntries, entry)
+				totalSize += f.info.Size()
+				continue
 			}
-			fileEntries = append(fileEntries, entry)
-			totalSize += f.info.Size()
-			continue
+			// Hash mismatch or compute error — treat as modified and
+			// fall through to the chunking path below.
 		}
 
 		// Open file for streaming reads
@@ -189,7 +227,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 			Path:    relPath,
 			Mode:    core.FileMode(f.info.Mode()),
 			Size:    f.info.Size(),
-			ModTime: f.info.ModTime().Unix(),
+			ModTime: f.info.ModTime().UnixNano(),
 			Chunks:  chunkHashes,
 			Hash:    fileHash,
 		}
@@ -199,7 +237,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		// Detect changes: added or modified
 		if oldEntry, ok := oldIndexMap[relPath]; !ok {
 			changed = true
-		} else if oldEntry.Size != f.info.Size() || oldEntry.ModTime != f.info.ModTime().Unix() {
+		} else if oldEntry.Size != f.info.Size() || oldEntry.ModTime != f.info.ModTime().UnixNano() {
 			changed = true
 		} else if oldEntry.Hash != fileHash {
 			changed = true
@@ -212,7 +250,7 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 	}
 
 	if !changed {
-		return nil, fmt.Errorf("nothing to save")
+		return nil, ErrNothingToSave
 	}
 
 	// Get previous snapshot if HEAD is not zero
@@ -231,8 +269,9 @@ func CreateSnapshot(store storage.Storer, workDir string, message string, author
 		Tags:      tags,
 	}
 
-	// Compute snapshot hash: marshal to protobuf, hash with BLAKE3
-	snapProto := snapshotToProto(snap)
+	// Compute snapshot hash: marshal to protobuf, hash with BLAKE3.
+	// withIDHash=false so the not-yet-assigned ID does not affect the hash.
+	snapProto := core.SnapshotToProto(snap, false)
 	marshaled, err := proto.Marshal(snapProto)
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
@@ -319,44 +358,25 @@ func ComputeFileHash(filePath string) (core.Hash, error) {
 	return computeFileHashFromChunks(chunks), nil
 }
 
-// snapshotToProto converts a core.Snapshot to core.SnapshotProto for hashing.
-// The ID hash is set to nil so the hash can be computed over the rest of the fields.
-func snapshotToProto(s *core.Snapshot) *core.SnapshotProto {
-	sp := &core.SnapshotProto{
-		Message:   s.Message,
-		Author:    s.Author,
-		Timestamp: s.Timestamp,
-		Tags:      s.Tags,
-		TotalSize: s.TotalSize,
+// SaveTag creates a tag reference pointing to the given snapshot hash.
+// It returns ErrTagAlreadyExists if the tag already exists.
+func SaveTag(ctx context.Context, store storage.Storer, name string, snapshotID core.Hash) error {
+	if name == "" {
+		return fmt.Errorf("tag name is required")
 	}
 
-	if s.PrevID != nil {
-		prevHash := make([]byte, 32)
-		copy(prevHash, s.PrevID.Hash[:])
-		sp.PrevIdHash = prevHash
+	refName := "tags/" + name
+	if existing, err := store.GetRef(ctx, refName); err == nil && existing != nil {
+		return fmt.Errorf("tag '%s' already exists: %w", name, ErrTagAlreadyExists)
 	}
 
-	for _, f := range s.Files {
-		fp := &core.FileEntryProto{
-			Path:    f.Path,
-			Mode:    uint32(f.Mode),
-			Size:    f.Size,
-			ModTime: f.ModTime,
-		}
-
-		for _, h := range f.Chunks {
-			ch := make([]byte, 32)
-			copy(ch, h[:])
-			fp.ChunkHashes = append(fp.ChunkHashes, ch)
-		}
-
-		if f.Metadata != nil && f.Metadata.MimeType != "" {
-			mt := f.Metadata.MimeType
-			fp.MimeType = &mt
-		}
-
-		sp.Files = append(sp.Files, fp)
+	ref := &core.Reference{
+		Type:   core.RefTypeTag,
+		Name:   name,
+		Target: snapshotID,
 	}
-
-	return sp
+	if err := store.SetRef(ctx, refName, ref); err != nil {
+		return fmt.Errorf("set tag ref: %w", err)
+	}
+	return nil
 }

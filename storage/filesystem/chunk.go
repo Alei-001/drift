@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/your-org/drift/core"
+	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/util/fsutil"
 	"github.com/zeebo/blake3"
 )
@@ -41,18 +42,21 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 	path := fs.chunkPath(hash)
 	compressed, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("get chunk %x: %w", hash[:8], storage.ErrNotFound)
+		}
 		return nil, err
 	}
 
 	data, err := fs.zstdDecoder.DecodeAll(compressed, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode chunk %x: %w", hash[:8], storage.ErrCorrupted)
 	}
 
 	// Verify data integrity: hash should match
 	computedHash := core.Hash(blake3.Sum256(data))
 	if computedHash != hash {
-		return nil, fmt.Errorf("chunk data integrity check failed: expected %s, got %s", hash.FullString(), computedHash.FullString())
+		return nil, fmt.Errorf("chunk %x integrity check failed: expected %s, got %s: %w", hash[:8], hash.FullString(), computedHash.FullString(), storage.ErrCorrupted)
 	}
 
 	ch := &core.Chunk{

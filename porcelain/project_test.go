@@ -56,6 +56,7 @@ func TestOpenProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenProject failed: %v", err)
 	}
+	defer store.Close()
 	if store == nil {
 		t.Fatal("expected non-nil store")
 	}

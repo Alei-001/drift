@@ -1,12 +1,12 @@
 package porcelain
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"context"
 	"testing"
 	"time"
 
@@ -40,7 +40,7 @@ func TestPruneAutoSnapshots(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		os.WriteFile(filepath.Join(dir, "file.txt"), []byte(strings.Repeat("x", i+1)), 0644)
-		_, err := CreateSnapshot(store, dir, fmt.Sprintf("auto - snapshot %d", i), "drift", nil)
+		_, err := CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("auto - snapshot %d", i), "drift", nil)
 		if err != nil {
 			t.Fatalf("auto CreateSnapshot %d failed: %v", i, err)
 		}
@@ -48,7 +48,7 @@ func TestPruneAutoSnapshots(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		os.WriteFile(filepath.Join(dir, "file.txt"), []byte(strings.Repeat("y", i+10)), 0644)
-		_, err := CreateSnapshot(store, dir, fmt.Sprintf("manual %d", i), "test", nil)
+		_, err := CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("manual %d", i), "test", nil)
 		if err != nil {
 			t.Fatalf("manual CreateSnapshot %d failed: %v", i, err)
 		}
@@ -90,7 +90,7 @@ func TestPruneAutoSnapshots_NothingToPrune(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		os.WriteFile(filepath.Join(dir, "file.txt"), []byte(strings.Repeat("x", i+1)), 0644)
-		CreateSnapshot(store, dir, fmt.Sprintf("auto - %d", i), "drift", nil)
+		CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("auto - %d", i), "drift", nil)
 	}
 
 	deleted, err := pruneAutoSnapshots(store, 5)
