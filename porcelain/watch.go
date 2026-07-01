@@ -16,12 +16,14 @@ import (
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/util/fsutil"
 )
 
 // WatchState summarizes the runtime state of a watch daemon.
 type WatchState struct {
 	StartTime       int64  `json:"start_time"`
 	AutoSaves       int    `json:"auto_saves"`
+	MaxSaves        int    `json:"max_saves"`
 	LastSaveTime    int64  `json:"last_save_time"`
 	LastSaveChanges string `json:"last_save_changes"`
 	Pruned          int    `json:"pruned"`
@@ -54,7 +56,7 @@ func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, 
 
 	pid := cmd.Process.Pid
 
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(pidPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
 		return 0, fmt.Errorf("write pid file: %w", err)
 	}
 
@@ -87,16 +89,18 @@ func StopDaemon(ctx context.Context, cwd string) (int, int, error) {
 		}
 	}
 
-	killProcess(pid)
+	if err := killProcess(pid); err != nil {
+		// Log but don't fail — the pid file is still cleaned up below,
+		// and a failed kill usually means the process already exited.
+		fmt.Fprintf(os.Stderr, "warning: kill daemon PID %d: %v\n", pid, err)
+	}
 
 	os.Remove(pidPath)
 	os.Remove(statePath)
 	// The daemon may have been killed while holding the workspace lock.
-	// Remove it best-effort so subsequent commands are not blocked until
-	// the stale-lock timeout elapses. Errors are ignored: if another
-	// operation now holds the lock, AcquireWorkspaceLock will re-create
-	// it, and the worst case is a missed coordination cycle.
-	os.Remove(filepath.Join(driftDir, "workspace.lock"))
+	// Only remove the lock if it still belongs to the daemon's PID, so we
+	// don't clobber a lock acquired by another command in the meantime.
+	removeLockIfOwned(filepath.Join(driftDir, "workspace.lock"), pid)
 
 	return autoSaves, pruned, nil
 }
@@ -139,13 +143,34 @@ func DaemonStatus(ctx context.Context, cwd string) (*WatchState, bool, error) {
 // RunDaemonLoop runs the watch daemon loop. It periodically detects workspace
 // changes and creates auto-snapshots when changes are found. It prunes old
 // auto-snapshots to keep at most `keep` entries.
-func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interval int, keep int) {
+func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interval int, keep int, cfg *core.CoreConfig) {
+	if cfg == nil {
+		cfg = &core.DefaultConfig().Core
+	}
+	if interval <= 0 {
+		fmt.Fprintf(os.Stderr, "invalid interval: %d (must be > 0)\n", interval)
+		return
+	}
+	if keep < 0 {
+		fmt.Fprintf(os.Stderr, "invalid keep: %d (must be >= 0)\n", keep)
+		return
+	}
 	driftDir := filepath.Join(cwd, ".drift")
 	pidPath := filepath.Join(driftDir, "watch.pid")
 	statePath := filepath.Join(driftDir, "watch.state")
 
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "daemon panic: %v\n", r)
+			os.Remove(pidPath)
+			os.Remove(statePath)
+			removeLockIfOwned(filepath.Join(driftDir, "workspace.lock"), os.Getpid())
+		}
+	}()
+
 	state := &WatchState{
 		StartTime: time.Now().Unix(),
+		MaxSaves:  keep,
 	}
 	writeState(statePath, state)
 
@@ -161,11 +186,15 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			os.Remove(pidPath)
 			os.Remove(statePath)
 			return
+		case <-ctx.Done():
+			os.Remove(pidPath)
+			os.Remove(statePath)
+			return
 		case <-ticker.C:
 			// DetectChanges acquires+releases the workspace lock; if another
 			// operation holds it, detection simply fails and we retry next
 			// tick. This replaces the former IsWorkspaceLocked pre-check.
-			changes, err := DetectChanges(ctx, store, cwd)
+			changes, err := DetectChanges(ctx, store, cwd, cfg)
 			if err != nil {
 				continue
 			}
@@ -182,9 +211,9 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 				continue
 			}
 			msg := "auto - " + time.Now().Format("2006-01-02 15:04")
-			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", nil)
-			ReleaseWorkspaceLock(cwd)
+			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", nil, cfg)
 			if err != nil {
+				ReleaseWorkspaceLock(cwd)
 				continue
 			}
 
@@ -193,21 +222,21 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			state.LastSaveChanges = fmt.Sprintf("+%d ~%d -%d",
 				len(changes.Added), len(changes.Modified), len(changes.Deleted))
 			state.LastError = ""
-			writeState(statePath, state)
 
 			if keep > 0 {
-				pruned, _ := pruneAutoSnapshots(store, keep)
+				pruned, _ := pruneAutoSnapshots(ctx, store, keep)
 				state.Pruned += pruned
-				writeState(statePath, state)
 			}
+
+			ReleaseWorkspaceLock(cwd)
+			writeState(statePath, state)
 		}
 	}
 }
 
 // pruneAutoSnapshots deletes old auto-saved snapshots, keeping at most `keep`.
 // It returns the number of snapshots deleted.
-func pruneAutoSnapshots(store storage.Storer, keep int) (int, error) {
-	ctx := context.Background()
+func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (int, error) {
 	if keep <= 0 {
 		return 0, nil
 	}
@@ -228,12 +257,44 @@ func pruneAutoSnapshots(store storage.Storer, keep int) (int, error) {
 		return 0, nil
 	}
 
+	// Compute reachable snapshots from all branch/tag tips to avoid
+	// deleting snapshots that are still part of active history.
+	reachable := make(map[core.SnapshotID]bool)
+	// Collect roots: all heads/ and tags/ refs. If ListRefs fails, abort
+	// pruning entirely — deleting without reachability data risks
+	// severing the PrevID chain and corrupting branch history.
+	refs, err := store.ListRefs(ctx, "")
+	if err != nil {
+		return 0, fmt.Errorf("list refs for reachability check: %w", err)
+	}
+	var queue []core.SnapshotID
+	for _, ref := range refs {
+		if !ref.Target.IsZero() {
+			queue = append(queue, core.SnapshotID{Hash: ref.Target})
+		}
+	}
+	// BFS from roots following PrevID
+	for len(queue) > 0 {
+		sid := queue[0]
+		queue = queue[1:]
+		if reachable[sid] {
+			continue
+		}
+		reachable[sid] = true
+		if snap, err := store.GetSnapshot(ctx, sid); err == nil && snap.PrevID != nil {
+			queue = append(queue, *snap.PrevID)
+		}
+	}
+
 	sort.Slice(autoSnaps, func(i, j int) bool {
 		return autoSnaps[i].Timestamp > autoSnaps[j].Timestamp
 	})
 
 	deleted := 0
 	for i := keep; i < len(autoSnaps); i++ {
+		if reachable[autoSnaps[i].ID] {
+			continue // skip snapshots still reachable from branch/tag tips
+		}
 		if err := store.DeleteSnapshot(ctx, autoSnaps[i].ID); err != nil {
 			continue
 		}
@@ -243,7 +304,30 @@ func pruneAutoSnapshots(store storage.Storer, keep int) (int, error) {
 	return deleted, nil
 }
 
+// removeLockIfOwned removes the workspace lock file only if it was created by
+// the given PID. This prevents clobbering a lock that another command has
+// acquired after the daemon was killed.
+func removeLockIfOwned(lockPath string, pid int) {
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return
+	}
+	var lock workspaceLockData
+	if json.Unmarshal(data, &lock) != nil {
+		return
+	}
+	if lock.PID == pid {
+		os.Remove(lockPath)
+	}
+}
+
 func writeState(path string, state *WatchState) {
-	data, _ := json.Marshal(state)
-	os.WriteFile(path, data, 0644)
+	data, err := json.Marshal(state)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshal watch state: %v\n", err)
+		return
+	}
+	if err := fsutil.WriteFileAtomic(path, data, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "write watch state: %v\n", err)
+	}
 }

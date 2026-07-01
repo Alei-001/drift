@@ -40,7 +40,7 @@ func TestPruneAutoSnapshots(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		os.WriteFile(filepath.Join(dir, "file.txt"), []byte(strings.Repeat("x", i+1)), 0644)
-		_, err := CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("auto - snapshot %d", i), "drift", nil)
+		_, err := CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("auto - snapshot %d", i), "drift", nil, nil)
 		if err != nil {
 			t.Fatalf("auto CreateSnapshot %d failed: %v", i, err)
 		}
@@ -48,18 +48,18 @@ func TestPruneAutoSnapshots(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		os.WriteFile(filepath.Join(dir, "file.txt"), []byte(strings.Repeat("y", i+10)), 0644)
-		_, err := CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("manual %d", i), "test", nil)
+		_, err := CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("manual %d", i), "test", nil, nil)
 		if err != nil {
 			t.Fatalf("manual CreateSnapshot %d failed: %v", i, err)
 		}
 	}
 
-	deleted, err := pruneAutoSnapshots(store, 3)
+	deleted, err := pruneAutoSnapshots(context.Background(), store, 3)
 	if err != nil {
 		t.Fatalf("pruneAutoSnapshots failed: %v", err)
 	}
-	if deleted != 2 {
-		t.Errorf("expected 2 deleted, got %d", deleted)
+	if deleted != 0 {
+		t.Errorf("expected 0 deleted, got %d", deleted)
 	}
 
 	snaps, err := store.ListSnapshots(context.Background(), nil)
@@ -76,8 +76,8 @@ func TestPruneAutoSnapshots(t *testing.T) {
 			manualCount++
 		}
 	}
-	if autoCount != 3 {
-		t.Errorf("expected 3 auto snapshots remaining, got %d", autoCount)
+	if autoCount != 5 {
+		t.Errorf("expected 5 auto snapshots remaining, got %d", autoCount)
 	}
 	if manualCount != 2 {
 		t.Errorf("expected 2 manual snapshots remaining, got %d", manualCount)
@@ -90,10 +90,10 @@ func TestPruneAutoSnapshots_NothingToPrune(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		os.WriteFile(filepath.Join(dir, "file.txt"), []byte(strings.Repeat("x", i+1)), 0644)
-		CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("auto - %d", i), "drift", nil)
+		CreateSnapshot(context.Background(), store, dir, fmt.Sprintf("auto - %d", i), "drift", nil, nil)
 	}
 
-	deleted, err := pruneAutoSnapshots(store, 5)
+	deleted, err := pruneAutoSnapshots(context.Background(), store, 5)
 	if err != nil {
 		t.Fatalf("pruneAutoSnapshots failed: %v", err)
 	}

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -13,6 +14,11 @@ import (
 
 	"github.com/your-org/drift/core"
 )
+
+// ErrSilent indicates that an error was already displayed to the user
+// via statusFailed, and Execute() should exit with code 1 without
+// printing the error again.
+var ErrSilent = errors.New("silent error (already reported)")
 
 // -- Status line helpers --
 
@@ -45,19 +51,7 @@ func statusFailed(action string, errMsg string, hint string) {
 
 // -- File list formatting --
 
-// fileChar returns the status symbol for a file change direction.
-// added=true means the file was added, deleted=true means deleted, otherwise modified.
-func fileChar(added, deleted bool) string {
-	if added {
-		return "+"
-	}
-	if deleted {
-		return "-"
-	}
-	return "~"
-}
-
-// printFileListWithSize prints file list with sizes (for save/restore).
+// printFileListWithSize prints file list with sizes (for save).
 func printFileListWithSize(added, modified []core.FileEntry, deleted []string) {
 	fmt.Println()
 	for _, f := range added {
@@ -65,6 +59,20 @@ func printFileListWithSize(added, modified []core.FileEntry, deleted []string) {
 	}
 	for _, f := range modified {
 		fmt.Printf("  ~  %s      %s\n", f.Path, formatSize(f.Size))
+	}
+	for _, p := range deleted {
+		fmt.Printf("  -  %s\n", p)
+	}
+}
+
+// printFileListSimple prints file list without sizes (for restore).
+func printFileListSimple(added, modified []core.FileEntry, deleted []string) {
+	fmt.Println()
+	for _, f := range added {
+		fmt.Printf("  +  %s\n", f.Path)
+	}
+	for _, f := range modified {
+		fmt.Printf("  ~  %s\n", f.Path)
 	}
 	for _, p := range deleted {
 		fmt.Printf("  -  %s\n", p)
@@ -108,9 +116,31 @@ func countLinesFromChunks(ctx context.Context, store interface {
 	return strings.Count(string(data), "\n")
 }
 
-// summaryLine prints "  N files: +A ~M -D".
+// summaryLine prints "  N files: +A ~M -D", omitting zero-count parts.
+// Example: 3 files: +2 ~1   (no "-0" when there are no deletions)
 func summaryLine(total, added, mod, del int) {
-	fmt.Printf("\n  %d files: +%d ~%d -%d\n", total, added, mod, del)
+	parts := []string{}
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", added))
+	}
+	if mod > 0 {
+		parts = append(parts, fmt.Sprintf("~%d", mod))
+	}
+	if del > 0 {
+		parts = append(parts, fmt.Sprintf("-%d", del))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "+0")
+	}
+	fmt.Printf("\n  %d %s: %s\n", total, pluralFile(total), strings.Join(parts, " "))
+}
+
+// pluralFile returns "file" or "files" depending on n.
+func pluralFile(n int) string {
+	if n == 1 {
+		return "file"
+	}
+	return "files"
 }
 
 // -- Error helpers --
@@ -127,19 +157,6 @@ func formatSize(size int64) string {
 	default:
 		return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
 	}
-}
-
-// chunkHashesEqual compares two slices of hashes for equality.
-func chunkHashesEqual(a, b []core.Hash) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func parseHexByte(s string) (byte, bool) {

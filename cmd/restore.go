@@ -1,12 +1,15 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/spf13/cobra"
+	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/porcelain"
+	"github.com/your-org/drift/util/fsutil"
+	"github.com/your-org/drift/util/pathutil"
 )
 
 var restoreNoBackup bool
@@ -15,13 +18,16 @@ var restoreCmd = &cobra.Command{
 	Use:   "restore <snapshot-id> [<file>]",
 	Short: "Restore files from a snapshot",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		ctx := cmd.Context()
 		if len(args) < 1 {
 			return fmt.Errorf("snapshot id required")
 		}
 
-		cwd, _ := os.Getwd()
-		store, _, err := porcelain.OpenProject(cwd)
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		store, cfg, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
 		}
@@ -30,7 +36,7 @@ var restoreCmd = &cobra.Command{
 		snapshot := resolveSnapshot(ctx, store, args[0])
 		if snapshot == nil {
 			statusFailed("Restore", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
-			return nil
+			return ErrSilent
 		}
 
 		var filePath string
@@ -38,34 +44,101 @@ var restoreCmd = &cobra.Command{
 			filePath = args[1]
 		}
 
-		backupID, err := porcelain.RestoreSnapshot(ctx, store, cwd, snapshot.ID, filePath, restoreNoBackup)
-		if err != nil {
-			statusFailed("Restore", err.Error(), "use 'drift save' first, or restore a single file.")
-			return nil
+		// Compute what will change relative to the current workspace,
+		// before the restore actually happens.
+		var add, mod []core.FileEntry
+		var del []string
+		if filePath == "" {
+			add, mod, del, err = computeRestoreChanges(cwd, cfg.Core.IgnoreFile, snapshot)
+			if err != nil {
+				return err
+			}
 		}
 
-		if filePath != "" {
-			fmt.Printf(">>> Restored %s:%s [ok]\n", snapshot.ShortID(), filePath)
-			fmt.Println()
-			fmt.Printf("  ~  %s\n", filePath)
-			fmt.Println()
-			fmt.Println("  1 file: ~1")
-			if backupID != "" {
-				fmt.Printf("  backup: [%s]\n", backupID)
-			}
-		} else {
-			// Full restore: show added/modified/deleted files
-			add, mod, del := computeChanges(ctx, store, snapshot)
-			fmt.Printf(">>> Restored to %s [ok]\n", snapshot.ShortID())
-			printFileListWithSize(add, mod, del)
-			total := len(add) + len(mod) + len(del)
-			summaryLine(total, len(add), len(mod), len(del))
-			if backupID != "" {
-				fmt.Printf("  backup: [%s]\n", backupID)
-			}
+		backupID, err := porcelain.RestoreSnapshot(ctx, store, cwd, snapshot.ID, filePath, restoreNoBackup, &cfg.Core)
+	if err != nil {
+		statusFailed("Restore", err.Error(), "use 'drift save' first, or restore a single file.")
+		return ErrSilent
+	}
+
+	// If no backup snapshot was created (workspace was clean), fall back
+	// to HEAD as the undo point so the user knows how to revert.
+	if backupID == "" && !restoreNoBackup {
+		headRef, refErr := store.GetRef(ctx, "HEAD")
+		if refErr == nil && !headRef.Target.IsZero() {
+			backupID = headRef.Target.String()
 		}
-		return nil
+	}
+
+	if filePath != "" {
+		fmt.Printf(">>> Restored %s:%s [ok]\n", snapshot.ShortID(), filePath)
+		fmt.Println()
+		fmt.Printf("  ~  %s\n", filePath)
+		fmt.Println()
+		fmt.Println("  1 file: ~1")
+		if backupID != "" {
+			fmt.Printf("  backup: [%s]\n", backupID)
+		}
+	} else {
+		fmt.Printf(">>> Restored to %s [ok]\n", snapshot.ShortID())
+		printFileListSimple(add, mod, del)
+		total := len(add) + len(mod) + len(del)
+		summaryLine(total, len(add), len(mod), len(del))
+		if backupID != "" {
+			fmt.Printf("  backup: [%s]\n", backupID)
+		}
+	}
+	return nil
 	},
+}
+
+// computeRestoreChanges compares the current workspace files against the
+// target snapshot and returns what would change if the snapshot were restored:
+// files in the snapshot but not in the workspace (added), files in both but
+// with different size or modtime (modified), and files in the workspace but
+// not in the snapshot (deleted).
+func computeRestoreChanges(workDir, ignoreFile string, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string, err error) {
+	type fileInfo struct {
+		size    int64
+		modTime int64
+	}
+	workspaceFiles := make(map[string]fileInfo)
+	walkErr := fsutil.Walk(workDir, ignoreFile, func(path string, info os.FileInfo) error {
+		if info.IsDir() {
+			return nil
+		}
+		rel, relErr := pathutil.Rel(workDir, path)
+		if relErr != nil {
+			return nil
+		}
+		workspaceFiles[rel] = fileInfo{size: info.Size(), modTime: info.ModTime().UnixNano()}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, nil, nil, walkErr
+	}
+
+	snapFiles := make(map[string]bool)
+	for _, f := range snapshot.Files {
+		snapFiles[f.Path] = true
+		if ws, ok := workspaceFiles[f.Path]; !ok {
+			added = append(added, f)
+		} else if ws.size != f.Size || ws.modTime != f.ModTime {
+			modified = append(modified, f)
+		}
+	}
+
+	for path := range workspaceFiles {
+		if !snapFiles[path] {
+			deleted = append(deleted, path)
+		}
+	}
+
+	sort.Slice(added, func(i, j int) bool { return added[i].Path < added[j].Path })
+	sort.Slice(modified, func(i, j int) bool { return modified[i].Path < modified[j].Path })
+	sort.Strings(deleted)
+
+	return added, modified, deleted, nil
 }
 
 func init() {

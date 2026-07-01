@@ -33,6 +33,13 @@ func (e *ImageEngine) Diff(oldPath string, oldData []byte, newPath string, newDa
 			formatSize(len(oldData)), formatSize(len(newData))), nil
 	}
 
+	// Fallback: same format, dimensions, and byte length, but the bytes
+	// differ (checked at the top). Report a generic content change so we
+	// don't silently miss the modification.
+	if !bytes.Equal(oldData, newData) {
+		return "image content changed", nil
+	}
+
 	return "", nil
 }
 

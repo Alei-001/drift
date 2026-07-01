@@ -15,34 +15,25 @@ import (
 	"github.com/your-org/drift/util/pathutil"
 )
 
-// RestoreSnapshot restores workspace to a snapshot.
-// If filePath is non-empty, only restore that specific file.
-// If noBackup is false, a backup snapshot is created before restoring.
-func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool) (string, error) {
+func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool, cfg *core.CoreConfig) (string, error) {
+	if cfg == nil {
+		cfg = &core.DefaultConfig().Core
+	}
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return "", err
 	}
 	defer ReleaseWorkspaceLock(workDir)
 
-	// Get target snapshot
 	snap, err := store.GetSnapshot(ctx, snapshotID)
 	if err != nil {
 		return "", fmt.Errorf("get snapshot: %w", err)
 	}
 
-	// Create backup snapshot if requested
 	var backupID string
 	if !noBackup {
 		backupMsg := fmt.Sprintf("backup: restore to %s", snapshotID.Hash.String())
-		backupSnap, backupErr := createSnapshotInLock(ctx, store, workDir, backupMsg, "drift", nil)
+		backupSnap, backupErr := createSnapshotInLock(ctx, store, workDir, backupMsg, "drift", nil, cfg)
 		if backupErr != nil {
-			// Distinguish "nothing to save" from real failures:
-			//   - ErrNothingToSave: workspace has no changes since the last
-			//     snapshot, so there is nothing to back up. Continue with the
-			//     restore and leave backupID empty (the caller already
-			//     handles an empty backupID by not printing a backup line).
-			//   - any other error: backup creation failed. Abort the restore
-			//     so the user is not misled into thinking a backup exists.
 			if !errors.Is(backupErr, ErrNothingToSave) {
 				return "", fmt.Errorf("create backup: %w", backupErr)
 			}
@@ -51,24 +42,17 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 		}
 	}
 
-	// Normalize path and resolve absolute paths
-	var pathErr error
-	filePath, pathErr = pathutil.RelToWorkDir(workDir, filePath)
-	if pathErr != nil {
-		return "", fmt.Errorf("cannot resolve path: %w", pathErr)
-	}
-
 	if filePath == "" {
-		// Full restore: write all files, clean workspace, rebuild index.
-		// Do NOT move the branch ref — restore is a workspace time-travel
-		// operation, not a new commit. The backup snapshot (created above)
-		// already advanced the branch ref; removing this block preserves
-		// the linear history so a subsequent save continues from the backup.
-		if err := restoreFilesToWorkspace(ctx, store, workDir, snap); err != nil {
+		if err := restoreFilesToWorkspace(ctx, store, workDir, cfg.IgnoreFile, snap); err != nil {
 			return "", err
 		}
 	} else {
-		// Single-file restore: do not move HEAD, only update the restored entry
+		var pathErr error
+		filePath, pathErr = pathutil.RelToWorkDir(workDir, filePath)
+		if pathErr != nil {
+			return "", fmt.Errorf("cannot resolve path: %w", pathErr)
+		}
+
 		absWorkDir, err := filepath.Abs(workDir)
 		if err != nil {
 			return "", fmt.Errorf("resolve workDir: %w", err)
@@ -82,7 +66,6 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 
 			fullPath := filepath.Join(absWorkDir, entry.Path)
 
-			// Verify the resolved path stays within workDir (defense in depth against path traversal)
 			if fullPath != absWorkDir && !strings.HasPrefix(fullPath, absWorkDir+string(filepath.Separator)) {
 				continue
 			}
@@ -94,32 +77,19 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 				continue
 			}
 
-			// Assemble file content from chunks
-			var assembled []byte
-			for _, h := range entry.Chunks {
-				chunk, err := store.GetChunk(ctx, h)
-				if err != nil {
-					return "", fmt.Errorf("get chunk %s for %s: %w", h.String(), entry.Path, err)
-				}
-				assembled = append(assembled, chunk.Data...)
-			}
-
-			// Ensure parent directory exists
 			parentDir := filepath.Dir(fullPath)
 			if err := os.MkdirAll(parentDir, 0755); err != nil {
 				return "", fmt.Errorf("create parent dir %s: %w", parentDir, err)
 			}
 
-			// Restore original file permissions
 			perm := os.FileMode(entry.Mode & 0o777)
 			if perm == 0 {
 				perm = 0644
 			}
-			if err := os.WriteFile(fullPath, assembled, perm); err != nil {
+			if err := writeFileFromChunks(ctx, store, fullPath, entry.Chunks, perm); err != nil {
 				return "", fmt.Errorf("write file %s: %w", fullPath, err)
 			}
 
-			// Restore original modification time
 			if err := os.Chtimes(fullPath, time.Unix(0, entry.ModTime), time.Unix(0, entry.ModTime)); err != nil {
 				return "", fmt.Errorf("set modtime %s: %w", fullPath, err)
 			}
@@ -128,9 +98,16 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 			restoredEntry = &entryCopy
 		}
 
+		if restoredEntry == nil {
+			return backupID, fmt.Errorf("file %q not found in snapshot %s", filePath, snapshotID.Hash.String())
+		}
+
 		if restoredEntry != nil {
 			existingIndex, err := store.GetIndex(ctx)
 			if err != nil {
+				if !errors.Is(err, storage.ErrNotFound) {
+					return "", fmt.Errorf("read index: %w", err)
+				}
 				existingIndex = &core.Index{}
 			}
 			found := false
@@ -162,68 +139,96 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 	return backupID, nil
 }
 
-// restoreFilesToWorkspace writes snapshot files to the workspace, removes extra
-// files, and rebuilds the index. It does NOT update HEAD or any branch ref —
-// the caller is responsible for that.
-func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir string, snap *core.Snapshot) error {
+func writeFileFromChunks(ctx context.Context, store storage.Storer, path string, chunks []core.Hash, perm os.FileMode) error {
+	tmpPath := path + ".drifttmp"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+
+	for _, h := range chunks {
+		chunk, err := store.GetChunk(ctx, h)
+		if err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("get chunk %s: %w", h.String(), err)
+		}
+		if _, err := f.Write(chunk.Data); err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("write chunk data: %w", err)
+		}
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir, ignoreFile string, snap *core.Snapshot) error {
 	absWorkDir, err := filepath.Abs(workDir)
 	if err != nil {
 		return fmt.Errorf("resolve workDir: %w", err)
 	}
 
 	snapFiles := make(map[string]bool)
+	failedSet := make(map[string]bool)
+	var failures []string
 
 	for _, entry := range snap.Files {
 		fullPath := filepath.Join(absWorkDir, entry.Path)
 
-		// Verify the resolved path stays within workDir (defense in depth against path traversal)
 		if fullPath != absWorkDir && !strings.HasPrefix(fullPath, absWorkDir+string(filepath.Separator)) {
 			continue
 		}
 
 		if entry.Mode.IsDir() {
 			if err := os.MkdirAll(fullPath, 0755); err != nil {
-				return fmt.Errorf("create dir %s: %w", fullPath, err)
+				failedSet[entry.Path] = true
+				snapFiles[entry.Path] = true
+				failures = append(failures, fmt.Sprintf("create dir %s: %v", fullPath, err))
+				continue
 			}
 			snapFiles[entry.Path] = true
 			continue
 		}
 
-		// Assemble file content from chunks
-		var assembled []byte
-		for _, h := range entry.Chunks {
-			chunk, err := store.GetChunk(ctx, h)
-			if err != nil {
-				return fmt.Errorf("get chunk %s for %s: %w", h.String(), entry.Path, err)
-			}
-			assembled = append(assembled, chunk.Data...)
-		}
-
-		// Ensure parent directory exists
 		parentDir := filepath.Dir(fullPath)
 		if err := os.MkdirAll(parentDir, 0755); err != nil {
-			return fmt.Errorf("create parent dir %s: %w", parentDir, err)
+			failedSet[entry.Path] = true
+			snapFiles[entry.Path] = true
+			failures = append(failures, fmt.Sprintf("create parent dir %s: %v", parentDir, err))
+			continue
 		}
 
-		// Restore original file permissions
 		perm := os.FileMode(entry.Mode & 0o777)
 		if perm == 0 {
 			perm = 0644
 		}
-		if err := os.WriteFile(fullPath, assembled, perm); err != nil {
-			return fmt.Errorf("write file %s: %w", fullPath, err)
+		if err := writeFileFromChunks(ctx, store, fullPath, entry.Chunks, perm); err != nil {
+			failedSet[entry.Path] = true
+			snapFiles[entry.Path] = true
+			failures = append(failures, fmt.Sprintf("write file %s: %v", fullPath, err))
+			continue
 		}
 
-		// Restore original modification time
 		if err := os.Chtimes(fullPath, time.Unix(0, entry.ModTime), time.Unix(0, entry.ModTime)); err != nil {
-			return fmt.Errorf("set modtime %s: %w", fullPath, err)
+			failedSet[entry.Path] = true
+			snapFiles[entry.Path] = true
+			failures = append(failures, fmt.Sprintf("set modtime %s: %v", fullPath, err))
+			continue
 		}
 
 		snapFiles[entry.Path] = true
 	}
 
-	// Remove files in workspace not in the snapshot
-	cleanErr := fsutil.Walk(workDir, func(path string, info os.FileInfo) error {
+	cleanErr := fsutil.Walk(workDir, ignoreFile, func(path string, info os.FileInfo) error {
 		if info.IsDir() {
 			return nil
 		}
@@ -240,13 +245,13 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir 
 		}
 		return nil
 	})
-	if cleanErr != nil {
-		return fmt.Errorf("clean workspace: %w", cleanErr)
-	}
-
-	// Rebuild index from restored files
+	// Don't early-return on cleanup error; update the index first so
+	// the workspace state is consistent, then report the cleanup failure.
 	newIndex := &core.Index{}
 	for _, entry := range snap.Files {
+		if failedSet[entry.Path] {
+			continue
+		}
 		newIndex.Entries = append(newIndex.Entries, core.IndexEntry{
 			Path:    entry.Path,
 			Hash:    entry.Hash,
@@ -257,6 +262,14 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir 
 	}
 	if err := store.SetIndex(ctx, newIndex); err != nil {
 		return fmt.Errorf("update index: %w", err)
+	}
+
+	if cleanErr != nil {
+		return fmt.Errorf("clean workspace: %w", cleanErr)
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("restore failed for %d file(s): %s", len(failures), strings.Join(failures, "; "))
 	}
 
 	return nil

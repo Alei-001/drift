@@ -16,20 +16,26 @@ var initCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := ""
 		if len(args) > 0 {
-			cwd, _ := os.Getwd()
-			var err error
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
 			target, err = filepath.Abs(filepath.Join(cwd, args[0]))
 			if err != nil {
 				return err
 			}
 		} else {
-			target, _ = os.Getwd()
+			var err error
+			target, err = os.Getwd()
+			if err != nil {
+				return err
+			}
 		}
 
 		driftDir := filepath.Join(target, ".drift")
 		if _, err := os.Stat(driftDir); err == nil {
 			statusFailed("Init", "already a drift repository.", "use 'drift status' to check current state.")
-			return nil
+		return ErrSilent
 		}
 
 		err := porcelain.InitProject(target)

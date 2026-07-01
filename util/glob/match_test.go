@@ -155,10 +155,13 @@ func TestMatch_ExactPath(t *testing.T) {
 }
 
 func TestMatch_InvalidPattern(t *testing.T) {
-	t.Run("unclosed bracket returns error", func(t *testing.T) {
-		_, err := Match("abc[def", "abc")
-		if err == nil {
-			t.Errorf("expected error for unclosed bracket pattern")
+	t.Run("unclosed bracket treated as literal", func(t *testing.T) {
+		match, err := Match("abc[def", "abc[def")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !match {
+			t.Errorf("expected abc[def to match abc[def (literal bracket)")
 		}
 	})
 }

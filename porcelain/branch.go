@@ -11,7 +11,18 @@ import (
 )
 
 // CreateBranch creates a new branch pointing at the current HEAD snapshot.
-func CreateBranch(ctx context.Context, store storage.Storer, name string) error {
+func CreateBranch(ctx context.Context, store storage.Storer, cwd, name string) error {
+	if err := AcquireWorkspaceLock(cwd); err != nil {
+		return fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(cwd)
+	return createBranchNoLock(ctx, store, name)
+}
+
+// createBranchNoLock performs the branch creation without acquiring the
+// workspace lock. Callers already holding the lock (e.g. SwitchBranch) should
+// use this to avoid a non-re-entrant deadlock.
+func createBranchNoLock(ctx context.Context, store storage.Storer, name string) error {
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
@@ -22,8 +33,10 @@ func CreateBranch(ctx context.Context, store storage.Storer, name string) error 
 		return fmt.Errorf("invalid branch name: %q contains path separator", name)
 	}
 
-	if ref, err := store.GetRef(ctx, "heads/"+name); err == nil && ref != nil {
+	if _, err := store.GetRef(ctx, "heads/"+name); err == nil {
 		return fmt.Errorf("branch '%s' already exists: %w", name, ErrBranchAlreadyExists)
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		return fmt.Errorf("check branch existence: %w", err)
 	}
 
 	headRef, err := store.GetRef(ctx, "HEAD")
@@ -73,7 +86,10 @@ func ListBranches(ctx context.Context, store storage.Storer) ([]*core.Reference,
 // It auto-saves current changes, updates HEAD symref, and restores the target snapshot to workspace.
 // Returns autosave snapshot short ID (empty if nothing to save), the source branch name,
 // and the number of files that differ between the source and target branch snapshots.
-func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, name string, create bool, author string) (string, string, int, error) {
+func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, name string, create bool, author string, cfg *core.CoreConfig) (string, string, int, error) {
+	if cfg == nil {
+		cfg = &core.DefaultConfig().Core
+	}
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return "", "", 0, err
 	}
@@ -89,17 +105,20 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 	}
 
 	if create {
-		if err := CreateBranch(ctx, store, name); err != nil {
+		if err := createBranchNoLock(ctx, store, name); err != nil {
 			return "", "", 0, err
 		}
 	} else {
 		if _, err := store.GetRef(ctx, "heads/"+name); err != nil {
+			if !errors.Is(err, storage.ErrNotFound) {
+				return "", "", 0, fmt.Errorf("check branch existence: %w", err)
+			}
 			return "", "", 0, fmt.Errorf("branch '%s' not found: %w", name, ErrBranchNotFound)
 		}
 	}
 
 	autosaveID := ""
-	autosaveSnap, err := createSnapshotInLock(ctx, store, workDir, "auto - switch backup", author, nil)
+	autosaveSnap, err := createSnapshotInLock(ctx, store, workDir, "auto - switch backup", author, nil, cfg)
 	if err != nil {
 		if !errors.Is(err, ErrNothingToSave) {
 			return "", "", 0, fmt.Errorf("auto-save: %w", err)
@@ -166,7 +185,7 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 		if err != nil {
 			return "", "", 0, fmt.Errorf("get target snapshot: %w", err)
 		}
-		if err := restoreFilesToWorkspace(ctx, store, workDir, targetSnap); err != nil {
+		if err := restoreFilesToWorkspace(ctx, store, workDir, cfg.IgnoreFile, targetSnap); err != nil {
 			return "", "", 0, fmt.Errorf("restore workspace: %w", err)
 		}
 	}
@@ -175,11 +194,19 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 	if fromBranch != "" {
 		fromRef, refErr := store.GetRef(ctx, "heads/"+fromBranch)
 		if refErr == nil && !fromRef.Target.IsZero() {
-			fromSnap, _ = store.GetSnapshot(ctx, core.SnapshotID{Hash: fromRef.Target})
+			snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: fromRef.Target})
+			if err != nil {
+				return "", "", 0, fmt.Errorf("get source snapshot: %w", err)
+			}
+			fromSnap = snap
 		}
 	}
 	if !targetRef.Target.IsZero() {
-		toSnap, _ = store.GetSnapshot(ctx, core.SnapshotID{Hash: targetRef.Target})
+		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: targetRef.Target})
+		if err != nil {
+			return "", "", 0, fmt.Errorf("get target snapshot: %w", err)
+		}
+		toSnap = snap
 	}
 	diffCount := countSnapshotDiff(fromSnap, toSnap)
 
@@ -224,7 +251,12 @@ func countSnapshotDiff(from, to *core.Snapshot) int {
 //
 // Only the reference is removed; snapshots remain in storage and can be
 // reclaimed later by a future prune/GC command.
-func DeleteBranch(ctx context.Context, store storage.Storer, name string) error {
+func DeleteBranch(ctx context.Context, store storage.Storer, cwd, name string) error {
+	if err := AcquireWorkspaceLock(cwd); err != nil {
+		return fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(cwd)
+
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
@@ -233,6 +265,9 @@ func DeleteBranch(ctx context.Context, store storage.Storer, name string) error 
 	}
 
 	if _, err := store.GetRef(ctx, "heads/"+name); err != nil {
+		if !errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("check branch existence: %w", err)
+		}
 		return fmt.Errorf("branch '%s' not found: %w", name, ErrBranchNotFound)
 	}
 
@@ -258,7 +293,12 @@ func DeleteBranch(ctx context.Context, store storage.Storer, name string) error 
 //
 // The operation is ordered as SetRef(new) then DeleteRef(old) so that a crash
 // leaves a duplicate rather than a missing branch, which is safer to recover.
-func RenameBranch(ctx context.Context, store storage.Storer, oldName, newName string) error {
+func RenameBranch(ctx context.Context, store storage.Storer, cwd, oldName, newName string) error {
+	if err := AcquireWorkspaceLock(cwd); err != nil {
+		return fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(cwd)
+
 	if oldName == "" {
 		return fmt.Errorf("old branch name is empty")
 	}
@@ -274,6 +314,9 @@ func RenameBranch(ctx context.Context, store storage.Storer, oldName, newName st
 	// than silently treated as a successful no-op.
 	oldRef, err := store.GetRef(ctx, "heads/"+oldName)
 	if err != nil {
+		if !errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("check branch existence: %w", err)
+		}
 		return fmt.Errorf("branch '%s' not found: %w", oldName, ErrBranchNotFound)
 	}
 
@@ -291,6 +334,8 @@ func RenameBranch(ctx context.Context, store storage.Storer, oldName, newName st
 
 	if _, err := store.GetRef(ctx, "heads/"+newName); err == nil {
 		return fmt.Errorf("branch '%s' already exists: %w", newName, ErrBranchAlreadyExists)
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		return fmt.Errorf("check branch existence: %w", err)
 	}
 
 	// Create the new reference first. If this fails, the old one is intact.

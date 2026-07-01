@@ -2,10 +2,9 @@ package binary
 
 import (
 	"github.com/your-org/drift/chunker"
+	"github.com/your-org/drift/core"
 )
 
-// ChunkerFor returns the chunking strategy for a binary file of the given
-// size. Binary files use the shared binary-class 3-tier strategy.
-func (e *BinaryEngine) ChunkerFor(fileSize int64) chunker.Chunker {
-	return chunker.BinaryChunkerFor(fileSize)
+func (e *BinaryEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
+	return chunker.BinaryChunkerFor(fileSize, cfg)
 }

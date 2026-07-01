@@ -5,7 +5,6 @@ package porcelain
 import (
 	"fmt"
 	"os/exec"
-	"strings"
 	"syscall"
 )
 
@@ -13,17 +12,15 @@ func setSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
 }
 
+const processQueryLimitedInformation = 0x1000
+
 func processExists(pid int) bool {
-	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV")
-	out, err := cmd.Output()
+	h, err := syscall.OpenProcess(processQueryLimitedInformation, false, uint32(pid))
 	if err != nil {
-		return false
+		return err == syscall.ERROR_ACCESS_DENIED
 	}
-	output := strings.TrimSpace(string(out))
-	if output == "" {
-		return false
-	}
-	return strings.Contains(output, ",")
+	syscall.CloseHandle(h)
+	return true
 }
 
 func killProcess(pid int) error {

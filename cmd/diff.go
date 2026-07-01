@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/core"
@@ -20,9 +21,12 @@ var diffCmd = &cobra.Command{
 	Use:   "diff [<id1>] [<id2>] [<file>]",
 	Short: "Show changes between snapshots or workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
-		store, _, err := porcelain.OpenProject(cwd)
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		store, cfg, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
 		}
@@ -32,33 +36,32 @@ var diffCmd = &cobra.Command{
 			snap := resolveHeadSnapshot(ctx, store)
 			if snap == nil {
 				statusFailed("Diff", "no snapshot to compare against.", "use 'drift save -m \"message\"' to create one first.")
-				return nil
+				return ErrSilent
 			}
-			diffWorkspaceVsSnapshot(store, cwd, snap)
+			return diffWorkspaceVsSnapshot(store, cwd, snap, &cfg.Core)
 		} else if len(args) == 1 {
 			// Try as snapshot ID first
 			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 != nil {
-				diffWorkspaceVsSnapshot(store, cwd, snap1)
-				return nil
+				return diffWorkspaceVsSnapshot(store, cwd, snap1, &cfg.Core)
 			}
 			// Fall back: treat as file path, compare with HEAD
 			headSnap := resolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
 				statusFailed("Diff", "no snapshot to compare against.", "use 'drift save -m \"message\"' to create one first.")
-				return nil
+				return ErrSilent
 			}
 			return diffWorkspaceFileVsSnapshot(ctx, store, cwd, headSnap, args[0])
 		} else if len(args) == 3 {
 			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
-				return nil
+				return ErrSilent
 			}
 			snap2 := resolveSnapshot(ctx, store, args[1])
 			if snap2 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[1]), "use 'drift log' to list available snapshots.")
-				return nil
+				return ErrSilent
 			}
 			filePath := args[2]
 			diffFileInSnapshots(ctx, store, cwd, snap1, snap2, filePath)
@@ -66,12 +69,12 @@ var diffCmd = &cobra.Command{
 			snap1 := resolveSnapshot(ctx, store, args[0])
 			if snap1 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
-				return nil
+				return ErrSilent
 			}
 			snap2 := resolveSnapshot(ctx, store, args[1])
 			if snap2 == nil {
 				statusFailed("Diff", fmt.Sprintf("snapshot '%s' not found.", args[1]), "use 'drift log' to list available snapshots.")
-				return nil
+				return ErrSilent
 			}
 			diffSnapshots(store, snap1, snap2)
 		}
@@ -95,7 +98,7 @@ func resolveHeadSnapshot(ctx context.Context, store storage.Storer) *core.Snapsh
 	return snap
 }
 
-func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *core.Snapshot) {
+func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *core.Snapshot, cfg *core.CoreConfig) error {
 	snapFiles := make(map[string]*core.FileEntry)
 	for i := range snapshot.Files {
 		snapFiles[snapshot.Files[i].Path] = &snapshot.Files[i]
@@ -104,8 +107,11 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 	var added, modified []string
 	var deleted []string
 
-	_ = fsutil.Walk(workDir, func(path string, info os.FileInfo) error {
-		rel, _ := pathutil.Rel(workDir, path)
+	err := fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
+		rel, err := pathutil.Rel(workDir, path)
+		if err != nil {
+			return fmt.Errorf("resolve relative path %s: %w", path, err)
+		}
 		if info.IsDir() {
 			return nil
 		}
@@ -119,9 +125,7 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 		if info.Size() != snapEntry.Size {
 			modified = append(modified, rel)
 		} else {
-			// Same size: compare content hash using the same method as
-			// CreateSnapshot (blake3 of chunk hashes), not raw content hash.
-			workHash, hashErr := porcelain.ComputeFileHash(path)
+			workHash, hashErr := porcelain.ComputeFileHash(path, cfg)
 			if hashErr != nil || workHash != snapEntry.Hash {
 				modified = append(modified, rel)
 			}
@@ -129,12 +133,21 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 		delete(snapFiles, rel)
 		return nil
 	})
+	if err != nil {
+		return fmt.Errorf("walk workspace: %w", err)
+	}
 
 	for path := range snapFiles {
 		deleted = append(deleted, path)
 	}
 
 	fmt.Printf(">>> Diff workspace → %s\n", snapshot.ShortID())
+	total := len(added) + len(modified) + len(deleted)
+	if total == 0 {
+		fmt.Println()
+		fmt.Println("  No changes.")
+		return nil
+	}
 	fmt.Println()
 	for _, p := range added {
 		fmt.Printf("  +  %s\n", p)
@@ -145,8 +158,8 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 	for _, p := range deleted {
 		fmt.Printf("  -  %s\n", p)
 	}
-	total := len(added) + len(modified) + len(deleted)
-	fmt.Printf("\n  %d files: +%d ~%d -%d\n", total, len(added), len(modified), len(deleted))
+	summaryLine(total, len(added), len(modified), len(deleted))
+	return nil
 }
 
 // diffWorkspaceFileVsSnapshot shows content-level diff for a single file: workspace vs snapshot.
@@ -264,7 +277,7 @@ func diffSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot) {
 			continue
 		}
 
-		if entry1.Size != entry2.Size || !chunkHashesEqual(entry1.Chunks, entry2.Chunks) {
+		if entry1.Size != entry2.Size || !slices.Equal(entry1.Chunks, entry2.Chunks) {
 			modified = append(modified, entry2.Path)
 		}
 		delete(snap1Files, entry2.Path)
@@ -275,6 +288,12 @@ func diffSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot) {
 	}
 
 	fmt.Printf(">>> Diff %s → %s\n", snap1.ShortID(), snap2.ShortID())
+	total := len(added) + len(modified) + len(deleted)
+	if total == 0 {
+		fmt.Println()
+		fmt.Println("  No changes.")
+		return
+	}
 	fmt.Println()
 	for _, p := range added {
 		fmt.Printf("  +  %s\n", p)
@@ -285,8 +304,7 @@ func diffSnapshots(store storage.Storer, snap1, snap2 *core.Snapshot) {
 	for _, p := range deleted {
 		fmt.Printf("  -  %s\n", p)
 	}
-	total := len(added) + len(modified) + len(deleted)
-	fmt.Printf("\n  %d files: +%d ~%d -%d\n", total, len(added), len(modified), len(deleted))
+	summaryLine(total, len(added), len(modified), len(deleted))
 }
 
 func diffFileInSnapshots(ctx context.Context, store storage.Storer, workDir string, snap1, snap2 *core.Snapshot, filePath string) {
@@ -324,7 +342,11 @@ func diffFileInSnapshots(ctx context.Context, store storage.Storer, workDir stri
 		fmt.Fprintf(os.Stderr, "  warning: '%s' not found in either snapshot.\n", filePath)
 		return
 	}
-	if entry1.Size != entry2.Size || !chunkHashesEqual(entry1.Chunks, entry2.Chunks) {
+	if entry1.Size == entry2.Size && slices.Equal(entry1.Chunks, entry2.Chunks) {
+		fmt.Println("  (no change)")
+		return
+	}
+	{
 		var data1, data2 []byte
 		for _, h := range entry1.Chunks {
 			chunk, err := store.GetChunk(ctx, h)
@@ -352,9 +374,13 @@ func diffFileInSnapshots(ctx context.Context, store storage.Storer, workDir stri
 			diff, _ := engine.Diff(snap1.ShortID()+"/"+filePath, data1, snap2.ShortID()+"/"+filePath, data2)
 			fmt.Println(diff)
 		} else {
-			fmt.Printf("  Size:       %s → %s (+%s)\n",
-				formatSize(entry1.Size), formatSize(entry2.Size),
-				formatSize(entry2.Size-entry1.Size))
+			sizeDiff := formatSize(entry2.Size - entry1.Size)
+			sign := "+"
+			if entry2.Size < entry1.Size {
+				sign = ""
+			}
+			fmt.Printf("  Size:       %s → %s (%s%s)\n",
+				formatSize(entry1.Size), formatSize(entry2.Size), sign, sizeDiff)
 			oldDims := imageDimensions(data1)
 			newDims := imageDimensions(data2)
 			if oldDims != "" || newDims != "" {

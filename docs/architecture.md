@@ -463,7 +463,7 @@ type Detector interface {
 // 每个引擎根据文件大小自治决定分块策略，使策略与理解该类型的引擎共置一处；
 // 未来引擎（如 PSD）可返回结构感知的 chunker，而无需改动 snapshot 层。
 type ChunkerSelector interface {
-    ChunkerFor(fileSize int64) chunker.Chunker
+    ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker
 }
 
 // Differ 计算两个版本文件内容的差异
@@ -578,11 +578,11 @@ type Chunk struct {
     Flags    ChunkFlag     // 块标记
 }
 
+// ChunkFlag represents flags for a chunk.
 type ChunkFlag uint8
 const (
-    ChunkCompressed ChunkFlag = 1 << iota  // 已 zstd 压缩
-    ChunkFirst                             // 文件首块
-    ChunkLast                              // 文件尾块
+    ChunkFlagNone       ChunkFlag = 0
+    ChunkFlagCompressed ChunkFlag = 1  // 已 zstd 压缩（磁盘格式标志）
 )
 
 
@@ -590,20 +590,19 @@ const (
 
 // FileEntry 快照中的文件条目
 type FileEntry struct {
-    Path     string        // 文件路径
-    Mode     FileMode      // 文件模式（普通/目录/符号链接）
-    Size     int64         // 文件大小
-    ModTime  time.Time     // 修改时间（用于变化检测）
-    Chunks   []Hash        // 有序的分块哈希列表
-    Metadata FileMetadata  // 文件元数据（MIME/尺寸/颜色空间等）
+    Path     string         // 文件路径
+    Mode     FileMode       // 文件模式（普通/目录/符号链接）
+    Size     int64          // 文件大小
+    ModTime  int64          // 修改时间（unix 时间戳，用于变化检测）
+    Chunks   []Hash         // 有序的分块哈希列表
+    Hash     Hash           // 文件内容哈希
+    Metadata *FileMetadata  // 文件元数据（MIME/尺寸/颜色空间等，可选）
 }
 
 // FileMetadata 文件类型相关的元数据
 type FileMetadata struct {
-    MIMEType    string  `json:"mime"`              // "image/png", "application/x-photoshop"
-    ImageWidth  int     `json:"width,omitempty"`   // 图片宽
-    ImageHeight int     `json:"height,omitempty"`  // 图片高
-    Duration    float64 `json:"duration,omitempty"` // 音视频时长
+    MimeType string            `json:"mime,omitempty"`   // "image/png", "application/x-photoshop"
+    Extra    map[string]string `json:"extra,omitempty"`  // 扩展元数据键值对
 }
 
 
@@ -612,14 +611,19 @@ type FileMetadata struct {
 // Snapshot 一次保存操作创建的快照
 // 等价于 Git 的 commit，但语义是"检查点"而非"提交"
 type Snapshot struct {
-    ID        SnapshotID    // 快照 ID = BLAKE3(序列化内容)
-    PrevID    SnapshotID    // 父快照 ID（DAG 边）
+    ID        SnapshotID    // 快照 ID（包含 Hash 字段）
+    PrevID    *SnapshotID   // 父快照 ID（DAG 边），首个快照为 nil
     Message   string        // 快照消息
     Author    string        // 作者
-    Timestamp time.Time     // 时间戳
-    Files     []*FileEntry  // 文件树（扁平列表，非递归树结构）
+    Timestamp int64         // unix 时间戳
+    Files     []FileEntry   // 文件树（扁平列表，非递归树结构）
     Tags      []string      // 快照标签
     TotalSize int64         // 快照总大小（所有文件之和）
+}
+
+// SnapshotID 快照唯一标识
+type SnapshotID struct {
+    Hash Hash
 }
 
 
@@ -627,17 +631,17 @@ type Snapshot struct {
 
 // Reference 引用 —— 分支或标签
 type Reference struct {
-    Type   RefType
-    Name   string       // "refs/heads/main", "refs/tags/v1.0"
-    Target SnapshotID   // 指向的快照 ID
-    SymRef string       // 符号引用目标（如 "heads/main"），非空时表示这是一个 symref
+    Name   string       // "HEAD", "heads/main", "tags/v1.0"
+    Type   RefType      // 引用类型
+    Target Hash         // 指向的快照哈希（解析后）
+    SymRef string       // 符号引用目标（如 "refs/heads/main"），非空时表示 symref
 }
 
-type RefType uint8
+type RefType string
 const (
-    RefBranch RefType = iota  // 分支引用（可移动）
-    RefTag                    // 标签引用（不可移动）
-    RefHead                   // HEAD（当前分支）
+    RefTypeBranch RefType = "branch"  // 分支引用（可移动）
+    RefTypeTag    RefType = "tag"     // 标签引用（不可移动）
+    RefTypeHead   RefType = "HEAD"    // HEAD（当前分支）
 )
 
 
@@ -675,11 +679,14 @@ type UserConfig struct {
 }
 
 type CoreConfig struct {
-    ChunkMin    int  // 最小块大小（字节，默认 128KB）
-    ChunkAvg    int  // 平均块大小（字节，默认 256KB）
-    ChunkMax    int  // 最大块大小（字节，默认 512KB）
-    Compression bool // 是否启用压缩（默认 true）
-    AutoPreview bool // save 时是否自动生成预览（默认 true）
+    ChunkMinSize     int    `json:"chunk_min_size"`     // 最小块大小（字节，默认 128KB）
+    ChunkAvgSize     int    `json:"chunk_avg_size"`     // 平均块大小（字节，默认 256KB）
+    ChunkMaxSize     int    `json:"chunk_max_size"`     // 最大块大小（字节，默认 512KB）
+    Compression      bool   `json:"compression"`        // 是否启用压缩（默认 true）
+    CompressionLevel int    `json:"compression_level"`  // zstd 压缩级别（1-19，默认 3）
+    IgnoreFile       string `json:"ignore_file"`        // 忽略规则文件名（默认 .driftignore）
+    AutoSaveInterval int    `json:"auto_save_interval"` // 自动保存间隔（秒，默认 300）
+    AutoSaveKeep     int    `json:"auto_save_keep"`     // 自动保存快照保留数量（默认 10）
 }
 ```
 
@@ -687,13 +694,14 @@ type CoreConfig struct {
 
 ```
 .drift/
-├── HEAD                  # 文本文件："ref: heads/<branch>"（符号引用 symref）
-├── config                # 项目配置（TOML 格式）
+├── HEAD                  # 文本文件："ref: refs/heads/<branch>"（符号引用 symref）
+├── config                # 项目配置（JSON 格式）
 ├── index                 # 工作区索引（protobuf 二进制）
+├── workspace.lock        # 工作区并发锁文件（JSON，含 PID + 时间戳）
 │
 ├── chunks/               # 内容寻址的块存储
 │   └── ab/
-│       └── cdef1234...   # 块文件：{hash[0:2]}/{hash[2:]}
+│       └── cdef1234...   # 块文件：{hash[0:2]}/{hash[2:]}，1字节头部+数据
 │
 ├── snapshots/            # 快照对象
 │   └── 12/
@@ -701,23 +709,25 @@ type CoreConfig struct {
 │
 ├── refs/
 │   ├── heads/
-│   │   ├── main          # → snapshot_id
-│   │   └── 新配色方案       # → snapshot_id
+│   │   ├── main          # → snapshot_id (hex)
+│   │   └── 新配色方案       # → snapshot_id (hex)
 │   └── tags/
-│       └── 交稿v1         # → snapshot_id
+│       └── 交稿v1         # → snapshot_id (hex)
 │
 ├── previews/             # 预览缓存
 │   └── ab/
 │       ├── cdef_thumb_128.jpg   # 128px 缩略图
 │       └── cdef_thumb_512.jpg   # 512px 缩略图
 │
-├── logs/                 # 操作日志
-│   └── drift.log
-│
-└── lock                  # 并发锁文件
+└── logs/                 # 操作日志
+    └── drift.log
 ```
 
-> **HEAD symref 解析**：HEAD 文件以符号引用（symref）格式存储，内容为 `ref: heads/<branch>`。调用 `GetRef("HEAD")` 时会识别 `ref:` 前缀，自动递归解析 symref 链（HEAD → heads/main → snapshot 哈希），返回的 `Reference` 中 `SymRef` 字段记录符号目标，`Target` 字段为最终解析到的快照哈希。
+> **HEAD symref 解析**：HEAD 文件位于 `.drift/HEAD`，以符号引用（symref）格式存储，内容为 `ref: refs/heads/<branch>`（含 `refs/` 前缀）。调用 `GetRef("HEAD")` 时会识别 `ref:` 前缀，自动递归解析 symref 链（HEAD → refs/heads/main → snapshot 哈希），返回的 `Reference` 中 `SymRef` 字段记录符号目标，`Target` 字段为最终解析到的快照哈希。最大 symref 递归深度为 8 层。
+>
+> **块文件格式**：每个块文件以 1 字节头部开头，最低位（0x01）为压缩标志，随后是原始或 zstd 压缩的块数据。读取时先校验解压后数据的 BLAKE3 哈希与文件名一致，防止数据损坏。
+>
+> **工作区锁**：并发控制由 porcelain 层的 `workspace.lock` 文件负责（无 storage.lock）。锁文件为 JSON 格式，包含 PID 和时间戳，支持陈旧锁自动检测（超时 10 分钟或进程不存在时自动释放）。使用 `O_CREATE|O_EXCL` 原子创建，保证无竞争。
 
 ### 4.3 序列化格式
 
@@ -727,7 +737,7 @@ type CoreConfig struct {
 | **Snapshot** | Protocol Buffers | 紧凑、向后兼容、语言无关 |
 | **Index** | Protocol Buffers | 同上 |
 | **Reference** | 纯文本（行分隔） | 人可读、易调试 |
-| **Config** | TOML | 人可读、易编辑 |
+| **Config** | JSON | 简单、Go 原生支持、易编辑 |
 | **Preview** | 原始二进制 (JPEG/WebP) | 无需反序列化，直接使用 |
 
 ---
@@ -1035,8 +1045,8 @@ func (fs *FSStorage) PutChunk(chunk *core.Chunk) error {
 
 | 场景 | 策略 |
 |------|------|
-| **多实例写入** | 文件锁 `.drift/lock`，非锁持有者立即报错退出 |
-| **watch + save 冲突** | watch 检测到锁 → 跳过本次保存 → 等待下次周期 |
+| **多实例写入** | 工作区文件锁 `.drift/workspace.lock`（porcelain 层），非锁持有者立即报错退出；无 storage.lock |
+| **watch + save 冲突** | watch 检测到锁 → 跳过本次保存 → 等待下次周期；陈旧锁（>10分钟或进程死亡）自动释放 |
 | **大文件写入** | 块级写入无锁冲突（内容寻址天然无竞争） |
 
 ### 7.3 敏感文件保护
@@ -1148,11 +1158,8 @@ func (e *ClipStudioEngine) DetectByHeuristic(path string, header []byte) bool {
     return false // 无需启发式兜底
 }
 
-// ChunkerFor 按文件大小返回分块策略。
-// 可复用 chunker.BinaryChunkerFor 共享策略，或用 NewFastCDCChunkerWithParams 自定义粒度，
-// 也可返回结构感知的专用 chunker（如 PSDLayerChunker）。
-func (e *ClipStudioEngine) ChunkerFor(fileSize int64) chunker.Chunker {
-    return chunker.BinaryChunkerFor(fileSize)
+func (e *ClipStudioEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
+    return chunker.BinaryChunkerFor(fileSize, cfg)
 }
 
 func (e *ClipStudioEngine) Diff(oldPath string, oldData []byte, newPath string, newData []byte) (string, error) {
@@ -1276,7 +1283,7 @@ storage 接口使用语义化版本：
 
 ### 10.4 分块策略（各引擎 ChunkerFor 自治 + 文件大小 5 档自适应）
 
-drift 不再使用统一的 FastCDC 默认参数，而是由各引擎通过 `ChunkerFor(fileSize)` 自治决定分块策略。`porcelain/snapshot.go` 的 `chunkFile(r, engine, fileSize)` 调用 `engine.ChunkerFor(fileSize)` 获取 chunker：返回 nil 走整文件单块路径，否则 `c.Chunk(r)`。text 引擎实现 2 档（<64KB 整文件 / 否则 FastCDC 4K-8K-16K）；image/video/binary 引擎共用 `chunker.BinaryChunkerFor(fileSize)` 的 3 档策略。合计仍是下表 5 档效果。`CreateSnapshot` 与 `ComputeFileHash` 共用 `chunkFile`，保证两路计算得到完全相同的分块布局与文件哈希。
+drift 不再使用统一的 FastCDC 默认参数，而是由各引擎通过 `ChunkerFor(fileSize, cfg)` 自治决定分块策略。`porcelain/snapshot.go` 的 `chunkFile(r, engine, fileSize, cfg)` 调用 `engine.ChunkerFor(fileSize, cfg)` 获取 chunker：返回 nil 走整文件单块路径，否则 `c.Chunk(r)`。text 引擎实现 2 档（<64KB 整文件 / 否则 FastCDC 4K-8K-16K）；image/video/binary 引擎共用 `chunker.BinaryChunkerFor(fileSize, cfg)` 的 3 档策略。合计仍是下表 5 档效果。`CreateSnapshot` 与 `ComputeFileHash` 共用 `chunkFile`，保证两路计算得到完全相同的分块布局与文件哈希。
 
 | 文件特征 | 分块策略 | 理由 |
 |----------|---------|------|
@@ -1296,19 +1303,30 @@ const (
     BinaryHugeThreshold  = 500 * 1024 * 1024  // 500MB
 )
 
-func BinaryChunkerFor(fileSize int64) Chunker {
+func BinaryChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
+    var minSize, avgSize, maxSize int
+    if cfg != nil {
+        minSize = cfg.ChunkMinSize
+        avgSize = cfg.ChunkAvgSize
+        maxSize = cfg.ChunkMaxSize
+    }
+    if minSize <= 0 || avgSize <= 0 || maxSize <= 0 {
+        minSize = 128 * 1024
+        avgSize = 256 * 1024
+        maxSize = 512 * 1024
+    }
     switch {
     case fileSize < BinaryLargeThreshold:
-        return NewFastCDCChunker()                              // 128K-256K-512K
+        return NewFastCDCChunkerWithParams(minSize, avgSize, maxSize)  // 使用配置参数
     case fileSize < BinaryHugeThreshold:
-        return NewFastCDCChunkerWithParams(1<<20, 2<<20, 4<<20) // 1M-2M-4M
+        return NewFastCDCChunkerWithParams(avgSize*4, avgSize*8, avgSize*16)
     default:
-        return NewFixedChunker(8 << 20)                         // 8M 定长
+        return NewFixedChunker(avgSize * 32)
     }
 }
 
 // filetype/text/chunker.go —— 文本引擎自治 2 档
-func (e *TextEngine) ChunkerFor(fileSize int64) chunker.Chunker {
+func (e *TextEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
     if fileSize < 64*1024 {
         return nil // 整文件单块，由 chunkFile 直接拼一个 Chunk
     }
@@ -1316,13 +1334,13 @@ func (e *TextEngine) ChunkerFor(fileSize int64) chunker.Chunker {
 }
 
 // filetype/image|video|binary/chunker.go —— 复用共享策略
-func (e *ImageEngine) ChunkerFor(fileSize int64) chunker.Chunker {
-    return chunker.BinaryChunkerFor(fileSize)
+func (e *ImageEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
+    return chunker.BinaryChunkerFor(fileSize, cfg)
 }
 
 // porcelain/snapshot.go —— 调用方：策略选择由引擎自治，snapshot 层零分支
-func chunkFile(r io.Reader, engine filetype.Engine, fileSize int64) ([]*core.Chunk, error) {
-    c := engine.ChunkerFor(fileSize)
+func chunkFile(r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
+    c := engine.ChunkerFor(fileSize, cfg)
     if c == nil {
         // 整文件单块：读全部内容，构造单个 Chunk{Hash: BLAKE3(content), ...}
         // ...

@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,8 +25,11 @@ var branchCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
@@ -45,7 +48,7 @@ var branchCmd = &cobra.Command{
 				return fmt.Errorf("branch delete accepts at most one argument")
 			}
 			name := args[0]
-			err := porcelain.DeleteBranch(ctx, store, name)
+			err := porcelain.DeleteBranch(ctx, store, cwd, name)
 			if err != nil {
 				var hint string
 				switch {
@@ -59,11 +62,11 @@ var branchCmd = &cobra.Command{
 					hint = "'main' is the default branch and cannot be removed."
 					statusFailed("Branch", err.Error(), hint)
 				default:
-					statusFailed("Branch", err.Error(), "")
-				}
-				return nil
+				statusFailed("Branch", err.Error(), "")
 			}
-			statusOK("Branch deleted")
+			return ErrSilent
+		}
+		statusOK("Branch deleted")
 			fmt.Printf("'%s' has been removed.\n", name)
 			return nil
 		}
@@ -88,7 +91,7 @@ var branchCmd = &cobra.Command{
 				oldName = args[0]
 				newName = args[1]
 			}
-			err := porcelain.RenameBranch(ctx, store, oldName, newName)
+			err := porcelain.RenameBranch(ctx, store, cwd, oldName, newName)
 			if err != nil {
 				var hint string
 				switch {
@@ -102,11 +105,11 @@ var branchCmd = &cobra.Command{
 					hint = "'main' is the default branch and cannot be renamed."
 					statusFailed("Branch", err.Error(), hint)
 				default:
-					statusFailed("Branch", err.Error(), "")
-				}
-				return nil
+				statusFailed("Branch", err.Error(), "")
 			}
-			statusOK("Branch renamed")
+			return ErrSilent
+		}
+		statusOK("Branch renamed")
 			fmt.Printf("'%s' has been renamed to '%s'.\n", oldName, newName)
 			return nil
 		}
@@ -116,6 +119,24 @@ var branchCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
+			// Sort: current branch first, then others alphabetically.
+			sort.Slice(branches, func(i, j int) bool {
+				iName := branches[i].Name
+				jName := branches[j].Name
+				if idx := strings.LastIndex(iName, "/"); idx >= 0 {
+					iName = iName[idx+1:]
+				}
+				if idx := strings.LastIndex(jName, "/"); idx >= 0 {
+					jName = jName[idx+1:]
+				}
+				if iName == current {
+					return true
+				}
+				if jName == current {
+					return false
+				}
+				return iName < jName
+			})
 			fmt.Printf(">>> Branches (%d)\n", len(branches))
 			for _, b := range branches {
 				displayName := b.Name
@@ -135,14 +156,14 @@ var branchCmd = &cobra.Command{
 			return fmt.Errorf("too many arguments for branch creation")
 		}
 		name := args[0]
-		err = porcelain.CreateBranch(ctx, store, name)
+		err = porcelain.CreateBranch(ctx, store, cwd, name)
 		if err != nil {
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				statusFailed("Branch", fmt.Sprintf("'%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
-				return nil
+				return ErrSilent
 			}
 			statusFailed("Branch", err.Error(), "")
-			return nil
+			return ErrSilent
 		}
 		sid := "no commits yet"
 		headRef, err := store.GetRef(ctx, "HEAD")

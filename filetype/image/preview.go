@@ -96,19 +96,29 @@ func webpDimensions(data []byte) (int, int) {
 	return 0, 0
 }
 
-// bmpDimensions parses pixel dimensions from a BMP DIB header. The standard
-// BITMAPINFOHEADER stores width and height as signed 32-bit little-endian
-// integers at offsets 18 and 22. Height may be negative for top-down bitmaps;
-// the absolute value is returned.
+// bmpDimensions parses pixel dimensions from a BMP DIB header. It handles
+// BITMAPCOREHEADER (DIB size 12, 16-bit dimensions at offsets 18/20) and
+// BITMAPINFOHEADER and later (32-bit dimensions at offsets 18/22).
 func bmpDimensions(data []byte) (int, int) {
+	if len(data) < 18 {
+		return 0, 0
+	}
+	dibSize := binary.LittleEndian.Uint32(data[14:18])
+	if dibSize == 12 {
+		// BITMAPCOREHEADER: 16-bit width/height at offsets 18/20
+		if len(data) < 22 {
+			return 0, 0
+		}
+		w := int(binary.LittleEndian.Uint16(data[18:20]))
+		h := int(binary.LittleEndian.Uint16(data[20:22]))
+		return w, h
+	}
+	// BITMAPINFOHEADER and later: 32-bit width/height at offsets 18/22
 	if len(data) < 26 {
 		return 0, 0
 	}
-	w := int(int32(binary.LittleEndian.Uint32(data[18:22])))
-	h := int(int32(binary.LittleEndian.Uint32(data[22:26])))
-	if h < 0 {
-		h = -h
-	}
+	w := int(binary.LittleEndian.Uint32(data[18:22]))
+	h := int(binary.LittleEndian.Uint32(data[22:26]))
 	return w, h
 }
 

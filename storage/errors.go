@@ -17,10 +17,6 @@ var (
 	// ErrPermission is returned when an operation is denied by permissions.
 	ErrPermission = errors.New("drift: permission denied")
 
-	// ErrLocked is returned when the storage is locked by another live
-	// drift process and the requested operation cannot proceed.
-	ErrLocked = errors.New("drift: locked by another process")
-
 	// ErrInvalidRef is returned when a reference name or value is malformed.
 	ErrInvalidRef = errors.New("drift: invalid reference")
 

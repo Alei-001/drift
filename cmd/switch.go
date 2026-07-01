@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,8 +16,11 @@ var switchCmd = &cobra.Command{
 	Short: "Switch to a branch",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 		store, cfg, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
@@ -27,24 +29,24 @@ var switchCmd = &cobra.Command{
 
 		name := args[0]
 		author := cfg.User.Name
-		autosaveID, fromBranch, diffCount, err := porcelain.SwitchBranch(ctx, store, cwd, name, switchCreate, author)
+		autosaveID, fromBranch, diffCount, err := porcelain.SwitchBranch(ctx, store, cwd, name, switchCreate, author, &cfg.Core)
 		if err != nil {
 			if errors.Is(err, porcelain.ErrBranchNotFound) {
 				statusFailed("Switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch' to list existing branches.")
-				return nil
+			return ErrSilent
 			}
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				statusFailed("Switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
-				return nil
+			return ErrSilent
 			}
 			statusFailed("Switch", err.Error(), "")
-			return nil
+		return ErrSilent
 		}
 
 		statusOK("Switched to '%s'", name)
 		fmt.Println()
 		if fromBranch != "" {
-			fmt.Printf("  %d files differ from %s.\n", diffCount, fromBranch)
+			fmt.Printf("  %d %s differ from %s.\n", diffCount, pluralFile(diffCount), fromBranch)
 		}
 		if autosaveID != "" {
 			fmt.Printf("  autosave: [%s]\n", autosaveID)

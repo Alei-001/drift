@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/your-org/drift/core"
@@ -125,6 +126,26 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 		}
 		for _, f := range snap.Files {
 			for _, c := range f.Chunks {
+				if !c.IsZero() {
+					reachableChunks[c] = true
+				}
+			}
+		}
+	}
+
+	// Include chunks referenced by the workspace index. The index may
+	// reference chunks from snapshots that are otherwise unreachable
+	// (e.g. after a partial restore or branch switch), and deleting them
+	// would corrupt the index.
+	idx, err := store.GetIndex(ctx)
+	if err != nil {
+		if !errors.Is(err, storage.ErrNotFound) {
+			return report, fmt.Errorf("get workspace index: %w", err)
+		}
+		// No index exists yet; nothing to mark as reachable.
+	} else {
+		for _, e := range idx.Entries {
+			for _, c := range e.Chunks {
 				if !c.IsZero() {
 					reachableChunks[c] = true
 				}

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -16,12 +15,15 @@ var checkCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Verify repository integrity",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			statusFailed("Check", ".drift/ directory not found.", "run 'drift init' first.")
-			return nil
+		return ErrSilent
 		}
 		defer store.Close()
 
@@ -60,7 +62,17 @@ var checkCmd = &cobra.Command{
 			}
 		}
 
-		if missing == 0 && corrupt == 0 {
+		// Verify snapshot integrity (BLAKE3 hash of serialized proto).
+		snapshotCorrupt := 0
+		for _, snap := range snapshots {
+			// Re-fetch via GetSnapshot which performs integrity verification.
+			if _, err := store.GetSnapshot(ctx, snap.ID); err != nil {
+				snapshotCorrupt++
+				continue
+			}
+		}
+
+		if missing == 0 && corrupt == 0 && snapshotCorrupt == 0 {
 			statusOK("Check")
 			fmt.Printf("%d blocks passed.\n", totalBlocks)
 
@@ -77,12 +89,18 @@ var checkCmd = &cobra.Command{
 		fmt.Printf("  blocks:  %d total, %d passed\n", totalBlocks, totalBlocks-corrupt-missing)
 		fmt.Printf("  corrupt: %d\n", corrupt)
 		fmt.Printf("  missing: %d\n", missing)
+		if snapshotCorrupt > 0 {
+			fmt.Printf("  snapshots: %d corrupt\n", snapshotCorrupt)
+		}
 		fmt.Println()
 		if corrupt > 0 {
-			fmt.Println("  corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <id>'.")
+			fmt.Println("  hint: corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <id>'.")
 		}
 		if missing > 0 {
-			fmt.Println("  missing chunks indicate data loss. Restore from a known-good snapshot using 'drift restore <id>'.")
+			fmt.Println("  hint: missing chunks indicate data loss. Restore from a known-good snapshot using 'drift restore <id>'.")
+		}
+		if snapshotCorrupt > 0 {
+			fmt.Println("  hint: corrupt snapshots have damaged metadata. Use 'drift gc' to clean up unreachable snapshots.")
 		}
 		return nil
 	},

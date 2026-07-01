@@ -10,7 +10,11 @@ import (
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/storage/refname"
 )
+
+// Compile-time assertion that MemoryStorage implements storage.Storer.
+var _ storage.Storer = (*MemoryStorage)(nil)
 
 // MemoryStorage implements storage.Storer entirely in memory.
 type MemoryStorage struct {
@@ -96,7 +100,7 @@ func (ms *MemoryStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID)
 }
 
 // ListSnapshots lists all snapshots, sorted by timestamp descending,
-// with optional limit/offset and branch filter.
+// with optional limit/offset pagination.
 func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOptions) ([]*core.Snapshot, error) {
 	var snapshots []*core.Snapshot
 	ms.snapshots.Range(func(key, value any) bool {
@@ -110,20 +114,6 @@ func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOp
 
 	if opts == nil {
 		return snapshots, nil
-	}
-
-	if opts.Branch != "" {
-		branchFilter := opts.Branch
-		filtered := make([]*core.Snapshot, 0, len(snapshots))
-		for _, s := range snapshots {
-			for _, t := range s.Tags {
-				if t == branchFilter {
-					filtered = append(filtered, s)
-					break
-				}
-			}
-		}
-		snapshots = filtered
 	}
 
 	if opts.Offset > 0 {
@@ -155,6 +145,9 @@ func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth
 	if depth > maxSymRefDepth {
 		return nil, fmt.Errorf("symref recursion limit exceeded at %q: %w", name, storage.ErrInvalidRef)
 	}
+	if err := refname.Validate(name); err != nil {
+		return nil, err
+	}
 	v, ok := ms.refs.Load(name)
 	if !ok {
 		return nil, fmt.Errorf("get ref %q: %w", name, storage.ErrNotFound)
@@ -174,6 +167,14 @@ func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth
 
 // SetRef writes a reference.
 func (ms *MemoryStorage) SetRef(ctx context.Context, name string, ref *core.Reference) error {
+	if err := refname.Validate(name); err != nil {
+		return err
+	}
+	if ref.SymRef != "" {
+		if err := refname.Validate(ref.SymRef); err != nil {
+			return err
+		}
+	}
 	ms.refs.Store(name, cloneReference(ref))
 	return nil
 }
@@ -193,6 +194,9 @@ func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.R
 
 // DeleteRef removes a reference.
 func (ms *MemoryStorage) DeleteRef(ctx context.Context, name string) error {
+	if err := refname.Validate(name); err != nil {
+		return err
+	}
 	ms.refs.Delete(name)
 	return nil
 }
@@ -217,7 +221,7 @@ func (ms *MemoryStorage) SetIndex(ctx context.Context, index *core.Index) error 
 
 // GetPreview is a noop stub (Phase 1).
 func (ms *MemoryStorage) GetPreview(ctx context.Context, hash core.Hash, size int) ([]byte, error) {
-	return nil, nil
+	return nil, fmt.Errorf("get preview %s: %w", hash.FullString(), storage.ErrNotFound)
 }
 
 // PutPreview is a noop stub (Phase 1).

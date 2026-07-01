@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
+	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/util/fsutil"
 	"github.com/your-org/drift/util/pathutil"
@@ -25,7 +25,10 @@ type ChangeSummary struct {
 // is compared against cannot be mutated mid-comparison by a concurrent save,
 // switch, or restore (which would otherwise produce a tear: half the files
 // from the old state, half from the new).
-func DetectChanges(ctx context.Context, store storage.Storer, workDir string) (*ChangeSummary, error) {
+func DetectChanges(ctx context.Context, store storage.Storer, workDir string, cfg *core.CoreConfig) (*ChangeSummary, error) {
+	if cfg == nil {
+		cfg = &core.DefaultConfig().Core
+	}
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return nil, fmt.Errorf("acquire workspace lock: %w", err)
 	}
@@ -37,11 +40,14 @@ func DetectChanges(ctx context.Context, store storage.Storer, workDir string) (*
 	}
 
 	workspaceFiles := make(map[string]os.FileInfo)
-	err = fsutil.Walk(workDir, func(path string, info os.FileInfo) error {
+	err = fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
 		if info.IsDir() {
 			return nil
 		}
-		rel, _ := pathutil.Rel(workDir, path)
+		rel, err := pathutil.Rel(workDir, path)
+		if err != nil {
+			return err
+		}
 		workspaceFiles[rel] = info
 		return nil
 	})
@@ -56,11 +62,6 @@ func DetectChanges(ctx context.Context, store storage.Storer, workDir string) (*
 		if info, ok := workspaceFiles[entry.Path]; ok {
 			if info.Size() != entry.Size || info.ModTime().UnixNano() != entry.ModTime {
 				summary.Modified = append(summary.Modified, entry.Path)
-			} else {
-				fileHash, hashErr := ComputeFileHash(filepath.Join(workDir, entry.Path))
-				if hashErr != nil || fileHash != entry.Hash {
-					summary.Modified = append(summary.Modified, entry.Path)
-				}
 			}
 			printed[entry.Path] = true
 		} else {

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -22,12 +21,21 @@ var watchOnCmd = &cobra.Command{
 	Use:   "on",
 	Short: "Start background watching",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if watchInterval <= 0 {
+			return fmt.Errorf("--interval must be a positive number of seconds")
+		}
+		if watchKeep < 0 {
+			return fmt.Errorf("--keep must be zero or a positive number")
+		}
 		pid, err := porcelain.StartDaemon(ctx, cwd, watchInterval, watchKeep)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "use 'drift watch off' to stop it first.")
-			return nil
+		return ErrSilent
 		}
 		statusActive("Watching")
 		fmt.Printf("Daemon started (PID %d). Auto-save every %ds.\n", pid, watchInterval)
@@ -41,12 +49,15 @@ var watchOffCmd = &cobra.Command{
 	Use:   "off",
 	Short: "Stop background watching",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 		autoSaves, pruned, err := porcelain.StopDaemon(ctx, cwd)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "")
-			return nil
+		return ErrSilent
 		}
 		statusOK("Stopped")
 		fmt.Printf("Daemon stopped. %d auto-saves created.\n", autoSaves)
@@ -61,8 +72,11 @@ var watchStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show watch daemon status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 		state, active, err := porcelain.DaemonStatus(ctx, cwd)
 		if err != nil {
 			return err
@@ -77,7 +91,11 @@ var watchStatusCmd = &cobra.Command{
 		elapsed := time.Since(time.Unix(state.StartTime, 0))
 		fmt.Printf("Running since %s (%s ago).\n",
 			time.Unix(state.StartTime, 0).Format("15:04"), formatDuration(elapsed))
-		fmt.Printf("Auto-saves: %d (%d max)\n", state.AutoSaves, watchKeep)
+		maxSaves := state.MaxSaves
+		if maxSaves == 0 {
+			maxSaves = watchKeep
+		}
+		fmt.Printf("Auto-saves: %d (%d max)\n", state.AutoSaves, maxSaves)
 		if state.LastSaveTime > 0 {
 			fmt.Printf("Last save: %s %s\n",
 				time.Unix(state.LastSaveTime, 0).Format("15:04"), state.LastSaveChanges)
@@ -90,14 +108,17 @@ var watchDaemonCmd = &cobra.Command{
 	Use:    "_watch_daemon",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
-		store, _, err := porcelain.OpenProject(cwd)
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		store, cfg, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
 		}
 		defer store.Close()
-		porcelain.RunDaemonLoop(ctx, store, cwd, watchInterval, watchKeep)
+		porcelain.RunDaemonLoop(ctx, store, cwd, watchInterval, watchKeep, &cfg.Core)
 		return nil
 	},
 }

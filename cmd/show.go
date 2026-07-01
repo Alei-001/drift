@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -24,8 +25,11 @@ var showCmd = &cobra.Command{
 	Short: "Show file content from a snapshot",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
@@ -37,7 +41,7 @@ var showCmd = &cobra.Command{
 			headSnap := resolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
 				statusFailed("Show", "no snapshot to show from.", "use 'drift save -m \"message\"' to create one first.")
-				return nil
+				return ErrSilent
 			}
 			idStr = headSnap.ShortID()
 			filePath = args[0]
@@ -49,7 +53,7 @@ var showCmd = &cobra.Command{
 		snapshot := resolveSnapshot(ctx, store, idStr)
 		if snapshot == nil {
 			statusFailed("Show", fmt.Sprintf("snapshot not found: %s.", idStr), "use 'drift log' to list available snapshots.")
-			return nil
+			return ErrSilent
 		}
 
 		var targetEntry *core.FileEntry
@@ -57,7 +61,7 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			statusFailed("Show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
 				"use a relative path from the project root.")
-			return nil
+			return ErrSilent
 		}
 		for i := range snapshot.Files {
 			if snapshot.Files[i].Path == normalizedPath {
@@ -68,7 +72,7 @@ var showCmd = &cobra.Command{
 		if targetEntry == nil {
 			statusFailed("Show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, snapshot.ShortID()),
 				fmt.Sprintf("use 'drift log -v %s' to list files in this snapshot.", snapshot.ShortID()))
-			return nil
+			return ErrSilent
 		}
 
 		var data []byte
@@ -84,15 +88,21 @@ var showCmd = &cobra.Command{
 		if len(header) > 512 {
 			header = header[:512]
 		}
-		engine := filetype.DetectEngine(filePath, header)
+		engine := filetype.DetectEngine(normalizedPath, header)
 
 		// --open: launch system viewer for any file type
 		if showOpen {
 			return openExternal(snapshot, filePath, data)
 		}
 
+		// Unknown file type: refuse to dump raw bytes to the terminal
+		if engine == nil {
+			fmt.Fprintf(os.Stderr, "cannot display binary file (unknown type)\n")
+			return nil
+		}
+
 		// Binary file handling (metadata only)
-		if engine != nil && engine.Name() != "text" {
+		if engine.Name() != "text" {
 			// Show metadata
 			fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
 			fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
@@ -118,13 +128,23 @@ var showCmd = &cobra.Command{
 
 func openExternal(snapshot *core.Snapshot, filePath string, data []byte) error {
 	fmt.Printf(">>> Opening [ok]\n")
-	// Write temp file and open
-	tmpFile, err := os.CreateTemp("", "drift-show-*"+filepathExt(filePath))
+
+	// Use a drift-specific temp directory so old preview files can be
+	// cleaned up on subsequent invocations.
+	tmpDir := filepath.Join(os.TempDir(), "drift-previews")
+	os.MkdirAll(tmpDir, 0755)
+
+	// Best-effort cleanup of stale preview files (older than 1 hour).
+	cleanOldPreviews(tmpDir, time.Hour)
+
+	ext := filepath.Ext(filePath)
+	tmpFile, err := os.CreateTemp(tmpDir, "drift_preview_*"+ext)
 	if err != nil {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
 		os.Remove(tmpPath)
 		return err
 	}
@@ -151,16 +171,23 @@ func openExternal(snapshot *core.Snapshot, filePath string, data []byte) error {
 	return nil
 }
 
-func filepathExt(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '.' {
-			return path[i:]
+// cleanOldPreviews removes files in dir older than maxAge. Best-effort;
+// errors are silently ignored.
+func cleanOldPreviews(dir string, maxAge time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
 		}
-		if path[i] == '/' || path[i] == '\\' {
-			return ""
+		if info.ModTime().Before(cutoff) {
+			os.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
-	return ""
 }
 
 func init() {

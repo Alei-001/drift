@@ -42,5 +42,13 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 
+	// fsync parent directory to ensure the rename is persisted to disk.
+	// Best-effort: on platforms where opening a directory fails (e.g.
+	// Windows), the error is silently ignored.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+
 	return nil
 }

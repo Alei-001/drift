@@ -1,6 +1,7 @@
 package image
 
 import (
+	"encoding/binary"
 	"path/filepath"
 	"strings"
 )
@@ -71,9 +72,17 @@ func detectFormatByMagic(header []byte) string {
 	if len(header) >= 12 && string(header[:4]) == "RIFF" && string(header[8:12]) == "WEBP" {
 		return formatWebP
 	}
-	// BMP: BM
-	if len(header) >= 2 && header[0] == 'B' && header[1] == 'M' {
-		return formatBMP
+	// BMP: "BM" magic plus a valid DIB header size at offset 14-17.
+	// Requiring the DIB size avoids false positives on text files that
+	// happen to start with "BM" (e.g. "BMW parts..."). Known valid DIB
+	// header sizes: 12 (BITMAPCOREHEADER), 40 (BITMAPINFOHEADER), 52, 56,
+	// 64, 108 (BITMAPV4HEADER), 124 (BITMAPV5HEADER).
+	if len(header) >= 18 && header[0] == 'B' && header[1] == 'M' {
+		dibSize := binary.LittleEndian.Uint32(header[14:18])
+		switch dibSize {
+		case 12, 40, 52, 56, 64, 108, 124:
+			return formatBMP
+		}
 	}
 	// TIFF: II*\x00 (little-endian) or MM\x00* (big-endian)
 	if len(header) >= 4 {

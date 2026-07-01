@@ -44,7 +44,10 @@ func AcquireWorkspaceLock(cwd string) error {
 		PID:       os.Getpid(),
 		Timestamp: time.Now().Unix(),
 	}
-	data, _ := json.Marshal(&lock)
+	data, err := json.Marshal(&lock)
+	if err != nil {
+		return fmt.Errorf("marshal lock data: %w", err)
+	}
 
 	// Attempt 1: atomic create.
 	if err := createLockFile(lockPath, data); err == nil {
@@ -122,29 +125,12 @@ func readWorkspaceLock(lockPath string) (*workspaceLockData, error) {
 // ReleaseWorkspaceLock removes the workspace lock file.
 func ReleaseWorkspaceLock(cwd string) {
 	lockPath := filepath.Join(cwd, ".drift", "workspace.lock")
+	// The error from os.Remove is intentionally ignored: if the lock file is
+	// already gone (e.g. another process stole a stale lock) there is nothing
+	// to do, and if removal fails for other reasons the lock will be reclaimed
+	// by the stale-timeout in AcquireWorkspaceLock. Returning an error here
+	// would give callers no useful recovery action.
 	os.Remove(lockPath)
-}
-
-// IsWorkspaceLocked returns true if a valid (non-stale) workspace lock exists.
-// Stale locks are cleaned up as a side effect. A lock that cannot be parsed
-// (e.g. an empty file being written concurrently) is treated as held rather
-// than removed, to avoid clobbering a writer mid-write.
-func IsWorkspaceLocked(cwd string) bool {
-	lockPath := filepath.Join(cwd, ".drift", "workspace.lock")
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		return false
-	}
-	var lock workspaceLockData
-	if json.Unmarshal(data, &lock) != nil {
-		// Likely a half-written file; do not remove it.
-		return true
-	}
-	if isLockStale(&lock) {
-		os.Remove(lockPath)
-		return false
-	}
-	return true
 }
 
 func isLockStale(lock *workspaceLockData) bool {

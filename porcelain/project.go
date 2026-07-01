@@ -7,13 +7,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
 	"github.com/your-org/drift/storage/filesystem"
 )
 
-// InitProject initializes a new drift repository at the given path.
-// Creates .drift/ directory structure, default config, HEAD reference, and empty index.
 func InitProject(path string) error {
 	ctx := context.Background()
 	driftPath := filepath.Join(path, ".drift")
@@ -28,11 +27,13 @@ func InitProject(path string) error {
 	}
 	defer store.Close()
 
-	if err := store.SetConfig(ctx, core.DefaultConfig()); err != nil {
+	cfg := core.DefaultConfig()
+	applyStorageConfig(store, &cfg.Core)
+
+	if err := store.SetConfig(ctx, cfg); err != nil {
 		return fmt.Errorf("set config: %w", err)
 	}
 
-	// Create main branch ref (zero hash = no commits yet)
 	mainRef := &core.Reference{
 		Name:   "heads/main",
 		Type:   core.RefTypeBranch,
@@ -42,7 +43,6 @@ func InitProject(path string) error {
 		return fmt.Errorf("set main branch: %w", err)
 	}
 
-	// Create HEAD as a symbolic reference pointing to heads/main
 	headRef := &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
@@ -60,7 +60,6 @@ func InitProject(path string) error {
 		return fmt.Errorf("set index: %w", err)
 	}
 
-	// Create default .driftignore in project root if it doesn't exist
 	driftignorePath := filepath.Join(path, ".driftignore")
 	if _, err := os.Stat(driftignorePath); os.IsNotExist(err) {
 		driftignoreContent := []byte(`# macOS
@@ -86,8 +85,6 @@ desktop.ini
 	return nil
 }
 
-// OpenProject opens an existing drift repository at the given path.
-// Returns the storage backend, configuration, and any error.
 func OpenProject(path string) (storage.Storer, *core.Config, error) {
 	ctx := context.Background()
 	driftPath := filepath.Join(path, ".drift")
@@ -96,16 +93,23 @@ func OpenProject(path string) (storage.Storer, *core.Config, error) {
 		return nil, nil, fmt.Errorf("not a drift repository")
 	}
 
-	store, err := filesystem.NewFSStorage(driftPath)
+	fsStore, err := filesystem.NewFSStorage(driftPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open storage: %w", err)
 	}
 
-	config, err := store.GetConfig(ctx)
+	config, err := fsStore.GetConfig(ctx)
 	if err != nil {
-		store.Close()
+		fsStore.Close()
 		return nil, nil, fmt.Errorf("get config: %w", err)
 	}
 
-	return store, config, nil
+	applyStorageConfig(fsStore, &config.Core)
+
+	return fsStore, config, nil
+}
+
+func applyStorageConfig(store *filesystem.FSStorage, cfg *core.CoreConfig) {
+	level := zstd.EncoderLevelFromZstd(cfg.ZstdLevel())
+	store.SetCompression(cfg.Compression, level)
 }

@@ -30,7 +30,8 @@ type FileEntryProto struct {
 	ModTime       int64                  `protobuf:"varint,4,opt,name=mod_time,json=modTime,proto3" json:"mod_time,omitempty"`
 	ChunkHashes   [][]byte               `protobuf:"bytes,5,rep,name=chunk_hashes,json=chunkHashes,proto3" json:"chunk_hashes,omitempty"` // each is 32 bytes BLAKE3 hash
 	MimeType      *string                `protobuf:"bytes,6,opt,name=mime_type,json=mimeType,proto3,oneof" json:"mime_type,omitempty"`
-	FileHash      []byte                 `protobuf:"bytes,7,opt,name=file_hash,json=fileHash,proto3" json:"file_hash,omitempty"` // 32 bytes BLAKE3 hash of the file
+	FileHash      []byte                 `protobuf:"bytes,7,opt,name=file_hash,json=fileHash,proto3" json:"file_hash,omitempty"`                                                     // 32 bytes BLAKE3 hash of the file
+	Extra         map[string]string      `protobuf:"bytes,8,rep,name=extra,proto3" json:"extra,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // optional metadata key-value pairs
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -110,6 +111,13 @@ func (x *FileEntryProto) GetMimeType() string {
 func (x *FileEntryProto) GetFileHash() []byte {
 	if x != nil {
 		return x.FileHash
+	}
+	return nil
+}
+
+func (x *FileEntryProto) GetExtra() map[string]string {
+	if x != nil {
+		return x.Extra
 	}
 	return nil
 }
@@ -219,7 +227,7 @@ var File_core_snapshot_proto protoreflect.FileDescriptor
 
 const file_core_snapshot_proto_rawDesc = "" +
 	"\n" +
-	"\x13core/snapshot.proto\x12\x04core\"\xd7\x01\n" +
+	"\x13core/snapshot.proto\x12\x04core\"\xc8\x02\n" +
 	"\x0eFileEntryProto\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
 	"\x04mode\x18\x02 \x01(\rR\x04mode\x12\x12\n" +
@@ -227,7 +235,12 @@ const file_core_snapshot_proto_rawDesc = "" +
 	"\bmod_time\x18\x04 \x01(\x03R\amodTime\x12!\n" +
 	"\fchunk_hashes\x18\x05 \x03(\fR\vchunkHashes\x12 \n" +
 	"\tmime_type\x18\x06 \x01(\tH\x00R\bmimeType\x88\x01\x01\x12\x1b\n" +
-	"\tfile_hash\x18\a \x01(\fR\bfileHashB\f\n" +
+	"\tfile_hash\x18\a \x01(\fR\bfileHash\x125\n" +
+	"\x05extra\x18\b \x03(\v2\x1f.core.FileEntryProto.ExtraEntryR\x05extra\x1a8\n" +
+	"\n" +
+	"ExtraEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\f\n" +
 	"\n" +
 	"_mime_type\"\x8f\x02\n" +
 	"\rSnapshotProto\x12\x17\n" +
@@ -255,18 +268,20 @@ func file_core_snapshot_proto_rawDescGZIP() []byte {
 	return file_core_snapshot_proto_rawDescData
 }
 
-var file_core_snapshot_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_core_snapshot_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_core_snapshot_proto_goTypes = []any{
 	(*FileEntryProto)(nil), // 0: core.FileEntryProto
 	(*SnapshotProto)(nil),  // 1: core.SnapshotProto
+	nil,                    // 2: core.FileEntryProto.ExtraEntry
 }
 var file_core_snapshot_proto_depIdxs = []int32{
-	0, // 0: core.SnapshotProto.files:type_name -> core.FileEntryProto
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 0: core.FileEntryProto.extra:type_name -> core.FileEntryProto.ExtraEntry
+	0, // 1: core.SnapshotProto.files:type_name -> core.FileEntryProto
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_core_snapshot_proto_init() }
@@ -282,7 +297,7 @@ func file_core_snapshot_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_snapshot_proto_rawDesc), len(file_core_snapshot_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

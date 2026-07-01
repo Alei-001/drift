@@ -109,7 +109,7 @@ func TestDetect_ByMagic(t *testing.T) {
 		{"GIF89a", []byte("GIF89a"), true},
 		{"GIF87a", []byte("GIF87a"), true},
 		{"WebP", append([]byte("RIFF\x00\x00\x00\x00"), []byte("WEBP")...), true},
-		{"BMP", []byte("BM"), true},
+		{"BMP", []byte{'B', 'M', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00}, true},
 		{"TIFF little-endian", []byte{'I', 'I', 0x2A, 0x00}, true},
 		{"TIFF big-endian", []byte{'M', 'M', 0x00, 0x2A}, true},
 		{"unknown", []byte("plain text"), false},
@@ -254,7 +254,7 @@ func TestPreview_UnknownFormat(t *testing.T) {
 	engine := NewEngine()
 	// Magic bytes for BMP, but not decodable by image.DecodeConfig; should
 	// still produce a preview line with format name and size.
-	data := []byte{'B', 'M', 0x00, 0x00}
+	data := []byte{'B', 'M', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00}
 	preview := engine.Preview(data, 10)
 
 	if !strings.Contains(preview, "BMP") {
@@ -276,7 +276,7 @@ func TestName(t *testing.T) {
 func TestChunkerFor(t *testing.T) {
 	engine := NewEngine()
 	// 200KB — below 50MB, expects a non-nil default FastCDC chunker.
-	c := engine.ChunkerFor(200 * 1024)
+	c := engine.ChunkerFor(200 * 1024, nil)
 	if c == nil {
 		t.Fatal("expected non-nil chunker for 200KB image, got nil")
 	}

@@ -11,7 +11,7 @@ type FileEntry struct {
 	Path     string
 	Mode     FileMode
 	Size     int64
-	ModTime  int64 // unix timestamp
+	ModTime  int64 // unix timestamp in nanoseconds (time.UnixNano())
 	Chunks   []Hash
 	Hash     Hash
 	Metadata *FileMetadata

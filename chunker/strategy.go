@@ -1,31 +1,36 @@
 package chunker
 
-// Size thresholds for the binary-class chunking strategy shared by
-// image/video/binary engines.
+import "github.com/your-org/drift/core"
+
 const (
-	// BinaryLargeThreshold: files at or above this size use larger FastCDC
-	// targets (1M/2M/4M) to keep the chunk count manageable.
-	BinaryLargeThreshold = 50 * 1024 * 1024 // 50MB
-	// BinaryHugeThreshold: files at or above this size switch to fixed 8MB
-	// chunks for predictable, bounded memory and chunk count.
-	BinaryHugeThreshold = 500 * 1024 * 1024 // 500MB
+	BinaryLargeThreshold = 50 * 1024 * 1024
+	BinaryHugeThreshold  = 500 * 1024 * 1024
 )
 
-// BinaryChunkerFor returns a chunker for binary-class files
-// (image/video/binary) using a 3-tier strategy based on file size:
-//   - < 50MB:   default FastCDC (128K/256K/512K) balances dedup granularity
-//     and chunk count for typical media/binaries.
-//   - 50-500MB: larger FastCDC (1M/2M/4M) keeps the chunk count reasonable as
-//     file sizes grow.
-//   - >= 500MB: fixed 8MB chunks give predictable, bounded memory and chunk
-//     count for very large files.
-func BinaryChunkerFor(fileSize int64) Chunker {
+func BinaryChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
+	minSize, avgSize, maxSize := 128*1024, 256*1024, 512*1024
+	if cfg != nil {
+		if cfg.ChunkMinSize > 0 {
+			minSize = cfg.ChunkMinSize
+		}
+		if cfg.ChunkAvgSize > 0 {
+			avgSize = cfg.ChunkAvgSize
+		}
+		if cfg.ChunkMaxSize > 0 {
+			maxSize = cfg.ChunkMaxSize
+		}
+	}
+
 	switch {
 	case fileSize < BinaryLargeThreshold:
-		return NewFastCDCChunker()
+		return NewFastCDCChunkerWithParams(minSize, avgSize, maxSize)
 	case fileSize < BinaryHugeThreshold:
-		return NewFastCDCChunkerWithParams(1 << 20, 2 << 20, 4 << 20)
+		// Scale all three proportionally to keep the user's min/avg/max
+		// ratio while producing fewer, larger chunks for big files.
+		return NewFastCDCChunkerWithParams(minSize*4, avgSize*4, maxSize*4)
 	default:
-		return NewFixedChunker(8 << 20)
+		// For huge files, use fixed chunking with a size derived from
+		// the user's avg, scaled up to reduce chunk count.
+		return NewFixedChunker(avgSize * 8)
 	}
 }

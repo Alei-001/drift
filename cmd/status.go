@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -15,15 +14,18 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show working tree status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
-		store, _, err := porcelain.OpenProject(cwd)
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		store, cfg, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
 		}
 		defer store.Close()
 
-		changes, err := porcelain.DetectChanges(ctx, store, cwd)
+		changes, err := porcelain.DetectChanges(ctx, store, cwd, &cfg.Core)
 		if err != nil {
 			return err
 		}
@@ -37,7 +39,7 @@ var statusCmd = &cobra.Command{
 		}
 
 		if statusShort {
-			fmt.Printf(">>> Status (%d files)\n", total)
+			fmt.Printf(">>> Status (%d %s)\n", total, pluralFile(total))
 			for _, p := range changes.Added {
 				fmt.Println(p)
 			}
@@ -48,7 +50,7 @@ var statusCmd = &cobra.Command{
 				fmt.Println(p)
 			}
 		} else {
-			header := fmt.Sprintf("Status (%d files changed since last save)", total)
+			header := fmt.Sprintf("Status (%d %s changed since last save)", total, pluralFile(total))
 			fmt.Printf(">>> %s\n", header)
 			fmt.Println()
 			for _, p := range changes.Added {

@@ -20,7 +20,7 @@ func (fs *FSStorage) snapshotPath(id core.SnapshotID) string {
 	return filepath.Join(fs.root, SnapshotsDir, hex[:2], hex[2:])
 }
 
-// GetSnapshot reads a snapshot from disk.
+// GetSnapshot reads a snapshot from disk and verifies its integrity.
 func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error) {
 	path := fs.snapshotPath(id)
 	data, err := os.ReadFile(path)
@@ -34,6 +34,19 @@ func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core
 	if err := proto.Unmarshal(data, p); err != nil {
 		return nil, fmt.Errorf("unmarshal snapshot %x: %w", id.Hash[:8], storage.ErrCorrupted)
 	}
+	// Verify integrity: the snapshot ID is the BLAKE3 hash of the marshaled
+	// proto with IdHash omitted (as computed in porcelain.CreateSnapshot).
+	// Clear IdHash, re-marshal, and compare the hash to the requested ID.
+	idHash := p.IdHash
+	p.IdHash = nil
+	recomputed, err := proto.Marshal(p)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal snapshot %x: %w", id.Hash[:8], storage.ErrCorrupted)
+	}
+	if core.Hash(blake3.Sum256(recomputed)) != id.Hash {
+		return nil, fmt.Errorf("snapshot %x integrity check failed: %w", id.Hash[:8], storage.ErrCorrupted)
+	}
+	p.IdHash = idHash
 	return snapshotFromProto(p), nil
 }
 
@@ -64,7 +77,7 @@ func (fs *FSStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID) err
 }
 
 // ListSnapshots lists all snapshots, sorted by timestamp descending,
-// with optional limit/offset and branch filter.
+// with optional limit/offset pagination.
 func (fs *FSStorage) ListSnapshots(ctx context.Context, opts *storage.ListOptions) ([]*core.Snapshot, error) {
 	snapDir := filepath.Join(fs.root, SnapshotsDir)
 	var snapshots []*core.Snapshot
@@ -82,7 +95,8 @@ func (fs *FSStorage) ListSnapshots(ctx context.Context, opts *storage.ListOption
 		}
 		p := &core.SnapshotProto{}
 		if err := proto.Unmarshal(data, p); err != nil {
-			return fmt.Errorf("unmarshal snapshot: %w", storage.ErrCorrupted)
+			fmt.Fprintf(os.Stderr, "warning: skipping corrupted snapshot %s\n", path)
+			return nil
 		}
 		snapshots = append(snapshots, snapshotFromProto(p))
 		return nil
@@ -100,21 +114,6 @@ func (fs *FSStorage) ListSnapshots(ctx context.Context, opts *storage.ListOption
 
 	if opts == nil {
 		return snapshots, nil
-	}
-
-	// Filter by branch if specified
-	if opts.Branch != "" {
-		branchFilter := opts.Branch
-		filtered := make([]*core.Snapshot, 0, len(snapshots))
-		for _, s := range snapshots {
-			for _, t := range s.Tags {
-				if t == branchFilter {
-					filtered = append(filtered, s)
-					break
-				}
-			}
-		}
-		snapshots = filtered
 	}
 
 	if opts.Offset > 0 {
@@ -168,16 +167,23 @@ func snapshotFromProto(p *core.SnapshotProto) *core.Snapshot {
 			// as-is to avoid recomputing from chunk hashes.
 			copy(f.Hash[:], fe.FileHash)
 		} else {
-			// Old snapshots (no file_hash): recompute from chunk hashes
-			// for backward compatibility (same method as CreateSnapshot).
-			fileHasher := blake3.New()
-			for _, h := range f.Chunks {
-				fileHasher.Write(h[:])
-			}
-			copy(f.Hash[:], fileHasher.Sum(nil))
+			// Old snapshots without FileHash: leave as zero. The hash will be
+			// recomputed on the next save. A zero hash causes diff to conservatively
+			// report the file as modified, which is safer than a wrong hash.
+			// (Previously this computed blake3 of chunk hashes, which diverged from
+			// CreateSnapshot's blake3 of file content.)
 		}
-		if fe.MimeType != nil {
-			f.Metadata = &core.FileMetadata{MimeType: *fe.MimeType}
+		if fe.MimeType != nil || len(fe.Extra) > 0 {
+			f.Metadata = &core.FileMetadata{}
+			if fe.MimeType != nil {
+				f.Metadata.MimeType = *fe.MimeType
+			}
+			if len(fe.Extra) > 0 {
+				f.Metadata.Extra = make(map[string]string, len(fe.Extra))
+				for k, v := range fe.Extra {
+					f.Metadata.Extra[k] = v
+				}
+			}
 		}
 		s.Files = append(s.Files, f)
 	}

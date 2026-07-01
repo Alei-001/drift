@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,8 +26,11 @@ var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: "Show snapshot history",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 		store, _, err := porcelain.OpenProject(cwd)
 		if err != nil {
 			return err
@@ -40,14 +45,23 @@ var logCmd = &cobra.Command{
 		var branchMap map[string][]string
 
 		if logBranch != "" {
-			// Branch-filtered: walk PrevID chain from branch tip
-			snapshots, err = walkBranchHistory(ctx, store, logBranch)
+			// Branch-filtered: list ALL snapshots, then keep only those whose
+			// nearest-tip attribution is this branch. This shows the branch's
+			// own commits, excluding commits inherited from parent branches
+			// (which are attributed to the parent by the nearest-tip rule).
+			if _, refErr := store.GetRef(ctx, "heads/"+logBranch); refErr != nil {
+				statusFailed("Log", fmt.Sprintf("branch '%s' not found.", logBranch), "use 'drift branch' to list existing branches.")
+				return ErrSilent
+			}
+			allSnaps, err := store.ListSnapshots(ctx, &storage.ListOptions{})
 			if err != nil {
 				return err
 			}
-			branchMap = make(map[string][]string)
-			for _, s := range snapshots {
-				branchMap[s.ID.Hash.String()] = []string{logBranch}
+			branchMap, _ = buildBranchMap(ctx, store)
+			for _, s := range allSnaps {
+				if names, ok := branchMap[s.ID.Hash.String()]; ok && len(names) > 0 && names[0] == logBranch {
+					snapshots = append(snapshots, s)
+				}
 			}
 		} else {
 			// Global: list all, build branch map for the column
@@ -68,6 +82,11 @@ var logCmd = &cobra.Command{
 			filtered = append(filtered, s)
 		}
 
+		// Sort newest-first: by timestamp descending. When timestamps are
+		// equal (common for rapid successive saves), use the PrevID chain —
+		// if snapshot A's PrevID points to snapshot B, then A is newer.
+		sortSnapshotsNewestFirst(filtered)
+
 		// Apply limit after filtering for branch walk
 		if logBranch != "" && logLimit > 0 && len(filtered) > logLimit {
 			filtered = filtered[:logLimit]
@@ -79,7 +98,7 @@ var logCmd = &cobra.Command{
 				hint = fmt.Sprintf("branch '%s' has no snapshots yet.", logBranch)
 			}
 			statusFailed("Log", "no snapshots yet.", hint)
-			return nil
+		return ErrSilent
 		}
 
 		if logJSON {
@@ -99,10 +118,7 @@ var logCmd = &cobra.Command{
 		for _, s := range filtered {
 			timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
 			add, mod, del := countSnapshotChanges(ctx, store, s)
-			changes := fmt.Sprintf("+%d ~%d", add, mod)
-			if del > 0 {
-				changes += fmt.Sprintf(" -%d", del)
-			}
+			changes := formatChangesCompact(add, mod, del)
 
 			msg := s.Message
 			if len([]rune(msg)) > 28 {
@@ -183,7 +199,7 @@ func computeVerboseChanges(ctx context.Context, store storage.Storer, snapshot *
 		}
 		if prev, ok := prevFiles[f.Path]; !ok {
 			added = append(added, f)
-		} else if prev.Size != f.Size || !chunkHashesEqual(prev.Chunks, f.Chunks) {
+		} else if prev.Size != f.Size || !slices.Equal(prev.Chunks, f.Chunks) {
 			modified = append(modified, f)
 		}
 	}
@@ -201,6 +217,68 @@ func computeVerboseChanges(ctx context.Context, store storage.Storer, snapshot *
 func countSnapshotChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added, modified, deleted int) {
 	a, m, d := computeVerboseChanges(ctx, store, snapshot)
 	return len(a), len(m), len(d)
+}
+
+// formatChangesCompact formats change counts as "+A ~M -D", omitting zero parts.
+// Example: 2 added, 1 modified, 0 deleted → "+2 ~1"
+func formatChangesCompact(added, modified, deleted int) string {
+	var parts []string
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", added))
+	}
+	if modified > 0 {
+		parts = append(parts, fmt.Sprintf("~%d", modified))
+	}
+	if deleted > 0 {
+		parts = append(parts, fmt.Sprintf("-%d", deleted))
+	}
+	if len(parts) == 0 {
+		return "+0"
+	}
+	return strings.Join(parts, " ")
+}
+
+// sortSnapshotsNewestFirst sorts snapshots newest-first. Primary sort key is
+// timestamp (descending). When timestamps are equal (rapid successive saves),
+// it uses the PrevID chain: if A.PrevID == B.ID, then A is newer than B.
+// This is stable for unrelated snapshots.
+func sortSnapshotsNewestFirst(snaps []*core.Snapshot) {
+	// Build a set of IDs for quick lookup.
+	idSet := make(map[core.SnapshotID]bool, len(snaps))
+	for _, s := range snaps {
+		idSet[s.ID] = true
+	}
+	// For each snapshot, determine if it is preceded by another snapshot
+	// in the list (i.e., another snapshot's PrevID points to it). If so,
+	// that other snapshot is newer.
+	isNewer := make(map[core.SnapshotID]int, len(snaps)) // depth from root
+	for _, s := range snaps {
+		depth := 0
+		current := s
+		for current.PrevID != nil && idSet[*current.PrevID] {
+			depth++
+			// Find the predecessor snapshot in the list.
+			var pred *core.Snapshot
+			for _, p := range snaps {
+				if p.ID == *current.PrevID {
+					pred = p
+					break
+				}
+			}
+			if pred == nil {
+				break
+			}
+			current = pred
+		}
+		isNewer[s.ID] = depth
+	}
+	sort.SliceStable(snaps, func(i, j int) bool {
+		if snaps[i].Timestamp != snaps[j].Timestamp {
+			return snaps[i].Timestamp > snaps[j].Timestamp
+		}
+		// Higher depth = further from root = newer.
+		return isNewer[snaps[i].ID] > isNewer[snaps[j].ID]
+	})
 }
 
 func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.Snapshot, branchMap map[string][]string) error {
@@ -243,71 +321,71 @@ func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.Sn
 	return nil
 }
 
-// walkBranchHistory walks the PrevID chain from a branch's tip snapshot and
-// returns all reachable snapshots in newest-first order.
-func walkBranchHistory(ctx context.Context, store storage.Storer, branchName string) ([]*core.Snapshot, error) {
-	ref, err := store.GetRef(ctx, "heads/"+branchName)
-	if err != nil {
-		return nil, fmt.Errorf("branch '%s' not found", branchName)
-	}
-	if ref.Target.IsZero() {
-		return nil, nil
-	}
-
-	var snapshots []*core.Snapshot
-	current := &core.SnapshotID{Hash: ref.Target}
-	for current != nil {
-		snap, err := store.GetSnapshot(ctx, *current)
-		if err != nil {
-			break
-		}
-		snapshots = append(snapshots, snap)
-		if snap.PrevID != nil {
-			current = snap.PrevID
-		} else {
-			current = nil
-		}
-	}
-	return snapshots, nil
-}
-
-// buildBranchMap builds a map from snapshot hash to the list of branch names
-// whose history (PrevID chain) contains that snapshot.
+// buildBranchMap assigns each snapshot to exactly one branch: the one whose
+// tip is the *nearest* descendant (fewest PrevID hops). This matches the
+// mental model "this commit belongs to the branch it was made on" — a fork
+// point stays attributed to its original branch, and each snapshot shows at
+// most one branch name in the log.
+//
+// A snapshot unreachable from any branch tip (orphaned) gets no entry.
 func buildBranchMap(ctx context.Context, store storage.Storer) (map[string][]string, error) {
 	branches, _, err := porcelain.ListBranches(ctx, store)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make(map[string][]string)
+	// For each branch, walk its PrevID chain and record the hop distance from
+	// the tip for every snapshot. distance[branchName][hashStr] = hops.
+	type branchWalk struct {
+		name string
+		dist map[string]int
+	}
+	var walks []branchWalk
 	for _, b := range branches {
-		name := strings.TrimPrefix(b.Name, "heads/")
 		if b.Target.IsZero() {
 			continue
 		}
-		current := &core.SnapshotID{Hash: b.Target}
-		for current != nil {
-			snap, err := store.GetSnapshot(ctx, *current)
+		name := strings.TrimPrefix(b.Name, "heads/")
+		bw := branchWalk{name: name, dist: make(map[string]int)}
+		currHash := b.Target
+		hops := 0
+		for !currHash.IsZero() {
+			hashStr := currHash.String()
+			if _, seen := bw.dist[hashStr]; seen {
+				break // cycle guard
+			}
+			bw.dist[hashStr] = hops
+			snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: currHash})
 			if err != nil {
 				break
 			}
-			hashStr := snap.ID.Hash.String()
-			already := false
-			for _, existing := range result[hashStr] {
-				if existing == name {
-					already = true
-					break
-				}
+			if snap.PrevID == nil {
+				break
 			}
-			if !already {
-				result[hashStr] = append(result[hashStr], name)
-			}
-			if snap.PrevID != nil {
-				current = snap.PrevID
-			} else {
-				current = nil
+			currHash = snap.PrevID.Hash
+			hops++
+		}
+		walks = append(walks, bw)
+	}
+
+	// For each snapshot, pick the branch with the smallest hop count.
+	// Ties (a snapshot equidistant from two tips) are broken by branch name
+	// for determinism — this only happens at a true fork point where two
+	// branches share the same tip distance, which is rare.
+	bestDist := make(map[string]int)
+	bestName := make(map[string]string)
+	for _, bw := range walks {
+		for hashStr, d := range bw.dist {
+			cur, ok := bestDist[hashStr]
+			if !ok || d < cur || (d == cur && bw.name < bestName[hashStr]) {
+				bestDist[hashStr] = d
+				bestName[hashStr] = bw.name
 			}
 		}
+	}
+	result := make(map[string][]string)
+	for hashStr, name := range bestName {
+		result[hashStr] = []string{name}
 	}
 	return result, nil
 }

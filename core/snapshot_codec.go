@@ -59,9 +59,17 @@ func fileEntryToProto(f *FileEntry) *FileEntryProto {
 			copy(fp.ChunkHashes[i], c[:])
 		}
 	}
-	if f.Metadata != nil && f.Metadata.MimeType != "" {
-		mt := f.Metadata.MimeType
-		fp.MimeType = &mt
+	if f.Metadata != nil {
+		if f.Metadata.MimeType != "" {
+			mt := f.Metadata.MimeType
+			fp.MimeType = &mt
+		}
+		if len(f.Metadata.Extra) > 0 {
+			fp.Extra = make(map[string]string, len(f.Metadata.Extra))
+			for k, v := range f.Metadata.Extra {
+				fp.Extra[k] = v
+			}
+		}
 	}
 	if f.Hash != (Hash{}) {
 		fp.FileHash = make([]byte, 32)

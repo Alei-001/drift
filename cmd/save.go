@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/core"
@@ -19,8 +20,11 @@ var saveCmd = &cobra.Command{
 	Use:   "save",
 	Short: "Save a snapshot of current workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		cwd, _ := os.Getwd()
+		ctx := cmd.Context()
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
 
 		store, cfg, err := porcelain.OpenProject(cwd)
 		if err != nil {
@@ -31,7 +35,7 @@ var saveCmd = &cobra.Command{
 		message := saveMessage
 		if message == "" {
 			statusFailed("Save", "-m <message> is required.", "use 'drift save -m \"your message\"' to describe this snapshot.")
-			return nil
+		return ErrSilent
 		}
 
 		author := cfg.User.Name
@@ -43,24 +47,27 @@ var saveCmd = &cobra.Command{
 		if saveTag != "" {
 			tags = []string{saveTag}
 		}
-		snapshot, err := porcelain.CreateSnapshot(ctx, store, cwd, message, author, tags)
+		snapshot, err := porcelain.CreateSnapshot(ctx, store, cwd, message, author, tags, &cfg.Core)
 		if err != nil {
 			if errors.Is(err, porcelain.ErrNothingToSave) {
 				statusFailed("Save", "nothing to save.", "modify some files first to create a meaningful checkpoint.")
-				return nil
+			return ErrSilent
 			}
 			return err
 		}
 
 		// Compute added/modified/deleted by comparing with the previous snapshot
-		add, mod, del := computeChanges(ctx, store, snapshot)
+		add, mod, del, err := computeChanges(ctx, store, snapshot)
+		if err != nil {
+			return err
+		}
 
 		sid := snapshot.ShortID()
 		msgLine := snapshot.Message
 		if saveTag != "" {
 			if err := porcelain.SaveTag(ctx, store, saveTag, snapshot.ID.Hash); err != nil {
 				statusFailed("Save", err.Error(), "")
-				return nil
+			return ErrSilent
 			}
 			msgLine += "  [" + saveTag + "]"
 		}
@@ -79,7 +86,7 @@ var saveCmd = &cobra.Command{
 	},
 }
 
-func computeChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string) {
+func computeChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string, err error) {
 	currFiles := make(map[string]core.FileEntry)
 	for _, f := range snapshot.Files {
 		currFiles[f.Path] = f
@@ -89,11 +96,12 @@ func computeChanges(ctx context.Context, store storage.Storer, snapshot *core.Sn
 	var prevFiles map[string]core.FileEntry
 	if snapshot.PrevID != nil {
 		prevSnap, err := store.GetSnapshot(ctx, *snapshot.PrevID)
-		if err == nil {
-			prevFiles = make(map[string]core.FileEntry)
-			for _, f := range prevSnap.Files {
-				prevFiles[f.Path] = f
-			}
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("read previous snapshot: %w", err)
+		}
+		prevFiles = make(map[string]core.FileEntry)
+		for _, f := range prevSnap.Files {
+			prevFiles[f.Path] = f
 		}
 	}
 
@@ -105,7 +113,7 @@ func computeChanges(ctx context.Context, store storage.Storer, snapshot *core.Sn
 		}
 		if prev, ok := prevFiles[f.Path]; !ok {
 			added = append(added, f)
-		} else if prev.Size != f.Size || !chunkHashesEqual(prev.Chunks, f.Chunks) {
+		} else if prev.Size != f.Size || !slices.Equal(prev.Chunks, f.Chunks) {
 			modified = append(modified, f)
 		}
 	}
@@ -119,7 +127,7 @@ func computeChanges(ctx context.Context, store storage.Storer, snapshot *core.Sn
 		}
 	}
 
-	return added, modified, deleted
+	return added, modified, deleted, nil
 }
 
 func init() {

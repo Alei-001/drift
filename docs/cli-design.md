@@ -216,17 +216,19 @@ Output — 默认：
 
 ```
 >>> History (3 snapshots)
-12ab  2026-06-28 16:30  Chapter 3 draft complete                     +2 ~1
-a3c2  2026-06-27 22:15  Update cover color scheme                     ~1
-9f1e  2026-06-27 10:00  Submit to client                [submission]  +1 ~1
+12ab  2026-06-28 16:30  main          Chapter 3 draft complete                     +2 ~1
+a3c2  2026-06-27 22:15  main          Update cover color scheme                     ~1
+9f1e  2026-06-27 10:00  dev           Submit to client                [submission]  +1 ~1
 ```
+
+> 第三列为分支名（仅显示指向该快照的分支头，类似 git --decorate）。
 
 消息或标签过长时自动截断，末尾加 `…`：
 
 ```
 >>> History (3 snapshots)
-12ab  2026-06-28 16:30  Chapter 3 draft complete, revised by editor…  +2 ~1
-b4e1  2026-06-27 22:15  Fix typo                        [typo-fix-…]  ~1
+12ab  2026-06-28 16:30  main          Chapter 3 draft complete, revised by editor…  +2 ~1
+b4e1  2026-06-27 22:15  dev           Fix typo                        [typo-fix-…]  ~1
 ```
 
 > 被截断的完整内容可通过 `drift log -v <id>` 查看。`-v` 模式不限宽度，完整展示消息和文件列表。
@@ -235,11 +237,11 @@ Output — `--all`：
 
 ```
 >>> History (5 snapshots, including auto-saves)
-12ab  2026-06-28 16:30  Chapter 3 draft complete                     +2 ~1
-f3e2  2026-06-28 16:25  [auto] 2026-06-28 16:25                     ~1    · dimmed
-a3c2  2026-06-27 22:15  Update cover color scheme                     ~1
-f1a0  2026-06-27 22:10  [auto] 2026-06-27 22:10                     +1    · dimmed
-9f1e  2026-06-27 10:00  Submit to client                [submission]  +1 ~1
+12ab  2026-06-28 16:30  main          Chapter 3 draft complete                     +2 ~1
+f3e2  2026-06-28 16:25                [auto] 2026-06-28 16:25                     ~1    · dimmed
+a3c2  2026-06-27 22:15  main          Update cover color scheme                     ~1
+f1a0  2026-06-27 22:10                [auto] 2026-06-27 22:10                     +1    · dimmed
+9f1e  2026-06-27 10:00  dev           Submit to client                [submission]  +1 ~1
 ```
 
 Output — `-v <id>`：
@@ -302,9 +304,9 @@ Output — 文本文件：
 
 # Chapter 1: The Beginning
 The sun rose over the quiet village...
-
-(↑↓ scroll  ·  q quit  ·  / search)
 ```
+
+> 文本文件内容直接输出到终端，可用 `--open` 调用系统程序查看。
 
 Output — 二进制文件：
 
@@ -849,16 +851,12 @@ Error: a watch daemon is already running (PID 4821).
 ### `drift check`
 
 ```
-drift check [--fix]
+drift check
 
 校验 .drift/ 目录中所有块的数据完整性，验证 BLAKE3 哈希。
 
-选项：
-  --fix  尝试修复损坏的块
-
 示例：
   drift check
-  drift check --fix
 ```
 
 Output — 全部正常：
@@ -876,7 +874,7 @@ Output — 全部正常但有不可达快照：
   hint: 3 unreachable snapshots detected. use 'drift gc --dry-run' to review.
 ```
 
-Output — 有损坏（未修复）：
+Output — 有损坏：
 
 ```
 >>> Check [warning]
@@ -884,15 +882,7 @@ Output — 有损坏（未修复）：
   corrupt: 2
   missing: 0
 
-  hint: use --fix to attempt repair.
-```
-
-Output — 已修复：
-
-```
->>> Check [ok]
-  blocks:  142 total, 140 passed → 142 passed
-  repaired: 2 blocks.
+  hint: corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <id>'.
 ```
 
 Error：

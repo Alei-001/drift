@@ -2,10 +2,9 @@ package image
 
 import (
 	"github.com/your-org/drift/chunker"
+	"github.com/your-org/drift/core"
 )
 
-// ChunkerFor returns the chunking strategy for an image file of the given
-// size. Image files share the binary-class 3-tier strategy.
-func (e *ImageEngine) ChunkerFor(fileSize int64) chunker.Chunker {
-	return chunker.BinaryChunkerFor(fileSize)
+func (e *ImageEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
+	return chunker.BinaryChunkerFor(fileSize, cfg)
 }

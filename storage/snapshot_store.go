@@ -6,11 +6,10 @@ import (
 	"github.com/your-org/drift/core"
 )
 
-// ListOptions controls snapshot listing pagination and filtering.
+// ListOptions controls snapshot listing pagination.
 type ListOptions struct {
 	Limit  int
 	Offset int
-	Branch string
 }
 
 // SnapshotStorer provides access to snapshot storage.

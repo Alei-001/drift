@@ -19,6 +19,7 @@ func Match(pattern, path string) (bool, error) {
 }
 
 func globToRegex(pattern string) string {
+	pattern = strings.TrimPrefix(pattern, "/")
 	var sb strings.Builder
 	var lit strings.Builder
 	flushLit := func() {
@@ -54,6 +55,11 @@ func globToRegex(pattern string) string {
 		case '[':
 			flushLit()
 			j := i + 1
+			negated := false
+			if j < n && pattern[j] == '!' {
+				negated = true
+				j++
+			}
 			if j < n && pattern[j] == ']' {
 				j++
 			}
@@ -61,10 +67,21 @@ func globToRegex(pattern string) string {
 				j++
 			}
 			if j < n {
-				sb.WriteString(pattern[i : j+1])
+				// Translate the class to regex syntax. A leading '!' (glob
+				// negation) becomes '^'; a leading ']' is a literal member.
+				start := i + 1
+				if negated {
+					start++
+				}
+				sb.WriteByte('[')
+				if negated {
+					sb.WriteByte('^')
+				}
+				sb.WriteString(pattern[start:j])
+				sb.WriteByte(']')
 				i = j + 1
 			} else {
-				sb.WriteString("[")
+				sb.WriteString("\\[")
 				i++
 			}
 		default:

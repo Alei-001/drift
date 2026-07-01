@@ -2,6 +2,7 @@ package fsutil
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -10,8 +11,11 @@ import (
 	"github.com/your-org/drift/util/glob"
 )
 
-func Walk(root string, fn func(path string, info os.FileInfo) error) error {
-	patterns, err := readIgnorePatterns(root)
+func Walk(root, ignoreFile string, fn func(path string, info os.FileInfo) error) error {
+	if ignoreFile == "" {
+		ignoreFile = ".driftignore"
+	}
+	patterns, err := readIgnorePatterns(root, ignoreFile)
 	if err != nil {
 		return err
 	}
@@ -52,8 +56,8 @@ func isDriftDir(rel string) bool {
 	return rel == ".drift" || strings.HasPrefix(rel, ".drift"+string(filepath.Separator))
 }
 
-func readIgnorePatterns(root string) ([]string, error) {
-	ignoreFile := filepath.Join(root, ".driftignore")
+func readIgnorePatterns(root, ignoreFile string) ([]string, error) {
+	ignoreFile = filepath.Join(root, ignoreFile)
 	f, err := os.Open(ignoreFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -72,6 +76,9 @@ func readIgnorePatterns(root string) ([]string, error) {
 		}
 		patterns = append(patterns, line)
 	}
+	if len(patterns) > 0 {
+		patterns[0] = strings.TrimPrefix(patterns[0], "\xef\xbb\xbf")
+	}
 	return patterns, scanner.Err()
 }
 
@@ -80,10 +87,14 @@ func isIgnored(rel string, info os.FileInfo, patterns []string) bool {
 	base := path.Base(rel)
 	for _, p := range patterns {
 		p = filepath.ToSlash(p)
-		if match, _ := glob.Match(p, base); match {
+		if match, err := glob.Match(p, base); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: invalid ignore pattern %q: %v\n", p, err)
+		} else if match {
 			return true
 		}
-		if match, _ := glob.Match(p, rel); match {
+		if match, err := glob.Match(p, rel); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: invalid ignore pattern %q: %v\n", p, err)
+		} else if match {
 			return true
 		}
 	}
