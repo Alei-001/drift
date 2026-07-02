@@ -29,15 +29,23 @@ func (fs *FSStorage) chunkPath(hash core.Hash) string {
 	return filepath.Join(fs.chunksDir(), hex[:2], hex[2:])
 }
 
-func (fs *FSStorage) HasChunk(ctx context.Context, hash core.Hash) bool {
+func (fs *FSStorage) HasChunk(ctx context.Context, hash core.Hash) (bool, error) {
 	path := fs.chunkPath(hash)
 	_, err := os.Stat(path)
-	return err == nil
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat chunk %x: %w", hash[:8], err)
+	}
+	return true, nil
 }
 
 func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk, error) {
 	if ch, ok := fs.chunkCache.Get(hash); ok {
-		return ch, nil
+		// Return a deep copy so callers cannot mutate the cached chunk's
+		// Data slice and pollute other readers. Mirrors memory backend.
+		return storage.CloneChunk(ch), nil
 	}
 
 	path := fs.chunkPath(hash)
@@ -56,21 +64,26 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 	}
 
 	compressed := header[0]&chunkFlagCompressed != 0
-	rawData, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("read chunk data %x: %w", hash[:8], err)
-	}
 
 	var data []byte
 	if compressed {
-		fs.zstdMu.Lock()
-		decoded, err := fs.zstdDecoder.DecodeAll(rawData, nil)
-		fs.zstdMu.Unlock()
+		// Stream the compressed payload through the zstd decoder directly
+		// from the file reader. This avoids materializing the full
+		// compressed bytes in a separate buffer, keeping peak memory at
+		// roughly the decoded size rather than compressed+decoded.
+		if err := fs.zstdDecoder.Reset(f); err != nil {
+			return nil, fmt.Errorf("decode chunk %x: %w", hash[:8], storage.ErrCorrupted)
+		}
+		decoded, err := io.ReadAll(fs.zstdDecoder)
 		if err != nil {
 			return nil, fmt.Errorf("decode chunk %x: %w", hash[:8], storage.ErrCorrupted)
 		}
 		data = decoded
 	} else {
+		rawData, err := io.ReadAll(f)
+		if err != nil {
+			return nil, fmt.Errorf("read chunk data %x: %w", hash[:8], err)
+		}
 		data = rawData
 	}
 
@@ -95,7 +108,11 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 }
 
 func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
-	if fs.HasChunk(ctx, chunk.Hash) {
+	has, err := fs.HasChunk(ctx, chunk.Hash)
+	if err != nil {
+		return fmt.Errorf("check chunk existence %x: %w", chunk.Hash[:8], err)
+	}
+	if has {
 		return nil
 	}
 
@@ -105,21 +122,15 @@ func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 		return fmt.Errorf("mkdir chunks: %w", err)
 	}
 
-	// Snapshot the compression flag under the lock so the read of
-	// fs.compression is protected by the Go memory model (SetCompression
-	// writes it under the same lock). The TOCTOU window between this
-	// snapshot and the encode call is acceptable: SetCompression is only
-	// called during initialization.
-	fs.zstdMu.Lock()
+	// fs.compression is read without a lock: the porcelain workspace
+	// lock guarantees single-threaded access, and SetCompression is only
+	// called during initialization (before any data-access method).
 	useCompression := fs.compression
-	fs.zstdMu.Unlock()
 
 	var payload []byte
 	var flags byte
 	if useCompression {
-		fs.zstdMu.Lock()
 		compressed := fs.zstdEncoder.EncodeAll(chunk.Data, nil)
-		fs.zstdMu.Unlock()
 		payload = make([]byte, 0, chunkHeaderSize+len(compressed))
 		payload = append(payload, chunkFlagCompressed)
 		payload = append(payload, compressed...)
@@ -152,17 +163,25 @@ func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 func (fs *FSStorage) DeleteChunk(ctx context.Context, hash core.Hash) error {
 	path := fs.chunkPath(hash)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
+		return fmt.Errorf("delete chunk %x: %w", hash[:8], err)
 	}
 	fs.chunkCache.Remove(hash)
 	return nil
 }
 
 func (fs *FSStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
+	// Bail out early if the caller has already cancelled, before we start
+	// walking the chunks directory.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	chunksDir := fs.chunksDir()
 	var hashes []core.Hash
 	err := filepath.WalkDir(chunksDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			return fmt.Errorf("walk chunks: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if d.IsDir() {
@@ -170,7 +189,7 @@ func (fs *FSStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 		}
 		rel, err := filepath.Rel(chunksDir, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("rel path %s: %w", path, err)
 		}
 		rel = filepath.ToSlash(rel)
 		parts := strings.Split(rel, "/")
@@ -190,7 +209,7 @@ func (fs *FSStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 		if os.IsNotExist(err) {
 			return hashes, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("list chunks: %w", err)
 	}
 	return hashes, nil
 }

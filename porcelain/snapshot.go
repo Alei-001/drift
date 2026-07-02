@@ -5,27 +5,45 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"time"
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/filetype"
+	"github.com/your-org/drift/filetype/binary"
 	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/storage/refname"
 	"github.com/your-org/drift/util/fsutil"
 	"github.com/your-org/drift/util/pathutil"
 	"github.com/zeebo/blake3"
 	"google.golang.org/protobuf/proto"
 )
 
-func chunkFile(r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
+func chunkFile(path string, r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
 	c := engine.ChunkerFor(fileSize, cfg)
 	if fileSize == 0 {
 		c = nil
 	}
 	if c == nil {
+		// Reject large files before reading them into memory. The
+		// nil-chunker path reads the whole file as a single chunk, so
+		// a 500 MB video would OOM. 64 KB matches TextEngine's
+		// whole-file threshold.
+		if fileSize > 64*1024 {
+			return nil, fmt.Errorf("file %s too large (%d bytes) for whole-file chunking without chunker", path, fileSize)
+		}
 		data, err := io.ReadAll(r)
 		if err != nil {
 			return nil, err
+		}
+		// core.Chunk.Size is uint32; reject files whose single-chunk
+		// representation would overflow it. In practice this path is
+		// only reached for small text files (< 64KB), but guard
+		// defensively in case a future engine returns nil for a
+		// large file.
+		if uint64(len(data)) > math.MaxUint32 {
+			return nil, fmt.Errorf("file too large for single-chunk storage (%d bytes)", len(data))
 		}
 		sum := blake3.Sum256(data)
 		var hash core.Hash
@@ -138,19 +156,22 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 			return nil, fmt.Errorf("open file %s: %w", f.path, err)
 		}
 
-		header, err := io.ReadAll(io.LimitReader(file, 512))
+		header, err := io.ReadAll(io.LimitReader(file, core.HeaderPeekSize))
 		if err != nil {
 			file.Close()
 			return nil, fmt.Errorf("read header %s: %w", f.path, err)
 		}
 		engine := filetype.DetectEngine(relPath, header)
+		if engine == nil {
+			engine = &binary.BinaryEngine{}
+		}
 
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			file.Close()
 			return nil, fmt.Errorf("seek %s: %w", f.path, err)
 		}
 
-		chunks, err := chunkFile(file, engine, f.info.Size(), cfg)
+		chunks, err := chunkFile(f.path, file, engine, f.info.Size(), cfg)
 		file.Close()
 		if err != nil {
 			return nil, fmt.Errorf("chunk file %s: %w", f.path, err)
@@ -158,7 +179,11 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 
 		var chunkHashes []core.Hash
 		for _, c := range chunks {
-			if !store.HasChunk(ctx, c.Hash) {
+			has, err := store.HasChunk(ctx, c.Hash)
+			if err != nil {
+				return nil, fmt.Errorf("check chunk existence %s: %w", c.Hash.String(), err)
+			}
+			if !has {
 				if err := store.PutChunk(ctx, c); err != nil {
 					return nil, fmt.Errorf("store chunk %s: %w", c.Hash.String(), err)
 				}
@@ -266,9 +291,9 @@ func engineMetadata(engine filetype.Engine) *core.FileMetadata {
 	name := engine.Name()
 	switch name {
 	case "text":
-		return &core.FileMetadata{MimeType: "text/plain"}
+		return &core.FileMetadata{MIMEType: "text/plain"}
 	case "binary", "image", "video":
-		return &core.FileMetadata{MimeType: "application/octet-stream"}
+		return &core.FileMetadata{MIMEType: "application/octet-stream"}
 	default:
 		return nil
 	}
@@ -281,11 +306,14 @@ func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
 	}
 	defer file.Close()
 
-	header, err := io.ReadAll(io.LimitReader(file, 512))
+	header, err := io.ReadAll(io.LimitReader(file, core.HeaderPeekSize))
 	if err != nil {
 		return core.Hash{}, fmt.Errorf("read header %s: %w", filePath, err)
 	}
 	engine := filetype.DetectEngine(filePath, header)
+	if engine == nil {
+		engine = &binary.BinaryEngine{}
+	}
 
 	info, err := file.Stat()
 	if err != nil {
@@ -300,7 +328,7 @@ func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
 		cfg = &core.DefaultConfig().Core
 	}
 
-	chunks, err := chunkFile(file, engine, info.Size(), cfg)
+	chunks, err := chunkFile(filePath, file, engine, info.Size(), cfg)
 	if err != nil {
 		return core.Hash{}, fmt.Errorf("chunk file %s: %w", filePath, err)
 	}
@@ -308,13 +336,25 @@ func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
 	return computeFileHashFromChunks(chunks), nil
 }
 
-func SaveTag(ctx context.Context, store storage.Storer, name string, snapshotID core.Hash) error {
+// SaveTag creates a tag ref pointing at snapshotID. The existence check and
+// the ref write are guarded by the workspace lock so that two concurrent
+// SaveTag calls for the same name cannot both pass the check and the second
+// cannot silently overwrite the first (TOCTOU).
+func SaveTag(ctx context.Context, store storage.Storer, cwd string, name string, snapshotID core.Hash) error {
 	if snapshotID.IsZero() {
 		return fmt.Errorf("cannot create tag pointing to zero hash")
 	}
 	if name == "" {
 		return fmt.Errorf("tag name is required")
 	}
+	if err := refname.Validate("tags/" + name); err != nil {
+		return fmt.Errorf("invalid tag name: %w", err)
+	}
+
+	if err := AcquireWorkspaceLock(cwd); err != nil {
+		return fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(cwd)
 
 	refName := "tags/" + name
 	existing, err := store.GetRef(ctx, refName)

@@ -75,15 +75,15 @@
 ├──────────────────────────────────────────────────────────────────┤
 │                        core 层 (core/)                            │
 │  ┌────────┬────────┬──────────┬─────────┬─────────┬─────────┐  │
-│  │ Hash   │ Chunk  │ Snapshot  │ Ref     │ File    │ Object  │  │
-│  │ (BLAKE3)│ (块)   │ (快照)    │(引用)   │(文件条目)│(基础)   │  │
+│  │ Hash   │ Chunk  │ Snapshot  │ Ref     │ File    │ Config  │  │
+│  │ (BLAKE3)│ (块)   │ (快照)    │(引用)   │(文件条目)│(配置)   │  │
 │  └────────┴────────┴──────────┴─────────┴─────────┴─────────┘  │
 ├──────────────────────────────────────────────────────────────────┤
 │                         util 层 (util/)                           │
-│  ┌────────┬────────┬──────────┬─────────┬─────────┬─────────┐  │
-│  │ Cache  │ Logger │  Trace   │  FsUtil │ Glob    │ Event   │  │
-│  │ (LRU)  │(结构化)│ (性能追踪) │(文件工具)│(模式匹配)│(事件总线)│  │
-│  └────────┴────────┴──────────┴─────────┴─────────┴─────────┘  │
+│  ┌────────┬──────────┬─────────┬─────────┐  │
+│  │ Cache  │  FsUtil  │  Glob   │PathUtil │  │
+│  │ (LRU)  │(文件工具) │(模式匹配)│(路径工具)│  │
+│  └────────┴──────────┴─────────┴─────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -151,9 +151,9 @@ graph TB
 
     subgraph UTIL["util 层"]
         Cache["Cache LRU"]
-        Logger["Logger"]
         FsUtil["FsUtil"]
-        EventBus["EventBus"]
+        Glob["Glob"]
+        PathUtil["PathUtil"]
     end
 
     CLI --> PORCELAIN
@@ -306,10 +306,11 @@ drift/
 │   ├── diff.go                   # drift diff
 │   ├── restore.go                # drift restore
 │   ├── branch.go                 # drift branch
-│   ├── branch_switch.go          # drift switch
+│   ├── switch.go                 # drift switch
 │   ├── ignore.go                 # drift ignore
 │   ├── watch.go                  # drift watch
-│   └── check.go                  # drift check
+│   ├── check.go                  # drift check
+│   └── gc.go                     # drift gc
 │
 ├── porcelain/                    # 业务逻辑层（"瓷器"）
 │   ├── project.go                # 项目初始化/打开/配置
@@ -374,8 +375,7 @@ drift/
 │   ├── ref.go                    # Reference 结构体
 │   ├── file_entry.go             # FileEntry 结构体
 │   ├── file_mode.go              # 文件模式
-│   ├── config.go                 # 项目配置
-│   └── object.go                 # 基础对象接口
+│   └── config.go                 # 项目配置
 ├── util/                         # 工具层
 │   ├── cache/
 │   │   └── lru.go                # LRU 缓存封装
@@ -384,10 +384,8 @@ drift/
 │   │   └── atomic.go             # 原子文件操作
 │   ├── glob/                     # glob 匹配引擎（支持 ** 递归通配符，替代 path.Match）
 │   │   └── match.go              # .driftignore 模式匹配（被 fsutil/walk.go 调用）
-│   ├── event/
-│   │   └── bus.go                # 事件总线（watch 用）
-│   └── logger/
-│       └── logger.go             # 结构化日志
+│   └── pathutil/
+│       └── pathutil.go           # 路径相对化/规范化（CLI 用户路径处理）
 │
 ├── docs/                         # 文档
 │   ├── cli-design.md             # CLI 命令设计
@@ -520,11 +518,10 @@ type SnapshotStorer interface {
     ListSnapshots(ctx context.Context, opts *ListOptions) ([]*core.Snapshot, error)
 }
 
-// ListOptions 控制快照列表的分页与分支过滤
+// ListOptions 控制快照列表的分页
 type ListOptions struct {
     Limit  int
     Offset int
-    Branch string
 }
 
 // ReferenceStorer 引用存储
@@ -601,8 +598,8 @@ type FileEntry struct {
 
 // FileMetadata 文件类型相关的元数据
 type FileMetadata struct {
-    MimeType string            `json:"mime,omitempty"`   // "image/png", "application/x-photoshop"
-    Extra    map[string]string `json:"extra,omitempty"`  // 扩展元数据键值对
+    MimeType string            // "image/png", "application/x-photoshop"
+    Extra    map[string]string // 扩展元数据键值对
 }
 
 
@@ -634,7 +631,7 @@ type Reference struct {
     Name   string       // "HEAD", "heads/main", "tags/v1.0"
     Type   RefType      // 引用类型
     Target Hash         // 指向的快照哈希（解析后）
-    SymRef string       // 符号引用目标（如 "refs/heads/main"），非空时表示 symref
+    SymRef string       // 符号引用目标（如 "heads/main"，不含 refs/ 前缀），非空时表示 symref
 }
 
 type RefType string
@@ -650,15 +647,15 @@ const (
 // Index 工作区索引 —— 当前工作区文件到块的映射
 // 用于 status 和 save 时的变更检测
 type Index struct {
-    SnapshotID SnapshotID            // 当前快照 ID
-    Entries    map[string]*IndexEntry // 路径 → 条目
+    Entries   []IndexEntry // 条目列表
+    UpdatedAt int64        // 索引更新时间（unix 时间戳）
 }
 
 type IndexEntry struct {
     Path    string
-    ModTime time.Time
-    Size    int64
     Hash    Hash      // 文件内容哈希（用于快速变更检测）
+    Size    int64
+    ModTime int64     // 修改时间（unix 时间戳）
     Chunks  []Hash    // 分块列表
 }
 
@@ -667,10 +664,8 @@ type IndexEntry struct {
 
 // Config 项目配置
 type Config struct {
-    Version     int               // 配置格式版本号
     User        UserConfig        // 用户信息
     Core        CoreConfig        // 核心行为配置
-    IgnoreRules []string          // 忽略规则（.driftignore）
 }
 
 type UserConfig struct {
@@ -980,7 +975,7 @@ var (
     ErrNotFound      = errors.New("drift: not found")
     ErrAlreadyExists = errors.New("drift: already exists")
     ErrPermission    = errors.New("drift: permission denied")
-    ErrLocked        = errors.New("drift: locked by another process")
+    ErrLocked        = errors.New("workspace is locked by another operation")
     ErrInvalidRef    = errors.New("drift: invalid reference")
     ErrCorrupted     = errors.New("drift: data corrupted")
     ErrUnsupported   = errors.New("drift: unsupported operation")
@@ -1299,29 +1294,28 @@ drift 不再使用统一的 FastCDC 默认参数，而是由各引擎通过 `Chu
 // chunker/strategy.go —— 二进制类引擎（image/video/binary）共享的 3 档策略
 // 放在 chunker 包而非 filetype 包，是为了避免 filetype ↔ 子包循环依赖。
 const (
-    BinaryLargeThreshold = 50 * 1024 * 1024   // 50MB
-    BinaryHugeThreshold  = 500 * 1024 * 1024  // 500MB
+    binaryLargeThreshold = 50 * 1024 * 1024   // 50MB
+    binaryHugeThreshold  = 500 * 1024 * 1024  // 500MB
 )
 
 func BinaryChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
-    var minSize, avgSize, maxSize int
+    // 默认值复用 core.DefaultChunk*Size（经 fastCDCDefault*Size 别名引入）。
+    // cfg 中 > 0 的字段覆盖默认值；0 表示"用引擎默认"，方便部分 JSON 配置。
+    minSize, avgSize, maxSize := fastCDCDefaultMinSize, fastCDCDefaultAvgSize, fastCDCDefaultMaxSize
     if cfg != nil {
-        minSize = cfg.ChunkMinSize
-        avgSize = cfg.ChunkAvgSize
-        maxSize = cfg.ChunkMaxSize
-    }
-    if minSize <= 0 || avgSize <= 0 || maxSize <= 0 {
-        minSize = 128 * 1024
-        avgSize = 256 * 1024
-        maxSize = 512 * 1024
+        if cfg.ChunkMinSize > 0 { minSize = cfg.ChunkMinSize }
+        if cfg.ChunkAvgSize > 0 { avgSize = cfg.ChunkAvgSize }
+        if cfg.ChunkMaxSize > 0 { maxSize = cfg.ChunkMaxSize }
     }
     switch {
-    case fileSize < BinaryLargeThreshold:
+    case fileSize < binaryLargeThreshold:
         return NewFastCDCChunkerWithParams(minSize, avgSize, maxSize)  // 使用配置参数
-    case fileSize < BinaryHugeThreshold:
-        return NewFastCDCChunkerWithParams(avgSize*4, avgSize*8, avgSize*16)
+    case fileSize < binaryHugeThreshold:
+        // 按比例放大，保持用户的 min/avg/max 比例，生成更少更大的块
+        return NewFastCDCChunkerWithParams(minSize*4, avgSize*4, maxSize*4)
     default:
-        return NewFixedChunker(avgSize * 32)
+        // 超大文件用固定分块，基于 avg 放大以减少块数
+        return NewFixedChunker(avgSize * 8)
     }
 }
 

@@ -65,9 +65,29 @@ func AcquireWorkspaceLock(cwd string) error {
 		return fmt.Errorf("workspace is locked by another operation (PID %d): %w", existing.PID, ErrLocked)
 	}
 
-	// Stale lock: remove and retry the atomic create once.
+	// Stale lock: capture its identity, remove, then re-verify. Between the
+	// stale check above and the remove below another process may have stolen
+	// the same stale lock and refreshed it; re-reading after the remove
+	// detects that and yields with ErrLocked instead of clobbering a fresh
+	// owner. The O_EXCL create that follows is the final race-free arbiter.
+	stalePID := existing.PID
+	staleTS := existing.Timestamp
 	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale workspace lock: %w", err)
+	}
+	if reRead, err := readWorkspaceLock(lockPath); err == nil {
+		// A lock file exists again after our remove. If it carries different
+		// data than the stale lock we removed, another process has acquired
+		// the workspace — yield with ErrLocked.
+		if reRead.PID != stalePID || reRead.Timestamp != staleTS {
+			return fmt.Errorf("workspace is locked by another operation (PID %d): %w", reRead.PID, ErrLocked)
+		}
+		// Same stale data reappeared (another process is recovering the same
+		// stale lock and re-wrote it, or our remove raced). Remove it once
+		// more so the O_EXCL create can succeed.
+		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove stale workspace lock: %w", err)
+		}
 	}
 	if err := createLockFile(lockPath, data); err != nil {
 		return err
@@ -122,15 +142,36 @@ func readWorkspaceLock(lockPath string) (*workspaceLockData, error) {
 	return &lock, nil
 }
 
-// ReleaseWorkspaceLock removes the workspace lock file.
+// ReleaseWorkspaceLock removes the workspace lock file, but only if it is
+// owned by the current process. This prevents a process from clobbering a
+// lock that another operation has acquired after this process stopped using
+// it (e.g. a stale lock that was stolen and refreshed between acquire and
+// release). The error is intentionally ignored: if the lock is already gone
+// or is no longer owned by us there is nothing useful for callers to do, and
+// a leftover lock will be reclaimed by the stale-timeout in
+// AcquireWorkspaceLock.
 func ReleaseWorkspaceLock(cwd string) {
 	lockPath := filepath.Join(cwd, ".drift", "workspace.lock")
-	// The error from os.Remove is intentionally ignored: if the lock file is
-	// already gone (e.g. another process stole a stale lock) there is nothing
-	// to do, and if removal fails for other reasons the lock will be reclaimed
-	// by the stale-timeout in AcquireWorkspaceLock. Returning an error here
-	// would give callers no useful recovery action.
-	os.Remove(lockPath)
+	removeLockIfOwned(lockPath, os.Getpid())
+}
+
+// removeLockIfOwned removes the workspace lock file only if it was created by
+// the given PID. This prevents clobbering a lock that another command has
+// acquired after the recorded owner stopped using it. It is shared by
+// ReleaseWorkspaceLock (which passes the current PID) and the watch daemon's
+// shutdown path (which passes the daemon's PID).
+func removeLockIfOwned(lockPath string, pid int) {
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return
+	}
+	var lock workspaceLockData
+	if json.Unmarshal(data, &lock) != nil {
+		return
+	}
+	if lock.PID == pid {
+		os.Remove(lockPath)
+	}
 }
 
 func isLockStale(lock *workspaceLockData) bool {

@@ -9,10 +9,12 @@ import (
 	"github.com/zeebo/blake3"
 )
 
+// fastCDCDefaultMinSize etc. alias the core-level defaults so this package
+// has a single source of truth for chunk sizes (see core.DefaultChunk*Size).
 const (
-	fastCDCDefaultMinSize = 128 * 1024 // 128KB
-	fastCDCDefaultAvgSize = 256 * 1024 // 256KB
-	fastCDCDefaultMaxSize = 512 * 1024 // 512KB
+	fastCDCDefaultMinSize = core.DefaultChunkMinSize
+	fastCDCDefaultAvgSize = core.DefaultChunkAvgSize
+	fastCDCDefaultMaxSize = core.DefaultChunkMaxSize
 	// fastCDCMinSizeFloor is the minimum value accepted by the underlying
 	// FastCDC library (it rejects MinSize < 64). We clamp to this floor so
 	// callers can never trip a library validation error.

@@ -11,7 +11,7 @@
 | 模块 | 任务 | 优先级 |
 |------|------|--------|
 | `go.mod`, `main.go` | 项目初始化，依赖引入 | P0 |
-| `core/` | Hash (BLAKE3), Chunk, Snapshot, Reference, FileEntry, FileMode, Config, Object 类型定义 | P0 |
+| `core/` | Hash (BLAKE3), Chunk, Snapshot, Reference, FileEntry, FileMode, Config, Index 类型定义 | P0 |
 | `porcelain/project.go` | 项目初始化 / 打开逻辑 | P0 |
 | `porcelain/snapshot.go` | 快照创建（扫描 → 分块 → 去重 → 压缩 → 存储）| P0 |
 | `porcelain/restore.go` | 恢复逻辑（备份 → 获取快照 → 重建工作区）| P0 |
@@ -27,7 +27,6 @@
 | `filetype/text/` | 文本引擎（ChunkerFor + Differ）| P0 |
 | `util/cache/` | Chunk Cache + Preview Cache（hashicorp/golang-lru/v2）| P0 |
 | `util/fsutil/` | 目录遍历 + 原子文件操作 | P0 |
-| `util/logger/` | slog 封装 | P1 |
 
 ### CLI 命令
 
@@ -69,7 +68,6 @@
 | `porcelain/gc.go` | 垃圾回收（不可达快照与块清理） | ✅ 已完成 |
 | `cmd/gc.go` | `drift gc` 命令 | ✅ 已完成 |
 | `util/glob/` | .driftignore 模式匹配 | ✅ 已完成 |
-| `util/event/` | 事件总线（watch 用） | ✅ 已完成 |
 
 ### CLI 命令
 

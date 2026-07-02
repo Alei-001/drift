@@ -93,13 +93,13 @@ func TestCollectGarbage_ReclaimsUnreachable(t *testing.T) {
 		t.Error("snap3 should have been removed")
 	}
 	// chunk1 and chunk2 preserved; chunk3 gone.
-	if !store.HasChunk(context.Background(), chunk1) {
+	if ok, _ := store.HasChunk(context.Background(), chunk1); !ok {
 		t.Error("chunk1 should be preserved")
 	}
-	if !store.HasChunk(context.Background(), chunk2) {
+	if ok, _ := store.HasChunk(context.Background(), chunk2); !ok {
 		t.Error("chunk2 should be preserved")
 	}
-	if store.HasChunk(context.Background(), chunk3) {
+	if ok, _ := store.HasChunk(context.Background(), chunk3); ok {
 		t.Error("chunk3 should have been removed")
 	}
 }
@@ -142,7 +142,7 @@ func TestCollectGarbage_SharedChunkPreserved(t *testing.T) {
 	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap3}); err == nil {
 		t.Error("snap3 should have been removed")
 	}
-	if !store.HasChunk(context.Background(), chunkA) {
+	if ok, _ := store.HasChunk(context.Background(), chunkA); !ok {
 		t.Error("chunkA should be preserved because snap1 still references it")
 	}
 }
@@ -190,7 +190,7 @@ func TestCollectGarbage_DryRunNoDelete(t *testing.T) {
 	if _, err := store.GetSnapshot(context.Background(), core.SnapshotID{Hash: snap2}); err != nil {
 		t.Errorf("snap2 should still exist after dry-run: %v", err)
 	}
-	if !store.HasChunk(context.Background(), chunk2) {
+	if ok, _ := store.HasChunk(context.Background(), chunk2); !ok {
 		t.Error("chunk2 should still exist after dry-run")
 	}
 }
@@ -285,6 +285,7 @@ func TestCollectGarbage_ZeroTargetSkipped(t *testing.T) {
 
 func TestCountUnreachableSnapshots(t *testing.T) {
 	store := memory.NewMemoryStorage()
+	dir := t.TempDir()
 
 	snap1 := gcHash(0x01) // reachable
 	snap2 := gcHash(0x02) // orphan
@@ -297,7 +298,7 @@ func TestCountUnreachableSnapshots(t *testing.T) {
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: nil})
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap3}, PrevID: nil})
 
-	count, err := CountUnreachableSnapshots(context.Background(), store)
+	count, err := CountUnreachableSnapshots(context.Background(), store, dir)
 	if err != nil {
 		t.Fatalf("CountUnreachableSnapshots failed: %v", err)
 	}

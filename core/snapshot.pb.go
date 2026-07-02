@@ -223,6 +223,110 @@ func (x *SnapshotProto) GetTotalSize() int64 {
 	return 0
 }
 
+// SnapshotManifest is a lightweight metadata index for a snapshot, stored
+// separately so ListSnapshots can enumerate snapshots without deserializing
+// the full file list. The Go implementation lives in core/manifest.go with
+// hand-written protowire marshaling (no protoc toolchain required).
+type SnapshotManifest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                       // SnapshotID.Hash (32 bytes)
+	PrevId        []byte                 `protobuf:"bytes,2,opt,name=prev_id,json=prevId,proto3" json:"prev_id,omitempty"` // optional, nil for first commit
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Author        string                 `protobuf:"bytes,4,opt,name=author,proto3" json:"author,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Tags          []string               `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
+	TotalSize     int64                  `protobuf:"varint,7,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
+	FilesChanged  int32                  `protobuf:"varint,8,opt,name=files_changed,json=filesChanged,proto3" json:"files_changed,omitempty"` // file count
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotManifest) Reset() {
+	*x = SnapshotManifest{}
+	mi := &file_core_snapshot_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotManifest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotManifest) ProtoMessage() {}
+
+func (x *SnapshotManifest) ProtoReflect() protoreflect.Message {
+	mi := &file_core_snapshot_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotManifest.ProtoReflect.Descriptor instead.
+func (*SnapshotManifest) Descriptor() ([]byte, []int) {
+	return file_core_snapshot_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SnapshotManifest) GetId() []byte {
+	if x != nil {
+		return x.Id
+	}
+	return nil
+}
+
+func (x *SnapshotManifest) GetPrevId() []byte {
+	if x != nil {
+		return x.PrevId
+	}
+	return nil
+}
+
+func (x *SnapshotManifest) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *SnapshotManifest) GetAuthor() string {
+	if x != nil {
+		return x.Author
+	}
+	return ""
+}
+
+func (x *SnapshotManifest) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+func (x *SnapshotManifest) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *SnapshotManifest) GetTotalSize() int64 {
+	if x != nil {
+		return x.TotalSize
+	}
+	return 0
+}
+
+func (x *SnapshotManifest) GetFilesChanged() int32 {
+	if x != nil {
+		return x.FilesChanged
+	}
+	return 0
+}
+
 var File_core_snapshot_proto protoreflect.FileDescriptor
 
 const file_core_snapshot_proto_rawDesc = "" +
@@ -254,7 +358,17 @@ const file_core_snapshot_proto_rawDesc = "" +
 	"\x04tags\x18\a \x03(\tR\x04tags\x12\x1d\n" +
 	"\n" +
 	"total_size\x18\b \x01(\x03R\ttotalSizeB\x0f\n" +
-	"\r_prev_id_hashB Z\x1egithub.com/your-org/drift/coreb\x06proto3"
+	"\r_prev_id_hash\"\xe3\x01\n" +
+	"\x10SnapshotManifest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x17\n" +
+	"\aprev_id\x18\x02 \x01(\fR\x06prevId\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x16\n" +
+	"\x06author\x18\x04 \x01(\tR\x06author\x12\x1c\n" +
+	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\x12\x12\n" +
+	"\x04tags\x18\x06 \x03(\tR\x04tags\x12\x1d\n" +
+	"\n" +
+	"total_size\x18\a \x01(\x03R\ttotalSize\x12#\n" +
+	"\rfiles_changed\x18\b \x01(\x05R\ffilesChangedB Z\x1egithub.com/your-org/drift/coreb\x06proto3"
 
 var (
 	file_core_snapshot_proto_rawDescOnce sync.Once
@@ -268,14 +382,15 @@ func file_core_snapshot_proto_rawDescGZIP() []byte {
 	return file_core_snapshot_proto_rawDescData
 }
 
-var file_core_snapshot_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_core_snapshot_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_core_snapshot_proto_goTypes = []any{
-	(*FileEntryProto)(nil), // 0: core.FileEntryProto
-	(*SnapshotProto)(nil),  // 1: core.SnapshotProto
-	nil,                    // 2: core.FileEntryProto.ExtraEntry
+	(*FileEntryProto)(nil),   // 0: core.FileEntryProto
+	(*SnapshotProto)(nil),    // 1: core.SnapshotProto
+	(*SnapshotManifest)(nil), // 2: core.SnapshotManifest
+	nil,                      // 3: core.FileEntryProto.ExtraEntry
 }
 var file_core_snapshot_proto_depIdxs = []int32{
-	2, // 0: core.FileEntryProto.extra:type_name -> core.FileEntryProto.ExtraEntry
+	3, // 0: core.FileEntryProto.extra:type_name -> core.FileEntryProto.ExtraEntry
 	0, // 1: core.SnapshotProto.files:type_name -> core.FileEntryProto
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
@@ -297,7 +412,7 @@ func file_core_snapshot_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_core_snapshot_proto_rawDesc), len(file_core_snapshot_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

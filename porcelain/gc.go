@@ -63,8 +63,13 @@ func computeReachability(ctx context.Context, store storage.Storer) (map[core.Ha
 		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: h})
 		if err != nil {
 			// Snapshot referenced by a ref but missing from storage: skip
-			// it but continue traversing the rest of the graph.
-			continue
+			// it but continue traversing the rest of the graph. Only
+			// ErrNotFound is skippable; any other error (e.g. corruption
+			// or an I/O failure) must propagate so the caller can decide.
+			if errors.Is(err, storage.ErrNotFound) {
+				continue
+			}
+			return nil, nil, fmt.Errorf("get snapshot %s: %w", h.FullString(), err)
 		}
 
 		if snap.PrevID != nil && !snap.PrevID.Hash.IsZero() && !visited[snap.PrevID.Hash] {
@@ -118,13 +123,23 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 	}
 
 	// --- Unreferenced chunks ---
-	// Collect chunk hashes referenced by reachable snapshots.
+	// Collect chunk hashes referenced by reachable snapshots. ListSnapshots
+	// returns metadata-only snapshots (nil Files), so fetch each reachable
+	// snapshot's full data to access its chunk references.
 	reachableChunks := make(map[core.Hash]bool)
 	for _, snap := range allSnapshots {
+		if err := ctx.Err(); err != nil {
+			return GCReport{}, err
+		}
 		if !reachable[snap.ID.Hash] {
 			continue
 		}
-		for _, f := range snap.Files {
+		full, err := store.GetSnapshot(ctx, snap.ID)
+		if err != nil {
+			// Snapshot was deleted or corrupted; skip it.
+			continue
+		}
+		for _, f := range full.Files {
 			for _, c := range f.Chunks {
 				if !c.IsZero() {
 					reachableChunks[c] = true
@@ -159,6 +174,9 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 	}
 
 	for _, ch := range allChunks {
+		if err := ctx.Err(); err != nil {
+			return report, err
+		}
 		if reachableChunks[ch] {
 			continue
 		}
@@ -180,7 +198,15 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 
 // CountUnreachableSnapshots returns the number of snapshots that are not
 // reachable from any branch or tag reference.
-func CountUnreachableSnapshots(ctx context.Context, store storage.Storer) (int, error) {
+//
+// Like CollectGarbage, it acquires the workspace lock so it does not observe
+// a half-applied save/switch/restore that would produce a misleading count.
+func CountUnreachableSnapshots(ctx context.Context, store storage.Storer, workDir string) (int, error) {
+	if err := AcquireWorkspaceLock(workDir); err != nil {
+		return 0, fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(workDir)
+
 	reachable, allSnapshots, err := computeReachability(ctx, store)
 	if err != nil {
 		return 0, err

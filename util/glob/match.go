@@ -5,17 +5,50 @@ import (
 	"strings"
 )
 
+// Matcher is a precompiled glob pattern that can be matched against many
+// paths without recompiling the underlying regular expression.
+// Create one with Compile and reuse it across many Match calls.
+type Matcher struct {
+	pattern string
+	re      *regexp.Regexp
+}
+
+// Compile compiles a glob pattern into a reusable Matcher.
+// The pattern supports ** (recursive wildcard), * (single-level wildcard),
+// ? (single character), and [...] (character classes).
+// The path passed to Matcher.Match must use forward slashes.
+func Compile(pattern string) (*Matcher, error) {
+	re, err := regexp.Compile("^" + globToRegex(pattern) + "$")
+	if err != nil {
+		return nil, err
+	}
+	return &Matcher{pattern: pattern, re: re}, nil
+}
+
+// Match reports whether path matches the precompiled pattern.
+// The path must use forward slashes.
+func (m *Matcher) Match(path string) bool {
+	return m.re.MatchString(path)
+}
+
+// Pattern returns the original glob pattern the Matcher was compiled from.
+func (m *Matcher) Pattern() string {
+	return m.pattern
+}
+
 // Match reports whether path matches the glob pattern.
 // The pattern supports ** (recursive wildcard), * (single-level wildcard),
 // ? (single character), and [...] (character classes).
 // The path must use forward slashes.
+//
+// For repeated matches against the same pattern, prefer Compile + Matcher.Match
+// to avoid recompiling the regular expression on every call.
 func Match(pattern, path string) (bool, error) {
-	regexStr := globToRegex(pattern)
-	re, err := regexp.Compile("^" + regexStr + "$")
+	m, err := Compile(pattern)
 	if err != nil {
 		return false, err
 	}
-	return re.MatchString(path), nil
+	return m.Match(path), nil
 }
 
 func globToRegex(pattern string) string {

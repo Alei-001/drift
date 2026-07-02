@@ -2,7 +2,7 @@ package core
 
 // FileMetadata holds optional metadata about a file.
 type FileMetadata struct {
-	MimeType string
+	MIMEType string
 	Extra    map[string]string
 }
 

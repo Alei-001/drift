@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"path/filepath"
 	"strings"
+
+	"github.com/your-org/drift/chunker"
 )
 
 // Canonical image format keys returned by detectFormatByMagic.
@@ -22,7 +24,9 @@ var imageExtensions = map[string]bool{
 }
 
 // ImageEngine handles image files (PNG, JPEG, GIF, WebP, BMP, TIFF).
-type ImageEngine struct{}
+type ImageEngine struct {
+	chunker.DefaultSelector
+}
 
 // NewEngine creates a new ImageEngine.
 func NewEngine() *ImageEngine {

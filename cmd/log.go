@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -31,7 +31,7 @@ var logCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := porcelain.OpenProject(cwd)
+		store, _, err := openProjectOrReport("Log", cwd)
 		if err != nil {
 			return err
 		}
@@ -57,7 +57,10 @@ var logCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			branchMap, _ = buildBranchMap(ctx, store)
+			branchMap, err = porcelain.ResolveSnapshotBranches(ctx, store)
+			if err != nil {
+				return err
+			}
 			for _, s := range allSnaps {
 				if names, ok := branchMap[s.ID.Hash.String()]; ok && len(names) > 0 && names[0] == logBranch {
 					snapshots = append(snapshots, s)
@@ -70,7 +73,10 @@ var logCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			branchMap, _ = buildBranchMap(ctx, store)
+			branchMap, err = porcelain.ResolveSnapshotBranches(ctx, store)
+			if err != nil {
+				return err
+			}
 		}
 
 		// Filter auto-saves unless --all
@@ -98,7 +104,7 @@ var logCmd = &cobra.Command{
 				hint = fmt.Sprintf("branch '%s' has no snapshots yet.", logBranch)
 			}
 			statusFailed("Log", "no snapshots yet.", hint)
-		return ErrSilent
+			return ErrSilent
 		}
 
 		if logJSON {
@@ -161,61 +167,30 @@ var logCmd = &cobra.Command{
 func logVerboseMode(ctx context.Context, store storage.Storer, id string) error {
 	snapshot := resolveSnapshot(ctx, store, id)
 	if snapshot == nil {
-		return fmt.Errorf("snapshot not found: %s", id)
+		statusFailed("Log", fmt.Sprintf("snapshot not found: %s.", id), "use 'drift log' to list available snapshots.")
+		return ErrSilent
 	}
 
 	fmt.Printf(">>> Snapshot %s\n", snapshot.ShortID())
 	timeStr := time.Unix(snapshot.Timestamp, 0).Format("2006-01-02 15:04")
 	fmt.Printf("%s  %s\n", timeStr, snapshot.Message)
 
-	add, mod, del := computeVerboseChanges(ctx, store, snapshot)
+	add, mod, del, err := computeChanges(ctx, store, snapshot)
+	if err != nil {
+		return err
+	}
 	printFileListWithLineCount(add, mod, del, store)
 	total := len(add) + len(mod) + len(del)
 	summaryLine(total, len(add), len(mod), len(del))
 	return nil
 }
 
-func computeVerboseChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added, modified []core.FileEntry, deleted []string) {
-	currFiles := make(map[string]core.FileEntry)
-	for _, f := range snapshot.Files {
-		currFiles[f.Path] = f
-	}
-
-	var prevFiles map[string]core.FileEntry
-	if snapshot.PrevID != nil {
-		prevSnap, err := store.GetSnapshot(ctx, *snapshot.PrevID)
-		if err == nil {
-			prevFiles = make(map[string]core.FileEntry)
-			for _, f := range prevSnap.Files {
-				prevFiles[f.Path] = f
-			}
-		}
-	}
-
-	for _, f := range snapshot.Files {
-		if prevFiles == nil {
-			added = append(added, f)
-			continue
-		}
-		if prev, ok := prevFiles[f.Path]; !ok {
-			added = append(added, f)
-		} else if prev.Size != f.Size || !slices.Equal(prev.Chunks, f.Chunks) {
-			modified = append(modified, f)
-		}
-	}
-
-	if prevFiles != nil {
-		for p := range prevFiles {
-			if _, ok := currFiles[p]; !ok {
-				deleted = append(deleted, p)
-			}
-		}
-	}
-	return
-}
-
 func countSnapshotChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added, modified, deleted int) {
-	a, m, d := computeVerboseChanges(ctx, store, snapshot)
+	a, m, d, err := computeChanges(ctx, store, snapshot)
+	if err != nil {
+		slog.Warn("compute snapshot changes failed", "snapshot", snapshot.ShortID(), "error", err)
+		return 0, 0, 0
+	}
 	return len(a), len(m), len(d)
 }
 
@@ -243,41 +218,53 @@ func formatChangesCompact(added, modified, deleted int) string {
 // it uses the PrevID chain: if A.PrevID == B.ID, then A is newer than B.
 // This is stable for unrelated snapshots.
 func sortSnapshotsNewestFirst(snaps []*core.Snapshot) {
-	// Build a set of IDs for quick lookup.
-	idSet := make(map[core.SnapshotID]bool, len(snaps))
+	// Build a map for O(1) predecessor lookup. The old code scanned the
+	// full list for each PrevID hop, making it O(N²).
+	snapByID := make(map[core.SnapshotID]*core.Snapshot, len(snaps))
 	for _, s := range snaps {
-		idSet[s.ID] = true
+		snapByID[s.ID] = s
 	}
-	// For each snapshot, determine if it is preceded by another snapshot
-	// in the list (i.e., another snapshot's PrevID points to it). If so,
-	// that other snapshot is newer.
-	isNewer := make(map[core.SnapshotID]int, len(snaps)) // depth from root
-	for _, s := range snaps {
-		depth := 0
-		current := s
-		for current.PrevID != nil && idSet[*current.PrevID] {
-			depth++
-			// Find the predecessor snapshot in the list.
-			var pred *core.Snapshot
-			for _, p := range snaps {
-				if p.ID == *current.PrevID {
-					pred = p
-					break
+
+	// Compute depth (distance from the root of the PrevID chain) for each
+	// snapshot. Walk the chain via the map and memoize so every edge is
+	// traversed at most once — O(N) total instead of O(N²).
+	depth := make(map[core.SnapshotID]int, len(snaps))
+	for _, start := range snaps {
+		if _, ok := depth[start.ID]; ok {
+			continue
+		}
+		// Collect un-cached snapshots along the chain.
+		var chain []*core.Snapshot
+		cur := start
+		for cur != nil {
+			if d, ok := depth[cur.ID]; ok {
+				// Hit a cached depth; assign backward for the rest.
+				for i := len(chain) - 1; i >= 0; i-- {
+					d++
+					depth[chain[i].ID] = d
 				}
-			}
-			if pred == nil {
+				chain = nil
 				break
 			}
-			current = pred
+			chain = append(chain, cur)
+			if cur.PrevID != nil {
+				cur = snapByID[*cur.PrevID]
+			} else {
+				cur = nil
+			}
 		}
-		isNewer[s.ID] = depth
+		// Reached root without hitting a cached entry.
+		for i := len(chain) - 1; i >= 0; i-- {
+			depth[chain[i].ID] = len(chain) - 1 - i
+		}
 	}
+
 	sort.SliceStable(snaps, func(i, j int) bool {
 		if snaps[i].Timestamp != snaps[j].Timestamp {
 			return snaps[i].Timestamp > snaps[j].Timestamp
 		}
 		// Higher depth = further from root = newer.
-		return isNewer[snaps[i].ID] > isNewer[snaps[j].ID]
+		return depth[snaps[i].ID] > depth[snaps[j].ID]
 	})
 }
 
@@ -319,75 +306,6 @@ func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.Sn
 	os.Stdout.Write(data)
 	fmt.Println()
 	return nil
-}
-
-// buildBranchMap assigns each snapshot to exactly one branch: the one whose
-// tip is the *nearest* descendant (fewest PrevID hops). This matches the
-// mental model "this commit belongs to the branch it was made on" — a fork
-// point stays attributed to its original branch, and each snapshot shows at
-// most one branch name in the log.
-//
-// A snapshot unreachable from any branch tip (orphaned) gets no entry.
-func buildBranchMap(ctx context.Context, store storage.Storer) (map[string][]string, error) {
-	branches, _, err := porcelain.ListBranches(ctx, store)
-	if err != nil {
-		return nil, err
-	}
-
-	// For each branch, walk its PrevID chain and record the hop distance from
-	// the tip for every snapshot. distance[branchName][hashStr] = hops.
-	type branchWalk struct {
-		name string
-		dist map[string]int
-	}
-	var walks []branchWalk
-	for _, b := range branches {
-		if b.Target.IsZero() {
-			continue
-		}
-		name := strings.TrimPrefix(b.Name, "heads/")
-		bw := branchWalk{name: name, dist: make(map[string]int)}
-		currHash := b.Target
-		hops := 0
-		for !currHash.IsZero() {
-			hashStr := currHash.String()
-			if _, seen := bw.dist[hashStr]; seen {
-				break // cycle guard
-			}
-			bw.dist[hashStr] = hops
-			snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: currHash})
-			if err != nil {
-				break
-			}
-			if snap.PrevID == nil {
-				break
-			}
-			currHash = snap.PrevID.Hash
-			hops++
-		}
-		walks = append(walks, bw)
-	}
-
-	// For each snapshot, pick the branch with the smallest hop count.
-	// Ties (a snapshot equidistant from two tips) are broken by branch name
-	// for determinism — this only happens at a true fork point where two
-	// branches share the same tip distance, which is rare.
-	bestDist := make(map[string]int)
-	bestName := make(map[string]string)
-	for _, bw := range walks {
-		for hashStr, d := range bw.dist {
-			cur, ok := bestDist[hashStr]
-			if !ok || d < cur || (d == cur && bw.name < bestName[hashStr]) {
-				bestDist[hashStr] = d
-				bestName[hashStr] = bw.name
-			}
-		}
-	}
-	result := make(map[string][]string)
-	for hashStr, name := range bestName {
-		result[hashStr] = []string{name}
-	}
-	return result, nil
 }
 
 func init() {

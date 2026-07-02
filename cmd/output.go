@@ -13,6 +13,9 @@ import (
 	"strings"
 
 	"github.com/your-org/drift/core"
+	"github.com/your-org/drift/porcelain"
+	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/util/format"
 )
 
 // ErrSilent indicates that an error was already displayed to the user
@@ -47,6 +50,18 @@ func statusFailed(action string, errMsg string, hint string) {
 	if hint != "" {
 		fmt.Fprintf(os.Stderr, "  hint: %s\n", hint)
 	}
+}
+
+// openProjectOrReport opens the drift project at cwd. On failure it prints
+// a user-friendly statusFailed block and returns ErrSilent so the caller
+// can `return ErrSilent` directly. On success it returns the store and cfg.
+func openProjectOrReport(action, cwd string) (storage.Storer, *core.Config, error) {
+	store, cfg, err := porcelain.OpenProject(cwd)
+	if err != nil {
+		statusFailed(action, "not a drift repository.", "use 'drift init' to create one.")
+		return nil, nil, ErrSilent
+	}
+	return store, cfg, nil
 }
 
 // -- File list formatting --
@@ -105,15 +120,15 @@ func printFileListWithLineCount(added, modified []core.FileEntry, deleted []stri
 func countLinesFromChunks(ctx context.Context, store interface {
 	GetChunk(context.Context, core.Hash) (*core.Chunk, error)
 }, entry core.FileEntry) int {
-	var data []byte
+	count := 0
 	for _, h := range entry.Chunks {
 		chunk, err := store.GetChunk(ctx, h)
 		if err != nil {
 			return 0
 		}
-		data = append(data, chunk.Data...)
+		count += bytes.Count(chunk.Data, []byte{'\n'})
 	}
-	return strings.Count(string(data), "\n")
+	return count
 }
 
 // summaryLine prints "  N files: +A ~M -D", omitting zero-count parts.
@@ -147,16 +162,7 @@ func pluralFile(n int) string {
 
 // formatSize converts bytes to a human-readable string.
 func formatSize(size int64) string {
-	switch {
-	case size < 0:
-		return fmt.Sprintf("-%s", formatSize(-size))
-	case size < 1024:
-		return fmt.Sprintf("%d B", size)
-	case size < 1024*1024:
-		return fmt.Sprintf("%.1f KB", float64(size)/1024)
-	default:
-		return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
-	}
+	return format.Bytes(size)
 }
 
 func parseHexByte(s string) (byte, bool) {

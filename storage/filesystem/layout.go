@@ -4,6 +4,7 @@ const (
 	DriftDir     = ".drift"
 	ChunksDir    = "chunks"
 	SnapshotsDir = "snapshots"
+	ManifestsDir = "manifests"
 	RefsDir      = "refs"
 	PreviewsDir  = "previews"
 	HeadsDir     = "heads"

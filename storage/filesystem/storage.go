@@ -15,7 +15,11 @@ type FSStorage struct {
 	root         string
 	chunkCache   *cache.Cache[core.Hash, *core.Chunk]
 	previewCache *cache.Cache[string, []byte]
-	zstdMu       sync.Mutex
+	// lifecycleMu guards the lifecycle transitions of the zstd
+	// encoder/decoder (SetCompression and Close). It does NOT protect
+	// data-access methods (GetChunk/PutChunk): those rely on the
+	// porcelain workspace lock guaranteeing single-threaded access.
+	lifecycleMu  sync.Mutex
 	zstdDecoder  *zstd.Decoder
 	zstdEncoder  *zstd.Encoder
 	compression  bool
@@ -25,6 +29,7 @@ func NewFSStorage(root string) (*FSStorage, error) {
 	dirs := []string{
 		filepath.Join(root, ChunksDir),
 		filepath.Join(root, SnapshotsDir),
+		filepath.Join(root, ManifestsDir),
 		filepath.Join(root, RefsDir),
 		filepath.Join(root, PreviewsDir),
 		filepath.Join(root, RefsDir, HeadsDir),
@@ -32,7 +37,7 @@ func NewFSStorage(root string) (*FSStorage, error) {
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("create directory %s: %w", d, err)
 		}
 	}
 
@@ -66,18 +71,26 @@ func NewFSStorage(root string) (*FSStorage, error) {
 }
 
 func (fs *FSStorage) Close() error {
+	fs.lifecycleMu.Lock()
+	defer fs.lifecycleMu.Unlock()
 	fs.zstdDecoder.Close()
-	return fs.zstdEncoder.Close()
+	if err := fs.zstdEncoder.Close(); err != nil {
+		return fmt.Errorf("close zstd encoder: %w", err)
+	}
+	return nil
 }
 
-func (fs *FSStorage) SetCompression(enabled bool, level zstd.EncoderLevel) {
-	fs.zstdMu.Lock()
-	defer fs.zstdMu.Unlock()
+func (fs *FSStorage) SetCompression(enabled bool, level zstd.EncoderLevel) error {
+	fs.lifecycleMu.Lock()
+	defer fs.lifecycleMu.Unlock()
 	fs.compression = enabled
 	if enabled {
-		if enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level)); err == nil {
-			fs.zstdEncoder.Close()
-			fs.zstdEncoder = enc
+		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level))
+		if err != nil {
+			return fmt.Errorf("create zstd encoder: %w", err)
 		}
+		fs.zstdEncoder.Close()
+		fs.zstdEncoder = enc
 	}
+	return nil
 }

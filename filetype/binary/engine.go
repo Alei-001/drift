@@ -1,7 +1,11 @@
 package binary
 
+import "github.com/your-org/drift/chunker"
+
 // BinaryEngine is the fallback engine for binary files.
-type BinaryEngine struct{}
+type BinaryEngine struct {
+	chunker.DefaultSelector
+}
 
 // NewEngine creates a new BinaryEngine.
 func NewEngine() *BinaryEngine {

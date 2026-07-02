@@ -75,10 +75,26 @@ func TestFixedChunker_CorrectChunkSize(t *testing.T) {
 }
 
 func TestFixedChunker_MinimumChunkSize(t *testing.T) {
+	// FixedChunker(100) should be clamped to a minimum of 4096 bytes.
+	// Verify that all chunks produced are at least 4096 bytes (except the last).
+	data := make([]byte, 12000)
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
 	chunker := NewFixedChunker(100)
-	// Should be clamped to 4096
-	if chunker.chunkSize != 4096 {
-		t.Errorf("expected chunkSize to be clamped to 4096, got %d", chunker.chunkSize)
+	chunks, err := chunker.Chunk(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Chunk failed: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("expected at least 2 chunks for 12000 bytes with min 4096, got %d", len(chunks))
+	}
+	for i, c := range chunks {
+		if i < len(chunks)-1 {
+			if c.Size < 4096 {
+				t.Errorf("chunk %d: expected size >= 4096, got %d", i, c.Size)
+			}
+		}
 	}
 }
 

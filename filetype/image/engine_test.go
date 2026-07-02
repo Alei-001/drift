@@ -153,7 +153,7 @@ func TestDiff_FormatChanged(t *testing.T) {
 	oldData := makePNGHeader(10, 10)
 	newData := makeJPEG(10, 10)
 
-	diff, err := engine.Diff("old.png", oldData, "new.jpg", newData)
+	diff, err := engine.Diff("old.png", bytes.NewReader(oldData), "new.jpg", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestDiff_DimensionsChanged(t *testing.T) {
 	oldData := makePNGHeader(1920, 1080)
 	newData := makePNGHeader(3840, 2160)
 
-	diff, err := engine.Diff("old.png", oldData, "new.png", newData)
+	diff, err := engine.Diff("old.png", bytes.NewReader(oldData), "new.png", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestDiff_FileSizeChanged(t *testing.T) {
 	oldData := makePNGHeader(4, 4)
 	newData := append(append([]byte{}, oldData...), 0x00, 0x00, 0x00)
 
-	diff, err := engine.Diff("old.png", oldData, "new.png", newData)
+	diff, err := engine.Diff("old.png", bytes.NewReader(oldData), "new.png", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestDiff_Identical(t *testing.T) {
 	engine := NewEngine()
 	data := makePNGHeader(8, 8)
 
-	diff, err := engine.Diff("old.png", data, "new.png", data)
+	diff, err := engine.Diff("old.png", bytes.NewReader(data), "new.png", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -211,7 +211,10 @@ func TestDiff_Identical(t *testing.T) {
 func TestPreview_PNG(t *testing.T) {
 	engine := NewEngine()
 	data := makePNGHeader(640, 480)
-	preview := engine.Preview(data, 10)
+	preview, err := engine.Preview(data, int64(len(data)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	if !strings.Contains(preview, "PNG") {
 		t.Errorf("preview should contain format name 'PNG', got %q", preview)
@@ -227,7 +230,10 @@ func TestPreview_PNG(t *testing.T) {
 func TestPreview_JPEG(t *testing.T) {
 	engine := NewEngine()
 	data := makeJPEG(2, 2)
-	preview := engine.Preview(data, 10)
+	preview, err := engine.Preview(data, int64(len(data)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	if !strings.Contains(preview, "JPEG") {
 		t.Errorf("preview should contain 'JPEG', got %q", preview)
@@ -240,7 +246,10 @@ func TestPreview_JPEG(t *testing.T) {
 func TestPreview_GIF(t *testing.T) {
 	engine := NewEngine()
 	data := makeGIF(3, 3)
-	preview := engine.Preview(data, 10)
+	preview, err := engine.Preview(data, int64(len(data)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	if !strings.Contains(preview, "GIF") {
 		t.Errorf("preview should contain 'GIF', got %q", preview)
@@ -255,7 +264,10 @@ func TestPreview_UnknownFormat(t *testing.T) {
 	// Magic bytes for BMP, but not decodable by image.DecodeConfig; should
 	// still produce a preview line with format name and size.
 	data := []byte{'B', 'M', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00}
-	preview := engine.Preview(data, 10)
+	preview, err := engine.Preview(data, int64(len(data)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	if !strings.Contains(preview, "BMP") {
 		t.Errorf("preview should contain 'BMP', got %q", preview)

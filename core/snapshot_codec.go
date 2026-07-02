@@ -60,8 +60,8 @@ func fileEntryToProto(f *FileEntry) *FileEntryProto {
 		}
 	}
 	if f.Metadata != nil {
-		if f.Metadata.MimeType != "" {
-			mt := f.Metadata.MimeType
+		if f.Metadata.MIMEType != "" {
+			mt := f.Metadata.MIMEType
 			fp.MimeType = &mt
 		}
 		if len(f.Metadata.Extra) > 0 {

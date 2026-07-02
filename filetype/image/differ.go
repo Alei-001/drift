@@ -3,12 +3,28 @@ package image
 import (
 	"bytes"
 	"fmt"
+	"io"
+
+	"github.com/your-org/drift/util/format"
 )
 
 // Diff compares two images by format, dimensions, and file size, in that
 // priority order. It does not perform pixel-level diffing. Returns an empty
 // string when the images are identical.
-func (e *ImageEngine) Diff(oldPath string, oldData []byte, newPath string, newData []byte) (string, error) {
+//
+// The full bytes are needed for equality and size comparison, so both
+// readers are consumed entirely. Image diffs in drift are only invoked for
+// explicitly diffed files (not bulk snapshot diffs), so this is acceptable.
+func (e *ImageEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+	oldData, err := io.ReadAll(oldReader)
+	if err != nil {
+		return "", fmt.Errorf("read old image %s: %w", oldPath, err)
+	}
+	newData, err := io.ReadAll(newReader)
+	if err != nil {
+		return "", fmt.Errorf("read new image %s: %w", newPath, err)
+	}
+
 	// Short-circuit: identical bytes mean no change.
 	if bytes.Equal(oldData, newData) {
 		return "", nil
@@ -30,17 +46,13 @@ func (e *ImageEngine) Diff(oldPath string, oldData []byte, newPath string, newDa
 
 	if len(oldData) != len(newData) {
 		return fmt.Sprintf("image file size changed: %s -> %s",
-			formatSize(len(oldData)), formatSize(len(newData))), nil
+			format.Bytes(int64(len(oldData))), format.Bytes(int64(len(newData)))), nil
 	}
 
 	// Fallback: same format, dimensions, and byte length, but the bytes
 	// differ (checked at the top). Report a generic content change so we
 	// don't silently miss the modification.
-	if !bytes.Equal(oldData, newData) {
-		return "image content changed", nil
-	}
-
-	return "", nil
+	return "image content changed", nil
 }
 
 // formatKeyOrUnknown returns the format key or "unknown" for empty keys.

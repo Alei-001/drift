@@ -24,4 +24,16 @@ var (
 
 	// ErrTagAlreadyExists is returned when creating a tag that already exists.
 	ErrTagAlreadyExists = errors.New("tag already exists")
+
+	// ErrCannotDeleteCurrentBranch is returned when attempting to delete the
+	// currently checked-out branch.
+	ErrCannotDeleteCurrentBranch = errors.New("cannot delete the current branch")
+
+	// ErrCannotDeleteMain is returned when attempting to delete the 'main'
+	// branch, which is protected.
+	ErrCannotDeleteMain = errors.New("cannot delete 'main'")
+
+	// ErrCannotRenameMain is returned when attempting to rename the 'main'
+	// branch, which is protected.
+	ErrCannotRenameMain = errors.New("cannot rename 'main'")
 )

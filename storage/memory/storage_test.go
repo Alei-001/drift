@@ -43,13 +43,13 @@ func TestHasChunk(t *testing.T) {
 	ctx := context.Background()
 	hash := core.Hash{0x01}
 
-	if store.HasChunk(ctx, hash) {
+	if ok, _ := store.HasChunk(ctx, hash); ok {
 		t.Error("expected HasChunk=false before PutChunk")
 	}
 
 	store.PutChunk(ctx, &core.Chunk{Hash: hash, Data: []byte("x")})
 
-	if !store.HasChunk(ctx, hash) {
+	if ok, _ := store.HasChunk(ctx, hash); !ok {
 		t.Error("expected HasChunk=true after PutChunk")
 	}
 }
@@ -243,9 +243,9 @@ func TestGetRef_SymRef(t *testing.T) {
 		Target: core.Hash{0x01},
 	})
 	store.SetRef(ctx, "HEAD", &core.Reference{
-		Name:    "HEAD",
-		Type:    core.RefTypeHead,
-		SymRef:  "heads/main",
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/main",
 	})
 
 	got, err := store.GetRef(ctx, "HEAD")
@@ -320,5 +320,101 @@ func TestGetConfig_Default(t *testing.T) {
 	// DefaultConfig should have IgnoreFile set
 	if cfg.Core.IgnoreFile == "" {
 		t.Error("expected non-empty IgnoreFile in default config")
+	}
+}
+
+// TestListSnapshots_NilFiles verifies that ListSnapshots returns snapshots
+// with nil Files (using manifests, not full snapshot data).
+func TestListSnapshots_NilFiles(t *testing.T) {
+	store := NewMemoryStorage()
+	ctx := context.Background()
+
+	store.PutSnapshot(ctx, &core.Snapshot{
+		ID:        core.SnapshotID{Hash: core.Hash{0x01}},
+		Message:   "snap",
+		Timestamp: 1,
+		Files:     []core.FileEntry{{Path: "file.txt", Size: 100}},
+	})
+
+	snaps, err := store.ListSnapshots(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot, got %d", len(snaps))
+	}
+	if snaps[0].Files != nil {
+		t.Errorf("Files should be nil (manifest used), got %d entries", len(snaps[0].Files))
+	}
+	if snaps[0].Message != "snap" {
+		t.Errorf("Message: got %q, want %q", snaps[0].Message, "snap")
+	}
+}
+
+// TestListSnapshots_10000 verifies that listing 10,000 snapshots via
+// manifests is stable and returns nil Files for all entries.
+func TestListSnapshots_10000(t *testing.T) {
+	store := NewMemoryStorage()
+	ctx := context.Background()
+
+	const count = 10000
+	for i := 0; i < count; i++ {
+		store.PutSnapshot(ctx, &core.Snapshot{
+			ID:        core.SnapshotID{Hash: core.Hash{byte(i), byte(i >> 8), byte(i >> 16), byte(i >> 24)}},
+			Message:   "snap",
+			Timestamp: int64(i),
+			Files:     []core.FileEntry{{Path: "file", Size: int64(i)}},
+		})
+	}
+
+	snaps, err := store.ListSnapshots(ctx, &storage.ListOptions{Limit: 50, Offset: 0})
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+	if len(snaps) != 50 {
+		t.Fatalf("expected 50 snapshots (limit), got %d", len(snaps))
+	}
+	for _, s := range snaps {
+		if s.Files != nil {
+			t.Fatalf("Files should be nil (manifest used), got %d entries", len(s.Files))
+		}
+	}
+
+	// Verify total count.
+	all, err := store.ListSnapshots(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListSnapshots (all) failed: %v", err)
+	}
+	if len(all) != count {
+		t.Errorf("expected %d total snapshots, got %d", count, len(all))
+	}
+
+	// Verify sorted by timestamp descending.
+	for i := 1; i < len(all); i++ {
+		if all[i].Timestamp > all[i-1].Timestamp {
+			t.Fatal("snapshots should be sorted by timestamp descending")
+		}
+	}
+}
+
+// TestDeleteSnapshot_RemovesManifest verifies that deleting a snapshot also
+// removes its manifest from the cache.
+func TestDeleteSnapshot_RemovesManifest(t *testing.T) {
+	store := NewMemoryStorage()
+	ctx := context.Background()
+
+	store.PutSnapshot(ctx, &core.Snapshot{
+		ID:        core.SnapshotID{Hash: core.Hash{0x01}},
+		Message:   "snap",
+		Timestamp: 1,
+	})
+	store.DeleteSnapshot(ctx, core.SnapshotID{Hash: core.Hash{0x01}})
+
+	snaps, err := store.ListSnapshots(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListSnapshots failed: %v", err)
+	}
+	if len(snaps) != 0 {
+		t.Errorf("expected 0 snapshots after delete, got %d", len(snaps))
 	}
 }

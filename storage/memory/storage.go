@@ -3,10 +3,10 @@ package memory
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage"
@@ -17,12 +17,14 @@ import (
 var _ storage.Storer = (*MemoryStorage)(nil)
 
 // MemoryStorage implements storage.Storer entirely in memory.
+// It assumes single-threaded access: the porcelain workspace lock
+// guarantees that no two goroutines call its methods concurrently.
 type MemoryStorage struct {
-	chunks    sync.Map
-	snapshots sync.Map
-	refs      sync.Map
-	previews  sync.Map
-	mu        sync.RWMutex
+	chunks    map[string]*core.Chunk
+	snapshots map[string]*core.Snapshot
+	manifests map[string]*core.SnapshotManifest
+	refs      map[string]*core.Reference
+	previews  map[string][]byte
 	index     *core.Index
 	config    *core.Config
 }
@@ -30,34 +32,39 @@ type MemoryStorage struct {
 // NewMemoryStorage creates a new in-memory storage.
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
-		config: core.DefaultConfig(),
+		chunks:    make(map[string]*core.Chunk),
+		snapshots: make(map[string]*core.Snapshot),
+		manifests: make(map[string]*core.SnapshotManifest),
+		refs:      make(map[string]*core.Reference),
+		previews:  make(map[string][]byte),
+		config:    core.DefaultConfig(),
 	}
 }
 
 // HasChunk returns whether a chunk exists.
-func (ms *MemoryStorage) HasChunk(ctx context.Context, hash core.Hash) bool {
-	_, ok := ms.chunks.Load(hash.FullString())
-	return ok
+func (ms *MemoryStorage) HasChunk(ctx context.Context, hash core.Hash) (bool, error) {
+	_, ok := ms.chunks[hash.FullString()]
+	return ok, nil
 }
 
 // GetChunk retrieves a chunk.
 func (ms *MemoryStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk, error) {
-	v, ok := ms.chunks.Load(hash.FullString())
+	v, ok := ms.chunks[hash.FullString()]
 	if !ok {
 		return nil, fmt.Errorf("get chunk %s: %w", hash.FullString(), storage.ErrNotFound)
 	}
-	return cloneChunk(v.(*core.Chunk)), nil
+	return storage.CloneChunk(v), nil
 }
 
 // PutChunk stores a chunk.
 func (ms *MemoryStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
-	ms.chunks.Store(chunk.Hash.FullString(), cloneChunk(chunk))
+	ms.chunks[chunk.Hash.FullString()] = storage.CloneChunk(chunk)
 	return nil
 }
 
 // DeleteChunk removes a chunk. It is idempotent.
 func (ms *MemoryStorage) DeleteChunk(ctx context.Context, hash core.Hash) error {
-	ms.chunks.Delete(hash.FullString())
+	delete(ms.chunks, hash.FullString())
 	return nil
 }
 
@@ -65,48 +72,51 @@ func (ms *MemoryStorage) DeleteChunk(ctx context.Context, hash core.Hash) error 
 // returned slice is not guaranteed.
 func (ms *MemoryStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 	var hashes []core.Hash
-	ms.chunks.Range(func(key, value any) bool {
-		b, err := hex.DecodeString(key.(string))
+	for key := range ms.chunks {
+		b, err := hex.DecodeString(key)
 		if err != nil {
-			return true
+			continue
 		}
 		var h core.Hash
 		copy(h[:], b)
 		hashes = append(hashes, h)
-		return true
-	})
+	}
 	return hashes, nil
 }
 
 // GetSnapshot retrieves a snapshot.
 func (ms *MemoryStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error) {
-	v, ok := ms.snapshots.Load(id.Hash.FullString())
+	v, ok := ms.snapshots[id.Hash.FullString()]
 	if !ok {
 		return nil, fmt.Errorf("get snapshot %s: %w", id.Hash.FullString(), storage.ErrNotFound)
 	}
-	return cloneSnapshot(v.(*core.Snapshot)), nil
+	return storage.CloneSnapshot(v), nil
 }
 
-// PutSnapshot stores a snapshot.
+// PutSnapshot stores a snapshot and caches its lightweight manifest.
 func (ms *MemoryStorage) PutSnapshot(ctx context.Context, snapshot *core.Snapshot) error {
-	ms.snapshots.Store(snapshot.ID.Hash.FullString(), cloneSnapshot(snapshot))
+	key := snapshot.ID.Hash.FullString()
+	ms.snapshots[key] = storage.CloneSnapshot(snapshot)
+	ms.manifests[key] = cloneManifest(core.SnapshotToManifest(snapshot))
 	return nil
 }
 
-// DeleteSnapshot removes a snapshot. It is idempotent.
+// DeleteSnapshot removes a snapshot and its manifest. It is idempotent.
 func (ms *MemoryStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID) error {
-	ms.snapshots.Delete(id.Hash.FullString())
+	key := id.Hash.FullString()
+	delete(ms.snapshots, key)
+	delete(ms.manifests, key)
 	return nil
 }
 
-// ListSnapshots lists all snapshots, sorted by timestamp descending,
-// with optional limit/offset pagination.
+// ListSnapshots lists all snapshots via lightweight manifests, sorted by
+// timestamp descending, with optional limit/offset pagination. The returned
+// snapshots have nil Files because manifests carry only metadata.
 func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOptions) ([]*core.Snapshot, error) {
 	var snapshots []*core.Snapshot
-	ms.snapshots.Range(func(key, value any) bool {
-		snapshots = append(snapshots, cloneSnapshot(value.(*core.Snapshot)))
-		return true
-	})
+	for _, m := range ms.manifests {
+		snapshots = append(snapshots, core.ManifestToSnapshot(m))
+	}
 
 	sort.Slice(snapshots, func(i, j int) bool {
 		return snapshots[i].Timestamp > snapshots[j].Timestamp
@@ -133,7 +143,6 @@ func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOp
 // follow before giving up. It guards against malformed or malicious
 // self-referential symrefs (e.g. HEAD -> HEAD) that would otherwise cause
 // unbounded recursion.
-const maxSymRefDepth = 8
 
 // GetRef reads a reference. If the reference is a symbolic reference,
 // Target is resolved by recursively reading the referenced ref.
@@ -142,69 +151,114 @@ func (ms *MemoryStorage) GetRef(ctx context.Context, name string) (*core.Referen
 }
 
 func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth int) (*core.Reference, error) {
-	if depth > maxSymRefDepth {
+	if depth > storage.MaxSymRefDepth {
 		return nil, fmt.Errorf("symref recursion limit exceeded at %q: %w", name, storage.ErrInvalidRef)
 	}
 	if err := refname.Validate(name); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate ref %q: %w", name, err)
 	}
-	v, ok := ms.refs.Load(name)
+	ref, ok := ms.refs[name]
 	if !ok {
 		return nil, fmt.Errorf("get ref %q: %w", name, storage.ErrNotFound)
 	}
-	ref := v.(*core.Reference)
 	if ref.SymRef != "" {
 		target, err := ms.getRefRecursive(ctx, ref.SymRef, depth+1)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("resolve symref %q: %w", ref.SymRef, err)
 		}
 		resolved := cloneReference(ref)
+		resolved.Name = name
 		resolved.Target = target.Target
+		// Derive Type from name, matching the filesystem backend's behavior
+		// (the stored Type field is ignored so both backends agree).
+		resolved.Type = refTypeFromName(name)
 		return resolved, nil
 	}
-	return cloneReference(ref), nil
+	clone := cloneReference(ref)
+	clone.Name = name
+	clone.Type = refTypeFromName(name)
+	return clone, nil
 }
 
 // SetRef writes a reference.
 func (ms *MemoryStorage) SetRef(ctx context.Context, name string, ref *core.Reference) error {
 	if err := refname.Validate(name); err != nil {
-		return err
+		return fmt.Errorf("validate ref %q: %w", name, err)
 	}
-	if ref.SymRef != "" {
-		if err := refname.Validate(ref.SymRef); err != nil {
-			return err
+	clone := cloneReference(ref)
+	if clone.SymRef != "" {
+		// Normalize SymRef by stripping any "refs/" prefix so subsequent
+		// GetRef lookups succeed regardless of how the caller wrote it.
+		// This mirrors the filesystem backend's on-disk format.
+		clone.SymRef = strings.TrimPrefix(clone.SymRef, "refs/")
+		if err := refname.Validate(clone.SymRef); err != nil {
+			return fmt.Errorf("validate symref %q: %w", clone.SymRef, err)
 		}
 	}
-	ms.refs.Store(name, cloneReference(ref))
+	ms.refs[name] = clone
 	return nil
 }
 
+// refTypeFromName derives the RefType from the ref name, matching the
+// filesystem backend's refType() logic so both backends return the same
+// Type for the same name.
+func refTypeFromName(name string) core.RefType {
+	if name == "HEAD" {
+		return core.RefTypeHead
+	}
+	if strings.HasPrefix(name, "heads/") {
+		return core.RefTypeBranch
+	}
+	if strings.HasPrefix(name, "tags/") {
+		return core.RefTypeTag
+	}
+	return core.RefTypeBranch
+}
+
 // ListRefs lists all references matching the given prefix.
+// HEAD is excluded to match the filesystem backend, which only walks the
+// refs/ directory (HEAD lives at the repository root, outside refs/).
+// Each ref is resolved via GetRef so symrefs have their Target populated
+// and Type derived from the name, matching the filesystem backend.
+//
+// Only ErrNotFound errors from GetRef are skipped (e.g. dangling symref);
+// other errors are propagated so callers can distinguish I/O failures from
+// missing refs.
 func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {
 	var refs []*core.Reference
-	ms.refs.Range(func(key, value any) bool {
-		name := key.(string)
-		if strings.HasPrefix(name, prefix) {
-			refs = append(refs, cloneReference(value.(*core.Reference)))
+	for name := range ms.refs {
+		if name == "HEAD" {
+			continue
 		}
-		return true
-	})
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		ref, err := ms.GetRef(ctx, name)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("list refs: resolve %q: %w", name, err)
+		}
+		refs = append(refs, ref)
+	}
 	return refs, nil
 }
 
 // DeleteRef removes a reference.
 func (ms *MemoryStorage) DeleteRef(ctx context.Context, name string) error {
 	if err := refname.Validate(name); err != nil {
-		return err
+		return fmt.Errorf("validate ref %q: %w", name, err)
 	}
-	ms.refs.Delete(name)
+	if name == "HEAD" {
+		return fmt.Errorf("cannot delete HEAD: %w", storage.ErrInvalidRef)
+	}
+	delete(ms.refs, name)
 	return nil
 }
 
 // GetIndex retrieves the staging index.
 func (ms *MemoryStorage) GetIndex(ctx context.Context) (*core.Index, error) {
-	ms.mu.RLock()
-	defer ms.mu.RUnlock()
 	if ms.index == nil {
 		return &core.Index{}, nil
 	}
@@ -213,8 +267,6 @@ func (ms *MemoryStorage) GetIndex(ctx context.Context) (*core.Index, error) {
 
 // SetIndex stores the staging index.
 func (ms *MemoryStorage) SetIndex(ctx context.Context, index *core.Index) error {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 	ms.index = cloneIndex(index)
 	return nil
 }
@@ -229,20 +281,32 @@ func (ms *MemoryStorage) PutPreview(ctx context.Context, hash core.Hash, size in
 	return nil
 }
 
-// GetConfig retrieves the configuration.
+// Clamp chunk sizes to reasonable ranges to prevent OOM. Values are shared
+// from the storage package so both backends use the same limits.
 func (ms *MemoryStorage) GetConfig(ctx context.Context) (*core.Config, error) {
-	ms.mu.RLock()
-	defer ms.mu.RUnlock()
 	if ms.config == nil {
 		return core.DefaultConfig(), nil
 	}
-	return cloneConfig(ms.config), nil
+	// Clone before returning so callers cannot mutate stored state, and
+	// apply shared normalization so tests that SetConfig a partial config
+	// observe the same field invariants as the filesystem backend.
+	clone := cloneConfig(ms.config)
+	clone.Core.Normalize()
+	// Apply upper-bound clamps to match the filesystem backend.
+	if clone.Core.ChunkMinSize > storage.MaxChunkMinSize {
+		clone.Core.ChunkMinSize = storage.MaxChunkMinSize
+	}
+	if clone.Core.ChunkAvgSize > storage.MaxChunkAvgSize {
+		clone.Core.ChunkAvgSize = storage.MaxChunkAvgSize
+	}
+	if clone.Core.ChunkMaxSize > storage.MaxChunkMaxSize {
+		clone.Core.ChunkMaxSize = storage.MaxChunkMaxSize
+	}
+	return clone, nil
 }
 
 // SetConfig stores the configuration.
 func (ms *MemoryStorage) SetConfig(ctx context.Context, config *core.Config) error {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 	ms.config = cloneConfig(config)
 	return nil
 }
@@ -252,70 +316,25 @@ func (ms *MemoryStorage) Close() error {
 	return nil
 }
 
-// cloneChunk returns a deep copy of a Chunk.
-func cloneChunk(c *core.Chunk) *core.Chunk {
-	if c == nil {
+// cloneManifest returns a deep copy of a SnapshotManifest.
+func cloneManifest(m *core.SnapshotManifest) *core.SnapshotManifest {
+	if m == nil {
 		return nil
 	}
-	clone := &core.Chunk{
-		Hash:  c.Hash,
-		Size:  c.Size,
-		Flags: c.Flags,
+	clone := *m
+	if m.Id != nil {
+		clone.Id = make([]byte, len(m.Id))
+		copy(clone.Id, m.Id)
 	}
-	if c.Data != nil {
-		clone.Data = make([]byte, len(c.Data))
-		copy(clone.Data, c.Data)
+	if m.PrevId != nil {
+		clone.PrevId = make([]byte, len(m.PrevId))
+		copy(clone.PrevId, m.PrevId)
 	}
-	return clone
-}
-
-// cloneFileEntry returns a deep copy of a FileEntry.
-func cloneFileEntry(f core.FileEntry) core.FileEntry {
-	clone := f
-	if f.Chunks != nil {
-		clone.Chunks = make([]core.Hash, len(f.Chunks))
-		copy(clone.Chunks, f.Chunks)
+	if m.Tags != nil {
+		clone.Tags = make([]string, len(m.Tags))
+		copy(clone.Tags, m.Tags)
 	}
-	if f.Metadata != nil {
-		m := *f.Metadata
-		if f.Metadata.Extra != nil {
-			m.Extra = make(map[string]string, len(f.Metadata.Extra))
-			for k, v := range f.Metadata.Extra {
-				m.Extra[k] = v
-			}
-		}
-		clone.Metadata = &m
-	}
-	return clone
-}
-
-// cloneSnapshot returns a deep copy of a Snapshot.
-func cloneSnapshot(s *core.Snapshot) *core.Snapshot {
-	if s == nil {
-		return nil
-	}
-	clone := &core.Snapshot{
-		ID:        s.ID,
-		Message:   s.Message,
-		Author:    s.Author,
-		Timestamp: s.Timestamp,
-		TotalSize: s.TotalSize,
-	}
-	if s.PrevID != nil {
-		prev := *s.PrevID
-		clone.PrevID = &prev
-	}
-	if s.Files != nil {
-		clone.Files = make([]core.FileEntry, len(s.Files))
-		for i, f := range s.Files {
-			clone.Files[i] = cloneFileEntry(f)
-		}
-	}
-	if s.Tags != nil {
-		clone.Tags = make([]string, len(s.Tags))
-		copy(clone.Tags, s.Tags)
-	}
-	return clone
+	return &clone
 }
 
 // cloneReference returns a deep copy of a Reference.

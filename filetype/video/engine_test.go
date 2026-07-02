@@ -3,8 +3,11 @@ package video
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"strings"
 	"testing"
+
+	sizefmt "github.com/your-org/drift/util/format"
 )
 
 // buildBox assembles an ISO-BMFF box: 4-byte size + 4-byte type + payload.
@@ -142,7 +145,7 @@ func TestDiffSizeChanged(t *testing.T) {
 	oldData := bytes.Repeat([]byte{0x01}, 100)
 	newData := bytes.Repeat([]byte{0x02}, 200)
 
-	diff, err := engine.Diff("old.mp4", oldData, "new.mp4", newData)
+	diff, err := engine.Diff("old.mp4", bytes.NewReader(oldData), "new.mp4", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff returned error: %v", err)
 	}
@@ -156,7 +159,7 @@ func TestDiffNoChange(t *testing.T) {
 	engine := NewEngine()
 	data := bytes.Repeat([]byte{0x01}, 100)
 
-	diff, err := engine.Diff("old.mp4", data, "new.mp4", data)
+	diff, err := engine.Diff("old.mp4", bytes.NewReader(data), "new.mp4", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Diff returned error: %v", err)
 	}
@@ -168,7 +171,10 @@ func TestDiffNoChange(t *testing.T) {
 func TestPreviewWithDimensions(t *testing.T) {
 	engine := NewEngine()
 	data := buildMP4WithDimensions(1920, 1080)
-	preview := engine.Preview(data, 10)
+	preview, err := engine.Preview(data, int64(len(data)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	// Expected form: "MP4 1920x1080 <size>".
 	if !strings.HasPrefix(preview, "MP4 1920x1080 ") {
@@ -184,7 +190,10 @@ func TestPreviewWithoutDimensions(t *testing.T) {
 	engine := NewEngine()
 	// AVI header: detectable as AVI but carries no parseable dimensions.
 	aviData := []byte("RIFF\x00\x00\x00\x00AVI LIST\x00\x00\x00\x00")
-	preview := engine.Preview(aviData, 10)
+	preview, err := engine.Preview(aviData, int64(len(aviData)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	// Should start with format name and contain size, but no "WxH".
 	if !strings.HasPrefix(preview, "AVI ") {
@@ -199,7 +208,10 @@ func TestPreviewMKVFormat(t *testing.T) {
 	engine := NewEngine()
 	// EBML header with a matroska DocType.
 	mkvData := append([]byte{0x1A, 0x45, 0xDF, 0xA3, 0x00, 0x00, 0x00, 0x00}, []byte("matroska")...)
-	preview := engine.Preview(mkvData, 10)
+	preview, err := engine.Preview(mkvData, int64(len(mkvData)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 	if !strings.HasPrefix(preview, "MKV ") {
 		t.Errorf("Preview = %q, want prefix %q", preview, "MKV ")
 	}
@@ -208,7 +220,10 @@ func TestPreviewMKVFormat(t *testing.T) {
 func TestPreviewWebMFormat(t *testing.T) {
 	engine := NewEngine()
 	webmData := append([]byte{0x1A, 0x45, 0xDF, 0xA3, 0x00, 0x00, 0x00, 0x00}, []byte("webm")...)
-	preview := engine.Preview(webmData, 10)
+	preview, err := engine.Preview(webmData, int64(len(webmData)), nil, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 	if !strings.HasPrefix(preview, "WEBM ") {
 		t.Errorf("Preview = %q, want prefix %q", preview, "WEBM ")
 	}
@@ -226,21 +241,52 @@ func TestParseMP4DimensionsTruncated(t *testing.T) {
 	}
 }
 
-func TestHumanReadableSize(t *testing.T) {
+func TestFormatBytes(t *testing.T) {
 	tests := []struct {
-		n    int
+		n    int64
 		want string
 	}{
 		{0, "0 B"},
 		{512, "512 B"},
-		{1024, "1 KB"},
-		{1024 * 1024, "1 MB"},
-		{150 * 1024 * 1024, "150 MB"},
-		{1024 * 1024 * 1024, "1 GB"},
+		{1024, "1.0 KB"},
+		{1024 * 1024, "1.0 MB"},
+		{150 * 1024 * 1024, "150.0 MB"},
+		{1024 * 1024 * 1024, "1.0 GB"},
 	}
 	for _, tt := range tests {
-		if got := humanReadableSize(tt.n); got != tt.want {
-			t.Errorf("humanReadableSize(%d) = %q, want %q", tt.n, got, tt.want)
+		got := sizefmt.Bytes(tt.n)
+		if got != tt.want {
+			t.Errorf("FormatBytes(%d) = %q, want %q", tt.n, got, tt.want)
 		}
+	}
+}
+
+// countingReader tracks how many times Read is called. It always returns EOF
+// so it can stand in for a large file body without allocating any data.
+type countingReader struct{ calls int }
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	r.calls++
+	return 0, io.EOF
+}
+
+// TestPreviewLargeVideoMemoryConstant verifies that previewing a 500 MB video
+// keeps memory constant: the content reader must never be consumed. Only the
+// header (already extracted by the caller) is inspected.
+func TestPreviewLargeVideoMemoryConstant(t *testing.T) {
+	engine := NewEngine()
+	header := buildMP4WithDimensions(1920, 1080)
+	const fileSize = 500 * 1024 * 1024 // 500 MB
+	body := &countingReader{}
+
+	preview, err := engine.Preview(header, fileSize, body, 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
+	if !strings.HasPrefix(preview, "MP4 1920x1080 ") {
+		t.Errorf("Preview = %q, want prefix %q", preview, "MP4 1920x1080 ")
+	}
+	if body.calls != 0 {
+		t.Errorf("video preview read the body reader %d time(s); expected 0 reads so memory stays constant for a 500MB file", body.calls)
 	}
 }

@@ -36,7 +36,7 @@ func DetectChanges(ctx context.Context, store storage.Storer, workDir string, cf
 
 	index, err := store.GetIndex(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read index: %w", err)
 	}
 
 	workspaceFiles := make(map[string]os.FileInfo)
@@ -52,7 +52,7 @@ func DetectChanges(ctx context.Context, store storage.Storer, workDir string, cf
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan workspace: %w", err)
 	}
 
 	summary := &ChangeSummary{}

@@ -19,17 +19,16 @@ var gcCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := porcelain.OpenProject(cwd)
+		store, _, err := openProjectOrReport("GC", cwd)
 		if err != nil {
-			statusFailed("GC", ".drift/ directory not found.", "run 'drift init' first.")
-		return ErrSilent
+			return err
 		}
 		defer store.Close()
 
 		report, err := porcelain.CollectGarbage(ctx, store, cwd, gcDryRun)
 		if err != nil {
 			statusFailed("GC", err.Error(), "")
-		return ErrSilent
+			return ErrSilent
 		}
 
 		if report.SnapshotsRemoved == 0 && report.ChunksRemoved == 0 {

@@ -354,3 +354,132 @@ func TestRenameBranch_EmptyNames(t *testing.T) {
 		t.Error("expected error for empty new name, got nil")
 	}
 }
+
+func TestResolveSnapshotBranches_Linear(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+
+	// Create snapshots: s1 (root) -> s2 -> s3
+	s1 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{1}},
+		Message: "first",
+		Timestamp: 100,
+	}
+	s2 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{2}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{1}},
+		Message: "second",
+		Timestamp: 200,
+	}
+	s3 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{3}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{2}},
+		Message: "third",
+		Timestamp: 300,
+	}
+	store.PutSnapshot(ctx, s1)
+	store.PutSnapshot(ctx, s2)
+	store.PutSnapshot(ctx, s3)
+
+	// main branch points at s3
+	store.SetRef(ctx, "heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{3},
+	})
+
+	result, err := ResolveSnapshotBranches(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveSnapshotBranches: %v", err)
+	}
+
+	// All snapshots should be attributed to main
+	if names := result[core.Hash{1}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s1: got %v, want [main]", names)
+	}
+	if names := result[core.Hash{2}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s2: got %v, want [main]", names)
+	}
+	if names := result[core.Hash{3}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s3: got %v, want [main]", names)
+	}
+}
+
+func TestResolveSnapshotBranches_NearerTipWins(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+
+	// s1 (root) -> s2 -> s3
+	//                   \-> s4 (on a different branch)
+	s1 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{1}},
+		Message: "root",
+		Timestamp: 100,
+	}
+	s2 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{2}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{1}},
+		Message: "shared",
+		Timestamp: 200,
+	}
+	s3 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{3}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{2}},
+		Message: "main tip",
+		Timestamp: 300,
+	}
+	s4 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{4}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{2}},
+		Message: "feature tip",
+		Timestamp: 250,
+	}
+
+	store.PutSnapshot(ctx, s1)
+	store.PutSnapshot(ctx, s2)
+	store.PutSnapshot(ctx, s3)
+	store.PutSnapshot(ctx, s4)
+
+	store.SetRef(ctx, "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: core.Hash{3}})
+	store.SetRef(ctx, "heads/feature", &core.Reference{Name: "heads/feature", Type: core.RefTypeBranch, Target: core.Hash{4}})
+
+	result, err := ResolveSnapshotBranches(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveSnapshotBranches: %v", err)
+	}
+
+	// s3 is tip of main, hops=0 from main tip, hops=2 from feature tip -> main wins
+	// s4 is tip of feature, hops=0 from feature tip, hops=2 from main tip -> feature wins
+	// s2 is hops=1 from main, hops=1 from feature -> tie, broken by name: "feature" < "main"
+	// s1 is hops=2 from main, hops=2 from feature -> tie, broken by name: "feature" < "main"
+
+	if names := result[core.Hash{3}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s3: got %v, want [main]", names)
+	}
+	if names := result[core.Hash{4}.String()]; len(names) != 1 || names[0] != "feature" {
+		t.Errorf("s4: got %v, want [feature]", names)
+	}
+	// At equal distance, alphabetically smaller branch name wins
+	if names := result[core.Hash{2}.String()]; len(names) != 1 || names[0] != "feature" {
+		t.Errorf("s2: got %v, want [feature] (alphabetically smaller)", names)
+	}
+	if names := result[core.Hash{1}.String()]; len(names) != 1 || names[0] != "feature" {
+		t.Errorf("s1: got %v, want [feature] (alphabetically smaller)", names)
+	}
+}
+
+func TestResolveSnapshotBranches_NoBranches(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewMemoryStorage()
+	store.SetRef(ctx, "HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+	})
+	result, err := ResolveSnapshotBranches(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveSnapshotBranches: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(result))
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -44,7 +45,15 @@ func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, 
 		os.Remove(pidPath)
 	}
 
-	cmd := exec.Command(os.Args[0], "_watch_daemon",
+	// Resolve the current executable path rather than trusting os.Args[0].
+	// A malicious drift binary placed earlier on PATH could otherwise hijack
+	// the daemon subprocess, since os.Args[0] is whatever the parent shell
+	// used to launch us and need not be an absolute path.
+	exePath, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("resolve executable path: %w", err)
+	}
+	cmd := exec.Command(exePath, "_watch_daemon",
 		"--interval", strconv.Itoa(interval),
 		"--keep", strconv.Itoa(keep))
 	cmd.Dir = cwd
@@ -56,8 +65,27 @@ func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, 
 
 	pid := cmd.Process.Pid
 
-	if err := fsutil.WriteFileAtomic(pidPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
+	// Create the pid file atomically with O_CREATE|O_EXCL. If another daemon
+	// won the race to create the pid file between our pre-check and cmd.Start,
+	// we must not overwrite its pid file — instead kill the subprocess we just
+	// spawned and report the failure. This closes the TOCTOU window that
+	// existed when the pid file was written with a rename-based atomic write
+	// (which silently clobbers an existing file).
+	f, err := os.OpenFile(pidPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		cmd.Process.Kill()
 		return 0, fmt.Errorf("write pid file: %w", err)
+	}
+	if _, err := f.Write([]byte(strconv.Itoa(pid))); err != nil {
+		f.Close()
+		os.Remove(pidPath)
+		cmd.Process.Kill()
+		return 0, fmt.Errorf("write pid file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(pidPath)
+		cmd.Process.Kill()
+		return 0, fmt.Errorf("close pid file: %w", err)
 	}
 
 	return pid, nil
@@ -92,7 +120,7 @@ func StopDaemon(ctx context.Context, cwd string) (int, int, error) {
 	if err := killProcess(pid); err != nil {
 		// Log but don't fail — the pid file is still cleaned up below,
 		// and a failed kill usually means the process already exited.
-		fmt.Fprintf(os.Stderr, "warning: kill daemon PID %d: %v\n", pid, err)
+		slog.Warn("kill daemon failed", "pid", pid, "error", err)
 	}
 
 	os.Remove(pidPath)
@@ -148,11 +176,11 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 		cfg = &core.DefaultConfig().Core
 	}
 	if interval <= 0 {
-		fmt.Fprintf(os.Stderr, "invalid interval: %d (must be > 0)\n", interval)
+		slog.Warn("invalid interval", "interval", interval)
 		return
 	}
 	if keep < 0 {
-		fmt.Fprintf(os.Stderr, "invalid keep: %d (must be >= 0)\n", keep)
+		slog.Warn("invalid keep", "keep", keep)
 		return
 	}
 	driftDir := filepath.Join(cwd, ".drift")
@@ -161,7 +189,7 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "daemon panic: %v\n", r)
+			slog.Error("daemon panic", "panic", r)
 			os.Remove(pidPath)
 			os.Remove(statePath)
 			removeLockIfOwned(filepath.Join(driftDir, "workspace.lock"), os.Getpid())
@@ -196,6 +224,8 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			// tick. This replaces the former IsWorkspaceLocked pre-check.
 			changes, err := DetectChanges(ctx, store, cwd, cfg)
 			if err != nil {
+				state.LastError = "detect: " + err.Error()
+				writeState(statePath, state)
 				continue
 			}
 			total := len(changes.Added) + len(changes.Modified) + len(changes.Deleted)
@@ -213,7 +243,9 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			msg := "auto - " + time.Now().Format("2006-01-02 15:04")
 			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", nil, cfg)
 			if err != nil {
+				state.LastError = "save: " + err.Error()
 				ReleaseWorkspaceLock(cwd)
+				writeState(statePath, state)
 				continue
 			}
 
@@ -224,8 +256,13 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			state.LastError = ""
 
 			if keep > 0 {
-				pruned, _ := pruneAutoSnapshots(ctx, store, keep)
+				pruned, pruneErr := pruneAutoSnapshots(ctx, store, keep)
 				state.Pruned += pruned
+				if pruneErr != nil {
+					// Record but do not abort: a prune failure shouldn't undo a
+					// successful save. The error will be retried next cycle.
+					state.LastError = "prune: " + pruneErr.Error()
+				}
 			}
 
 			ReleaseWorkspaceLock(cwd)
@@ -243,7 +280,7 @@ func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (in
 
 	snapshots, err := store.ListSnapshots(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("list snapshots: %w", err)
 	}
 
 	var autoSnaps []*core.Snapshot
@@ -291,43 +328,32 @@ func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (in
 	})
 
 	deleted := 0
+	var firstErr error
 	for i := keep; i < len(autoSnaps); i++ {
 		if reachable[autoSnaps[i].ID] {
 			continue // skip snapshots still reachable from branch/tag tips
 		}
 		if err := store.DeleteSnapshot(ctx, autoSnaps[i].ID); err != nil {
+			// Record the first deletion error but keep trying remaining
+			// snapshots so a single corrupted entry doesn't block cleanup.
+			if firstErr == nil {
+				firstErr = fmt.Errorf("delete snapshot %s: %w", autoSnaps[i].ID.Hash.String(), err)
+			}
 			continue
 		}
 		deleted++
 	}
 
-	return deleted, nil
-}
-
-// removeLockIfOwned removes the workspace lock file only if it was created by
-// the given PID. This prevents clobbering a lock that another command has
-// acquired after the daemon was killed.
-func removeLockIfOwned(lockPath string, pid int) {
-	data, err := os.ReadFile(lockPath)
-	if err != nil {
-		return
-	}
-	var lock workspaceLockData
-	if json.Unmarshal(data, &lock) != nil {
-		return
-	}
-	if lock.PID == pid {
-		os.Remove(lockPath)
-	}
+	return deleted, firstErr
 }
 
 func writeState(path string, state *WatchState) {
 	data, err := json.Marshal(state)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "marshal watch state: %v\n", err)
+		slog.Warn("marshal watch state", "error", err)
 		return
 	}
 	if err := fsutil.WriteFileAtomic(path, data, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "write watch state: %v\n", err)
+		slog.Warn("write watch state", "path", path, "error", err)
 	}
 }

@@ -15,11 +15,6 @@ func Register(engine Engine) {
 	defaultRegistry.Register(engine)
 }
 
-// DefaultRegistry returns the default registry.
-func DefaultRegistry() *Registry {
-	return defaultRegistry
-}
-
 // DetectEngine finds the first matching engine for a file in the default registry.
 func DetectEngine(path string, header []byte) Engine {
 	return defaultRegistry.Detect(path, header)

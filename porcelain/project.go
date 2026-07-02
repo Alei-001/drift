@@ -13,7 +13,17 @@ import (
 	"github.com/your-org/drift/storage/filesystem"
 )
 
+type StoreFactory func(driftPath string) (storage.Storer, error)
+
+func defaultStoreFactory(driftPath string) (storage.Storer, error) {
+	return filesystem.NewFSStorage(driftPath)
+}
+
 func InitProject(path string) error {
+	return InitProjectWithFactory(path, defaultStoreFactory)
+}
+
+func InitProjectWithFactory(path string, factory StoreFactory) error {
 	ctx := context.Background()
 	driftPath := filepath.Join(path, ".drift")
 
@@ -21,14 +31,16 @@ func InitProject(path string) error {
 		return fmt.Errorf("already a drift repository")
 	}
 
-	store, err := filesystem.NewFSStorage(driftPath)
+	store, err := factory(driftPath)
 	if err != nil {
 		return fmt.Errorf("create storage: %w", err)
 	}
 	defer store.Close()
 
 	cfg := core.DefaultConfig()
-	applyStorageConfig(store, &cfg.Core)
+	if err := applyStorageConfig(store, &cfg.Core); err != nil {
+		return err
+	}
 
 	if err := store.SetConfig(ctx, cfg); err != nil {
 		return fmt.Errorf("set config: %w", err)
@@ -60,7 +72,7 @@ func InitProject(path string) error {
 		return fmt.Errorf("set index: %w", err)
 	}
 
-	driftignorePath := filepath.Join(path, ".driftignore")
+	driftignorePath := filepath.Join(path, core.DefaultIgnoreFile)
 	if _, err := os.Stat(driftignorePath); os.IsNotExist(err) {
 		driftignoreContent := []byte(`# macOS
 .DS_Store
@@ -86,6 +98,10 @@ desktop.ini
 }
 
 func OpenProject(path string) (storage.Storer, *core.Config, error) {
+	return OpenProjectWithFactory(path, defaultStoreFactory)
+}
+
+func OpenProjectWithFactory(path string, factory StoreFactory) (storage.Storer, *core.Config, error) {
 	ctx := context.Background()
 	driftPath := filepath.Join(path, ".drift")
 
@@ -93,23 +109,33 @@ func OpenProject(path string) (storage.Storer, *core.Config, error) {
 		return nil, nil, fmt.Errorf("not a drift repository")
 	}
 
-	fsStore, err := filesystem.NewFSStorage(driftPath)
+	store, err := factory(driftPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open storage: %w", err)
 	}
 
-	config, err := fsStore.GetConfig(ctx)
+	config, err := store.GetConfig(ctx)
 	if err != nil {
-		fsStore.Close()
+		store.Close()
 		return nil, nil, fmt.Errorf("get config: %w", err)
 	}
 
-	applyStorageConfig(fsStore, &config.Core)
+	if err := applyStorageConfig(store, &config.Core); err != nil {
+		store.Close()
+		return nil, nil, err
+	}
 
-	return fsStore, config, nil
+	return store, config, nil
 }
 
-func applyStorageConfig(store *filesystem.FSStorage, cfg *core.CoreConfig) {
+func applyStorageConfig(store storage.Storer, cfg *core.CoreConfig) error {
+	fsStore, ok := store.(*filesystem.FSStorage)
+	if !ok {
+		return nil
+	}
 	level := zstd.EncoderLevelFromZstd(cfg.ZstdLevel())
-	store.SetCompression(cfg.Compression, level)
+	if err := fsStore.SetCompression(cfg.Compression, level); err != nil {
+		return fmt.Errorf("apply storage config: %w", err)
+	}
+	return nil
 }

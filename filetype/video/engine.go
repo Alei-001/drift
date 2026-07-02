@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"path/filepath"
 	"strings"
+
+	"github.com/your-org/drift/chunker"
 )
 
 // videoExtensions maps supported video file extensions.
@@ -17,7 +19,9 @@ var videoExtensions = map[string]bool{
 
 // VideoEngine handles common video container formats (MP4, MOV, AVI, MKV, WebM).
 // Detection is purely byte-based; no third-party codecs are used.
-type VideoEngine struct{}
+type VideoEngine struct {
+	chunker.DefaultSelector
+}
 
 // NewEngine creates a new VideoEngine.
 func NewEngine() *VideoEngine {

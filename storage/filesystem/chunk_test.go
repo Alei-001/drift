@@ -236,3 +236,63 @@ func TestListChunks_SkipsInvalidFiles(t *testing.T) {
 		t.Fatalf("expected only the real chunk hash, got %v", hashes)
 	}
 }
+
+// TestGetChunk_LargeCompressed verifies that a large chunk stored with
+// compression is read back correctly via the streaming zstd decode path
+// (zstdDecoder.Reset + io.ReadAll), without panic or data corruption.
+func TestGetChunk_LargeCompressed(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fs, err := NewFSStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFSStorage: %v", err)
+	}
+	defer fs.Close()
+
+	// ~1.3 MB of highly compressible data: exercises the streaming decode
+	// path while keeping the test fast.
+	data := bytes.Repeat([]byte("drift-streaming-chunk-test-"), 50_000)
+	var hash core.Hash
+	sum := blake3.Sum256(data)
+	copy(hash[:], sum[:])
+
+	chunk := &core.Chunk{Hash: hash, Size: uint32(len(data)), Data: data}
+	if err := fs.PutChunk(context.Background(), chunk); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
+
+	// Evict the in-memory cache so GetChunk must read from disk, exercising
+	// the streaming zstd decode path.
+	fs.chunkCache.Remove(hash)
+
+	retrieved, err := fs.GetChunk(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("GetChunk large compressed: %v", err)
+	}
+	if len(retrieved.Data) != len(data) {
+		t.Fatalf("data length mismatch: got %d, want %d", len(retrieved.Data), len(data))
+	}
+	if !bytes.Equal(retrieved.Data, data) {
+		t.Fatalf("large chunk data mismatch")
+	}
+	if retrieved.Flags != core.ChunkFlagCompressed {
+		t.Errorf("expected ChunkFlagCompressed, got %v", retrieved.Flags)
+	}
+
+	// Verify the on-disk file actually starts with the compression flag so
+	// we know the streaming decode path (not the uncompressed path) was
+	// exercised.
+	path := fs.chunkPath(hash)
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open chunk file: %v", err)
+	}
+	header := make([]byte, 1)
+	if _, err := f.Read(header); err != nil {
+		t.Fatalf("read header: %v", err)
+	}
+	f.Close()
+	if header[0]&chunkFlagCompressed == 0 {
+		t.Fatal("on-disk chunk should have compression flag set")
+	}
+}

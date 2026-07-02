@@ -21,7 +21,7 @@ var switchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := porcelain.OpenProject(cwd)
+		store, cfg, err := openProjectOrReport("Switch", cwd)
 		if err != nil {
 			return err
 		}
@@ -33,14 +33,14 @@ var switchCmd = &cobra.Command{
 		if err != nil {
 			if errors.Is(err, porcelain.ErrBranchNotFound) {
 				statusFailed("Switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch' to list existing branches.")
-			return ErrSilent
+				return ErrSilent
 			}
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				statusFailed("Switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
-			return ErrSilent
+				return ErrSilent
 			}
 			statusFailed("Switch", err.Error(), "")
-		return ErrSilent
+			return ErrSilent
 		}
 
 		statusOK("Switched to '%s'", name)

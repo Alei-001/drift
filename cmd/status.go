@@ -19,7 +19,7 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := porcelain.OpenProject(cwd)
+		store, cfg, err := openProjectOrReport("Status", cwd)
 		if err != nil {
 			return err
 		}

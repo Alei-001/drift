@@ -5,9 +5,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
-	_ "image/gif"  // register GIF decoder for DecodeConfig
-	_ "image/jpeg" // register JPEG decoder for DecodeConfig
-	_ "image/png"  // register PNG decoder for DecodeConfig
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
+
+	sizefmt "github.com/your-org/drift/util/format"
 )
 
 // previewFormatName maps canonical format keys to display names.
@@ -22,14 +25,20 @@ var previewFormatName = map[string]string{
 
 // Preview returns a one-line summary: format name, dimensions, and
 // human-readable file size (e.g. "PNG 1920x1080 2.4 MB").
-func (e *ImageEngine) Preview(data []byte, maxLines int) string {
-	format := detectFormatByMagic(data)
+//
+// Only the header is inspected (for magic detection and dimension parsing)
+// and size is taken from the caller; the content reader is never touched.
+// This keeps memory constant for arbitrarily large images.
+func (e *ImageEngine) Preview(header []byte, size int64, reader io.Reader, maxLines int) (string, error) {
+	_ = reader
+	_ = maxLines
+	format := detectFormatByMagic(header)
 	name := previewFormatName[format]
 	if name == "" {
 		name = "image"
 	}
-	w, h := decodeDimensions(data)
-	return fmt.Sprintf("%s %dx%d %s", name, w, h, formatSize(len(data)))
+	w, h := decodeDimensions(header)
+	return fmt.Sprintf("%s %dx%d %s", name, w, h, sizefmt.Bytes(int64(size))), nil
 }
 
 // decodeDimensions parses image dimensions from the header. WebP, BMP, and
@@ -181,23 +190,4 @@ func readTIFFTagValue(data []byte, typ uint16, off int, order binary.ByteOrder) 
 		return int(order.Uint32(data[off : off+4]))
 	}
 	return 0
-}
-
-// formatSize returns a human-readable file size string (e.g. "2.4 MB").
-func formatSize(n int) string {
-	const (
-		KB = 1024
-		MB = KB * 1024
-		GB = MB * 1024
-	)
-	switch {
-	case n >= GB:
-		return fmt.Sprintf("%.1f GB", float64(n)/float64(GB))
-	case n >= MB:
-		return fmt.Sprintf("%.1f MB", float64(n)/float64(MB))
-	case n >= KB:
-		return fmt.Sprintf("%.1f KB", float64(n)/float64(KB))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
 }

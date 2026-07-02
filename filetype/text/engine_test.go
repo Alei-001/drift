@@ -119,7 +119,7 @@ func TestDiff_Identical(t *testing.T) {
 	engine := NewEngine()
 	data := []byte("line1\nline2\nline3\n")
 
-	diff, err := engine.Diff("old.txt", data, "new.txt", data)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(data), "new.txt", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestDiff_Identical(t *testing.T) {
 func TestDiff_EmptyFiles(t *testing.T) {
 	engine := NewEngine()
 
-	diff, err := engine.Diff("old.txt", []byte{}, "new.txt", []byte{})
+	diff, err := engine.Diff("old.txt", bytes.NewReader([]byte{}), "new.txt", bytes.NewReader([]byte{}))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestDiff_PureInsertions(t *testing.T) {
 	oldData := []byte("line1\nline2\n")
 	newData := []byte("line1\nline2\nline3\nline4\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestDiff_PureDeletions(t *testing.T) {
 	oldData := []byte("line1\nline2\nline3\nline4\n")
 	newData := []byte("line1\nline2\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestDiff_ModifiedLine(t *testing.T) {
 	oldData := []byte("line1\nold line\nline3\n")
 	newData := []byte("line1\nnew line\nline3\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestDiff_CRLF_Normalized(t *testing.T) {
 	lfData := []byte("line1\nline2\nline3\n")
 	crlfData := []byte("line1\r\nline2\r\nline3\r\n")
 
-	diff, err := engine.Diff("old.txt", lfData, "new.txt", crlfData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(lfData), "new.txt", bytes.NewReader(crlfData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestDiff_CRLF_WithRealChanges(t *testing.T) {
 	oldData := []byte("line1\r\nold line\r\nline3\r\n")
 	newData := []byte("line1\nnew line\nline3\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestDiff_HunkMerge(t *testing.T) {
 	oldData := []byte(strings.Join(oldLines, "\n") + "\n")
 	newData := []byte(strings.Join(newLines, "\n") + "\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestDiff_SeparateHunks(t *testing.T) {
 	oldData := []byte(strings.Join(oldLines, "\n") + "\n")
 	newData := []byte(strings.Join(newLines, "\n") + "\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestDiff_LargeFile(t *testing.T) {
 	oldData := []byte(strings.Join(oldLines, "\n") + "\n")
 	newData := []byte(strings.Join(newLines, "\n") + "\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed on large file: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestDiff_AllNewFile(t *testing.T) {
 	oldData := []byte{}
 	newData := []byte("line1\nline2\nline3\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestDiff_AllDeleted(t *testing.T) {
 	oldData := []byte("line1\nline2\nline3\n")
 	newData := []byte{}
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestDiff_UnifiedFormatHeader(t *testing.T) {
 	oldData := []byte("a\n")
 	newData := []byte("b\n")
 
-	diff, err := engine.Diff("old.txt", oldData, "new.txt", newData)
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -380,12 +380,81 @@ func TestDiff_UnifiedFormatHeader(t *testing.T) {
 	}
 }
 
+func TestDiff_100KLinesCompletelyDifferent(t *testing.T) {
+	engine := NewEngine()
+	// Two 100K-line files with no common lines — must not OOM.
+	// Uses linear-space Hirschberg via hasCommonLines fast path.
+	const N = 100000
+	oldLines := make([]string, N)
+	newLines := make([]string, N)
+	for i := 0; i < N; i++ {
+		oldLines[i] = "old_" + itoa(i)
+		newLines[i] = "new_" + itoa(i)
+	}
+	oldData := []byte(strings.Join(oldLines, "\n") + "\n")
+	newData := []byte(strings.Join(newLines, "\n") + "\n")
+
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
+	if err != nil {
+		t.Fatalf("Diff failed on 100K different lines: %v", err)
+	}
+	if diff == "" {
+		t.Error("expected non-empty diff for completely different files")
+	}
+	// Should be all deletions and insertions, no matches
+	if !strings.Contains(diff, "-old_0") {
+		t.Error("expected diff to contain -old_0")
+	}
+	if !strings.Contains(diff, "+new_0") {
+		t.Error("expected diff to contain +new_0")
+	}
+}
+
+func TestDiff_HirschbergWithChanges(t *testing.T) {
+	engine := NewEngine()
+	// 200-line file with scattered changes — exercises Hirschberg recursion
+	// (> 16 lines, has common lines)
+	const N = 200
+	var oldLines, newLines []string
+	for i := 0; i < N; i++ {
+		line := "line_" + itoa(i)
+		oldLines = append(oldLines, line)
+		if i == 50 || i == 100 || i == 150 {
+			newLines = append(newLines, "changed_"+itoa(i))
+		} else {
+			newLines = append(newLines, line)
+		}
+	}
+	oldData := []byte(strings.Join(oldLines, "\n") + "\n")
+	newData := []byte(strings.Join(newLines, "\n") + "\n")
+
+	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
+	if err != nil {
+		t.Fatalf("Diff failed: %v", err)
+	}
+	if !strings.Contains(diff, "-line_50") {
+		t.Error("expected diff to contain -line_50")
+	}
+	if !strings.Contains(diff, "+changed_50") {
+		t.Error("expected diff to contain +changed_50")
+	}
+	if !strings.Contains(diff, "-line_100") {
+		t.Error("expected diff to contain -line_100")
+	}
+	if !strings.Contains(diff, "+changed_100") {
+		t.Error("expected diff to contain +changed_100")
+	}
+}
+
 // --- Preview tests ---
 
 func TestPreview_ShortFile(t *testing.T) {
 	engine := NewEngine()
 	data := []byte("line1\nline2\nline3\n")
-	preview := engine.Preview(data, 10)
+	preview, err := engine.Preview(nil, int64(len(data)), bytes.NewReader(data), 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	previewLines := strings.Split(preview, "\n")
 	if len(previewLines) != 3 {
@@ -406,7 +475,10 @@ func TestPreview_Truncated(t *testing.T) {
 		lines = append(lines, "line "+itoa(i))
 	}
 	data := []byte(strings.Join(lines, "\n") + "\n")
-	preview := engine.Preview(data, 5)
+	preview, err := engine.Preview(nil, int64(len(data)), bytes.NewReader(data), 5)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 
 	// Preview should return only first 5 lines
 	previewLines := strings.Split(preview, "\n")
@@ -423,7 +495,10 @@ func TestPreview_Truncated(t *testing.T) {
 
 func TestPreview_EmptyFile(t *testing.T) {
 	engine := NewEngine()
-	preview := engine.Preview([]byte{}, 10)
+	preview, err := engine.Preview(nil, 0, bytes.NewReader([]byte{}), 10)
+	if err != nil {
+		t.Fatalf("Preview failed: %v", err)
+	}
 	if preview != "" {
 		t.Errorf("expected empty preview for empty file, got %q", preview)
 	}

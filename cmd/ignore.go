@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/util/fsutil"
 )
 
@@ -23,10 +22,9 @@ var ignoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := porcelain.OpenProject(cwd)
+		store, _, err := openProjectOrReport("Ignore", cwd)
 		if err != nil {
-			statusFailed("Ignore", ".drift/ directory not found.", "run 'drift init' first.")
-		return ErrSilent
+			return err
 		}
 		defer store.Close()
 		ignorePath := filepath.Join(cwd, ".driftignore")
@@ -46,7 +44,7 @@ var ignoreCmd = &cobra.Command{
 		if ignoreRemove != "" {
 			if err := removeIgnoreRule(ignorePath, ignoreRemove); err != nil {
 				statusFailed("Ignore", fmt.Sprintf("pattern '%s' not found.", ignoreRemove), "use 'drift ignore --list' to see current rules.")
-			return ErrSilent
+				return ErrSilent
 			}
 			statusOK("Ignore updated")
 			fmt.Printf("- %s\n", ignoreRemove)
@@ -91,22 +89,7 @@ var ignoreCmd = &cobra.Command{
 }
 
 func readIgnoreFile(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var rules []string
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		rules = append(rules, trimmed)
-	}
-	return rules, nil
+	return fsutil.ReadIgnoreFile(path)
 }
 
 func addIgnoreRules(filePath string, patterns []string) (int, error) {
@@ -114,13 +97,10 @@ func addIgnoreRules(filePath string, patterns []string) (int, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return 0, err
 	}
+	existing, _ := fsutil.ReadIgnoreFile(filePath)
 	set := make(map[string]bool)
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		set[trimmed] = true
+	for _, r := range existing {
+		set[r] = true
 	}
 	var added []string
 	for _, p := range patterns {

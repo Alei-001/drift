@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -15,17 +16,25 @@ import (
 // GetIndex reads the staging index from disk.
 func (fs *FSStorage) GetIndex(ctx context.Context) (*core.Index, error) {
 	path := filepath.Join(fs.root, IndexFile)
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &core.Index{}, nil
 		}
 		return nil, err
 	}
+	defer f.Close()
+	// Stream the index file through os.Open + io.ReadAll rather than
+	// os.ReadFile, and release the raw buffer promptly after unmarshaling.
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("read index: %w", err)
+	}
 	p := &core.IndexProto{}
 	if err := proto.Unmarshal(data, p); err != nil {
 		return nil, fmt.Errorf("unmarshal index: %w", storage.ErrCorrupted)
 	}
+	data = nil
 	return indexFromProto(p), nil
 }
 

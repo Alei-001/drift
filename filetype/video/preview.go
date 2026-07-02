@@ -3,25 +3,37 @@ package video
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
+
+	sizefmt "github.com/your-org/drift/util/format"
 )
 
 // Preview returns a short, human-readable summary of a video file.
 // Format: "<FORMAT> <WxH> <SIZE>" when dimensions are available, otherwise
 // "<FORMAT> <SIZE>". Only MP4/MOV containers expose dimensions; for other
 // formats the size-only form is returned.
-func (e *VideoEngine) Preview(data []byte, maxLines int) string {
-	format := detectVideoFormat(data)
+//
+// Only the header is inspected (format detection and, for MP4, a best-effort
+// scan of the leading boxes for a tkhd) and size is taken from the caller.
+// The content reader is never read, so previewing a 500 MB video stays in
+// constant memory. Note that real-world MP4s often store the moov atom at
+// the end of the file, in which case dimensions cannot be extracted from the
+// header alone and the size-only form is returned.
+func (e *VideoEngine) Preview(header []byte, size int64, reader io.Reader, maxLines int) (string, error) {
+	_ = reader
+	_ = maxLines
+	format := detectVideoFormat(header)
 	if format == "" {
 		format = "VIDEO"
 	}
-	size := humanReadableSize(len(data))
+	sizeStr := sizefmt.Bytes(size)
 
 	if format == "MP4" {
-		if w, h, ok := parseMP4Dimensions(data); ok && w > 0 && h > 0 {
-			return fmt.Sprintf("%s %dx%d %s", format, w, h, size)
+		if w, h, ok := parseMP4Dimensions(header); ok && w > 0 && h > 0 {
+			return fmt.Sprintf("%s %dx%d %s", format, w, h, sizeStr), nil
 		}
 	}
-	return fmt.Sprintf("%s %s", format, size)
+	return fmt.Sprintf("%s %s", format, sizeStr), nil
 }
 
 // parseMP4Dimensions walks the MP4 top-level box hierarchy looking for the

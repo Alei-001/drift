@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/filetype"
-	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/storage/stream"
 	"github.com/your-org/drift/util/pathutil"
 )
 
@@ -30,7 +31,7 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := porcelain.OpenProject(cwd)
+		store, _, err := openProjectOrReport("Show", cwd)
 		if err != nil {
 			return err
 		}
@@ -75,24 +76,20 @@ var showCmd = &cobra.Command{
 			return ErrSilent
 		}
 
-		var data []byte
-		for _, hash := range targetEntry.Chunks {
-			chunk, err := store.GetChunk(ctx, hash)
-			if err != nil {
-				return fmt.Errorf("missing chunk %s: %w", hash.String(), err)
-			}
-			data = append(data, chunk.Data...)
-		}
-
-		header := data
-		if len(header) > 512 {
-			header = header[:512]
+		// Stream the snapshot file from chunks. Peek a 512-byte header for
+		// engine detection and dimension parsing without buffering the file;
+		// fullReader replays the header followed by the remainder, so the
+		// whole stream remains available when needed.
+		chunkR := stream.NewChunkReader(ctx, store, targetEntry.Chunks)
+		header, fullReader, err := stream.PeekHeader(chunkR, core.HeaderPeekSize)
+		if err != nil {
+			return fmt.Errorf("read header for %s: %w", filePath, err)
 		}
 		engine := filetype.DetectEngine(normalizedPath, header)
 
 		// --open: launch system viewer for any file type
 		if showOpen {
-			return openExternal(snapshot, filePath, data)
+			return openExternal(snapshot, filePath, fullReader)
 		}
 
 		// Unknown file type: refuse to dump raw bytes to the terminal
@@ -106,7 +103,7 @@ var showCmd = &cobra.Command{
 			// Show metadata
 			fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
 			fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
-			if dims := imageDimensions(data); dims != "" {
+			if dims := imageDimensions(header); dims != "" {
 				fmt.Printf("  Dimensions: %s\n", dims)
 			}
 			if targetEntry.ModTime > 0 {
@@ -118,35 +115,70 @@ var showCmd = &cobra.Command{
 			return nil
 		}
 
-		// Text file: print header then content
+		// Text file: print header then stream content to stdout
 		fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
 		fmt.Println()
-		os.Stdout.Write(data)
+		if _, err := io.Copy(os.Stdout, fullReader); err != nil {
+			return fmt.Errorf("stream %s: %w", filePath, err)
+		}
 		return nil
 	},
 }
 
-func openExternal(snapshot *core.Snapshot, filePath string, data []byte) error {
+// safePreviewExts lists file extensions considered safe to hand to the
+// system viewer. Extensions outside this set are replaced with ".bin" so
+// that executable formats (e.g. .exe, .bat, .ps1) cannot be launched via
+// "drift show --open".
+var safePreviewExts = map[string]bool{
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".gif":  true,
+	".webp": true,
+	".bmp":  true,
+	".txt":  true,
+	".md":   true,
+	".pdf":  true,
+	".csv":  true,
+	".json": true,
+	".xml":  true,
+	".html": true,
+}
+
+// safePreviewExt returns the file extension to use for a preview temp file.
+// Unsafe or unknown extensions are replaced with ".bin" to prevent the
+// system viewer from executing dangerous file types.
+func safePreviewExt(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if safePreviewExts[ext] {
+		return ext
+	}
+	return ".bin"
+}
+
+func openExternal(snapshot *core.Snapshot, filePath string, r io.Reader) error {
 	fmt.Printf(">>> Opening [ok]\n")
 
 	// Use a drift-specific temp directory so old preview files can be
 	// cleaned up on subsequent invocations.
 	tmpDir := filepath.Join(os.TempDir(), "drift-previews")
-	os.MkdirAll(tmpDir, 0755)
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return fmt.Errorf("create preview dir: %w", err)
+	}
 
 	// Best-effort cleanup of stale preview files (older than 1 hour).
 	cleanOldPreviews(tmpDir, time.Hour)
 
-	ext := filepath.Ext(filePath)
+	ext := safePreviewExt(filePath)
 	tmpFile, err := os.CreateTemp(tmpDir, "drift_preview_*"+ext)
 	if err != nil {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-	if _, err := tmpFile.Write(data); err != nil {
+	if _, err := io.Copy(tmpFile, r); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		return err
+		return fmt.Errorf("write preview file: %w", err)
 	}
 	tmpFile.Close()
 
@@ -163,8 +195,16 @@ func openExternal(snapshot *core.Snapshot, filePath string, data []byte) error {
 		os.Remove(tmpPath)
 		return err
 	}
+	// Bound the viewer's lifetime so a hung process cannot leak the
+	// goroutine (and the temp file) forever.
+	timer := time.AfterFunc(30*time.Minute, func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+	})
 	go func() {
 		cmd.Wait()
+		timer.Stop()
 		os.Remove(tmpPath)
 	}()
 	fmt.Printf("Launched system viewer for %s:%s.\n", snapshot.ShortID(), filePath)

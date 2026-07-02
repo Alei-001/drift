@@ -1,13 +1,18 @@
 package porcelain
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/your-org/drift/chunker"
 	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/storage/memory"
 )
@@ -271,5 +276,145 @@ func TestComputeFileHash_EmptyFile(t *testing.T) {
 
 	if txtHash != binHash {
 		t.Errorf("empty file hash mismatch across engines: txt=%x bin=%x", txtHash, binHash)
+	}
+}
+
+// TestSaveTag_AlreadyExists verifies that creating a tag whose name is
+// already taken returns ErrTagAlreadyExists. The workspace lock held inside
+// SaveTag makes the existence check + write atomic, so a second caller that
+// observes the tag (after the first releases the lock) sees it exists.
+func TestSaveTag_AlreadyExists(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+
+	var snap1Hash core.Hash
+	snap1Hash[0] = 0xAA
+
+	if err := SaveTag(context.Background(), store, dir, "v1", snap1Hash); err != nil {
+		t.Fatalf("first SaveTag failed: %v", err)
+	}
+
+	err := SaveTag(context.Background(), store, dir, "v1", snap1Hash)
+	if !errors.Is(err, ErrTagAlreadyExists) {
+		t.Fatalf("expected ErrTagAlreadyExists on second SaveTag, got %v", err)
+	}
+
+	// The original tag must be untouched.
+	ref, err := store.GetRef(context.Background(), "tags/v1")
+	if err != nil {
+		t.Fatalf("GetRef tags/v1: %v", err)
+	}
+	if ref.Target != snap1Hash {
+		t.Errorf("tag target was clobbered: got %x, want %x", ref.Target, snap1Hash)
+	}
+}
+
+// TestSaveTag_ConcurrentSameName is a regression test for the TOCTOU race in
+// SaveTag: two goroutines creating the same tag name simultaneously must not
+// both succeed. Before the workspace lock was added, both could pass the
+// existence check and the second would silently overwrite the first. With the
+// lock, the calls serialize: exactly one succeeds, and the loser returns an
+// error (ErrTagAlreadyExists if it ran after the winner released the lock, or
+// ErrLocked if it contended on the lock while the winner held it). Either way
+// no double-create / overwrite occurs.
+func TestSaveTag_ConcurrentSameName(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+
+	var snap1Hash, snap2Hash core.Hash
+	snap1Hash[0] = 0x11
+	snap2Hash[0] = 0x22
+
+	var (
+		wg     sync.WaitGroup
+		start  = make(chan struct{})
+		err1   error
+		err2   error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		err1 = SaveTag(context.Background(), store, dir, "v1", snap1Hash)
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		err2 = SaveTag(context.Background(), store, dir, "v1", snap2Hash)
+	}()
+	close(start)
+	wg.Wait()
+
+	// Exactly one must succeed; both succeeding is the TOCTOU bug.
+	successCount := 0
+	if err1 == nil {
+		successCount++
+	}
+	if err2 == nil {
+		successCount++
+	}
+	if successCount != 1 {
+		t.Fatalf("expected exactly one success, got %d (err1=%v, err2=%v)", successCount, err1, err2)
+	}
+
+	// The loser must return an error that signals the tag is taken or the
+	// workspace is locked — never a silent overwrite.
+	var loserErr error
+	if err1 != nil {
+		loserErr = err1
+	} else {
+		loserErr = err2
+	}
+	if !errors.Is(loserErr, ErrTagAlreadyExists) && !errors.Is(loserErr, ErrLocked) {
+		t.Fatalf("expected loser error to be ErrTagAlreadyExists or ErrLocked, got %v", loserErr)
+	}
+
+	// The stored tag must point at the winner's hash, not be clobbered.
+	ref, err := store.GetRef(context.Background(), "tags/v1")
+	if err != nil {
+		t.Fatalf("GetRef tags/v1: %v", err)
+	}
+	if ref.Target != snap1Hash && ref.Target != snap2Hash {
+		t.Errorf("tag target %x does not match either snapshot hash", ref.Target)
+	}
+}
+
+// nilChunkerEngine is a test engine whose ChunkerFor always returns nil,
+// simulating whole-file chunking. Used to test the large-file guard.
+type nilChunkerEngine struct{}
+
+func (nilChunkerEngine) Name() string                                                 { return "nil-test" }
+func (nilChunkerEngine) DetectByMagic([]byte) bool                                    { return false }
+func (nilChunkerEngine) DetectByExtension(string) bool                                { return false }
+func (nilChunkerEngine) DetectByHeuristic(string, []byte) bool                        { return false }
+func (nilChunkerEngine) ChunkerFor(int64, *core.CoreConfig) chunker.Chunker           { return nil }
+func (nilChunkerEngine) Diff(string, io.Reader, string, io.Reader) (string, error)    { return "", nil }
+func (nilChunkerEngine) Preview([]byte, int64, io.Reader, int) (string, error)        { return "", nil }
+
+// TestChunkFile_NilChunkerLargeFile is a regression test for OOM: when
+// ChunkerFor returns nil (whole-file mode) and the file exceeds 64 KB,
+// chunkFile must return an error instead of reading the entire file into
+// memory. Before the fix, a 500 MB video would be fully buffered.
+func TestChunkFile_NilChunkerLargeFile(t *testing.T) {
+	largeSize := int64(128 * 1024) // 128 KB, above the 64 KB threshold
+	_, err := chunkFile("bigfile.bin", bytes.NewReader([]byte("x")), nilChunkerEngine{}, largeSize, nil)
+	if err == nil {
+		t.Fatal("expected error for large file with nil chunker, got nil")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("expected 'too large' in error, got: %s", err.Error())
+	}
+}
+
+// TestChunkFile_NilChunkerSmallFile verifies that small files (< 64 KB)
+// still work through the nil-chunker whole-file path.
+func TestChunkFile_NilChunkerSmallFile(t *testing.T) {
+	data := []byte("hello\nworld\n")
+	chunks, err := chunkFile("small.txt", bytes.NewReader(data), nilChunkerEngine{}, int64(len(data)), nil)
+	if err != nil {
+		t.Fatalf("unexpected error for small file: %v", err)
+	}
+	if len(chunks) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(chunks))
 	}
 }

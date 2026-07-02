@@ -30,50 +30,54 @@ var branchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := porcelain.OpenProject(cwd)
+		store, _, err := openProjectOrReport("Branch", cwd)
 		if err != nil {
 			return err
 		}
 		defer store.Close()
 
 		if branchDelete && branchMove {
-			return fmt.Errorf("cannot use -d and -m together")
+			statusFailed("Branch", "cannot use -d and -m together.", "")
+			return ErrSilent
 		}
 
 		if branchDelete {
 			if len(args) == 0 {
-				return fmt.Errorf("branch name required with -d")
+				statusFailed("Branch", "branch name required with -d.", "use 'drift branch <name>' to delete a branch.")
+				return ErrSilent
 			}
 			if len(args) > 1 {
-				return fmt.Errorf("branch delete accepts at most one argument")
+				statusFailed("Branch", "branch delete accepts at most one argument.", "")
+				return ErrSilent
 			}
 			name := args[0]
 			err := porcelain.DeleteBranch(ctx, store, cwd, name)
 			if err != nil {
 				var hint string
-				switch {
-				case errors.Is(err, porcelain.ErrBranchNotFound):
-					hint = "use 'drift branch' to list existing branches."
-					statusFailed("Branch", fmt.Sprintf("branch '%s' not found.", name), hint)
-				case strings.Contains(err.Error(), "cannot delete the current branch"):
-					hint = "switch to another branch first with 'drift switch'."
-					statusFailed("Branch", err.Error(), hint)
-				case strings.Contains(err.Error(), "cannot delete 'main'"):
-					hint = "'main' is the default branch and cannot be removed."
-					statusFailed("Branch", err.Error(), hint)
+			switch {
+			case errors.Is(err, porcelain.ErrBranchNotFound):
+				hint = "use 'drift branch' to list existing branches."
+				statusFailed("Branch", fmt.Sprintf("branch '%s' not found.", name), hint)
+			case errors.Is(err, porcelain.ErrCannotDeleteCurrentBranch):
+				hint = "switch to another branch first with 'drift switch'."
+				statusFailed("Branch", err.Error(), hint)
+			case errors.Is(err, porcelain.ErrCannotDeleteMain):
+				hint = "'main' is the default branch and cannot be removed."
+				statusFailed("Branch", err.Error(), hint)
 				default:
-				statusFailed("Branch", err.Error(), "")
+					statusFailed("Branch", err.Error(), "")
+				}
+				return ErrSilent
 			}
-			return ErrSilent
-		}
-		statusOK("Branch deleted")
+			statusOK("Branch deleted")
 			fmt.Printf("'%s' has been removed.\n", name)
 			return nil
 		}
 
 		if branchMove {
 			if len(args) == 0 {
-				return fmt.Errorf("new branch name required with -m")
+				statusFailed("Branch", "new branch name required with -m.", "use 'drift branch -m <new-name>' to rename the current branch.")
+				return ErrSilent
 			}
 			var oldName, newName string
 			if len(args) == 1 {
@@ -83,7 +87,8 @@ var branchCmd = &cobra.Command{
 					return fmt.Errorf("read HEAD: %w", err)
 				}
 				if headRef.SymRef == "" {
-					return fmt.Errorf("HEAD is detached; specify both old and new branch names")
+					statusFailed("Branch", "HEAD is detached; specify both old and new branch names.", "use 'drift branch -m <old> <new>' instead.")
+					return ErrSilent
 				}
 				oldName = strings.TrimPrefix(headRef.SymRef, "heads/")
 				newName = args[0]
@@ -101,15 +106,15 @@ var branchCmd = &cobra.Command{
 				case errors.Is(err, porcelain.ErrBranchAlreadyExists):
 					hint = "use 'drift branch' to list existing branches."
 					statusFailed("Branch", err.Error(), hint)
-				case strings.Contains(err.Error(), "cannot rename 'main'"):
-					hint = "'main' is the default branch and cannot be renamed."
-					statusFailed("Branch", err.Error(), hint)
+			case errors.Is(err, porcelain.ErrCannotRenameMain):
+				hint = "'main' is the default branch and cannot be renamed."
+				statusFailed("Branch", err.Error(), hint)
 				default:
-				statusFailed("Branch", err.Error(), "")
+					statusFailed("Branch", err.Error(), "")
+				}
+				return ErrSilent
 			}
-			return ErrSilent
-		}
-		statusOK("Branch renamed")
+			statusOK("Branch renamed")
 			fmt.Printf("'%s' has been renamed to '%s'.\n", oldName, newName)
 			return nil
 		}
@@ -153,7 +158,8 @@ var branchCmd = &cobra.Command{
 		}
 
 		if len(args) > 1 {
-			return fmt.Errorf("too many arguments for branch creation")
+			statusFailed("Branch", "too many arguments for branch creation.", "use 'drift branch <name>' to create a branch.")
+			return ErrSilent
 		}
 		name := args[0]
 		err = porcelain.CreateBranch(ctx, store, cwd, name)

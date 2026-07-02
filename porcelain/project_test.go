@@ -1,11 +1,65 @@
 package porcelain
 
 import (
+	"context"
 	"os"
 	"path/filepath"
-	"context"
 	"testing"
+
+	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/storage/memory"
 )
+
+func TestOpenProjectWithFactory_UsesProvidedStore(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := InitProject(dir); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+
+	var factoryCalled bool
+	memFactory := func(driftPath string) (storage.Storer, error) {
+		factoryCalled = true
+		return memory.NewMemoryStorage(), nil
+	}
+
+	store, config, err := OpenProjectWithFactory(dir, memFactory)
+	if err != nil {
+		t.Fatalf("OpenProjectWithFactory failed: %v", err)
+	}
+	defer store.Close()
+
+	if !factoryCalled {
+		t.Fatal("factory was not called")
+	}
+	if store == nil {
+		t.Fatal("expected non-nil store")
+	}
+	if config == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if _, ok := store.(*memory.MemoryStorage); !ok {
+		t.Fatalf("expected *memory.MemoryStorage, got %T", store)
+	}
+}
+
+func TestOpenProjectWithFactory_FallbackToDefault(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := InitProject(dir); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+
+	// OpenProject should use the default filesystem factory
+	store, _, err := OpenProject(dir)
+	if err != nil {
+		t.Fatalf("OpenProject failed: %v", err)
+	}
+	defer store.Close()
+	if store == nil {
+		t.Fatal("expected non-nil store")
+	}
+}
 
 func TestInitProject(t *testing.T) {
 	dir := t.TempDir()

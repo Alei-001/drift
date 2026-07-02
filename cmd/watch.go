@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/your-org/drift/core"
 	"github.com/your-org/drift/porcelain"
 )
 
@@ -27,15 +28,17 @@ var watchOnCmd = &cobra.Command{
 			return err
 		}
 		if watchInterval <= 0 {
-			return fmt.Errorf("--interval must be a positive number of seconds")
+			statusFailed("Watch", "--interval must be a positive number of seconds.", "")
+			return ErrSilent
 		}
 		if watchKeep < 0 {
-			return fmt.Errorf("--keep must be zero or a positive number")
+			statusFailed("Watch", "--keep must be zero or a positive number.", "")
+			return ErrSilent
 		}
 		pid, err := porcelain.StartDaemon(ctx, cwd, watchInterval, watchKeep)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "use 'drift watch off' to stop it first.")
-		return ErrSilent
+			return ErrSilent
 		}
 		statusActive("Watching")
 		fmt.Printf("Daemon started (PID %d). Auto-save every %ds.\n", pid, watchInterval)
@@ -57,7 +60,7 @@ var watchOffCmd = &cobra.Command{
 		autoSaves, pruned, err := porcelain.StopDaemon(ctx, cwd)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "")
-		return ErrSilent
+			return ErrSilent
 		}
 		statusOK("Stopped")
 		fmt.Printf("Daemon stopped. %d auto-saves created.\n", autoSaves)
@@ -91,11 +94,11 @@ var watchStatusCmd = &cobra.Command{
 		elapsed := time.Since(time.Unix(state.StartTime, 0))
 		fmt.Printf("Running since %s (%s ago).\n",
 			time.Unix(state.StartTime, 0).Format("15:04"), formatDuration(elapsed))
-		maxSaves := state.MaxSaves
-		if maxSaves == 0 {
-			maxSaves = watchKeep
+		if state.MaxSaves == 0 {
+			fmt.Printf("Auto-saves: %d (unlimited)\n", state.AutoSaves)
+		} else {
+			fmt.Printf("Auto-saves: %d (%d max)\n", state.AutoSaves, state.MaxSaves)
 		}
-		fmt.Printf("Auto-saves: %d (%d max)\n", state.AutoSaves, maxSaves)
 		if state.LastSaveTime > 0 {
 			fmt.Printf("Last save: %s %s\n",
 				time.Unix(state.LastSaveTime, 0).Format("15:04"), state.LastSaveChanges)
@@ -113,7 +116,7 @@ var watchDaemonCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := porcelain.OpenProject(cwd)
+		store, cfg, err := openProjectOrReport("Watch", cwd)
 		if err != nil {
 			return err
 		}
@@ -130,11 +133,16 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1f h", d.Hours())
 }
 
+// watchDefaultKeep is the CLI default for --keep. It is intentionally larger
+// than core.DefaultAutoSaveKeep (10) because the interactive `drift watch on`
+// command is meant for active work sessions where more history is desirable.
+const watchDefaultKeep = 50
+
 func init() {
-	watchOnCmd.Flags().IntVar(&watchInterval, "interval", 300, "detection interval in seconds")
-	watchOnCmd.Flags().IntVar(&watchKeep, "keep", 50, "max auto-saves to keep")
-	watchDaemonCmd.Flags().IntVar(&watchInterval, "interval", 300, "detection interval in seconds")
-	watchDaemonCmd.Flags().IntVar(&watchKeep, "keep", 50, "max auto-saves to keep")
+	watchOnCmd.Flags().IntVar(&watchInterval, "interval", core.DefaultAutoSaveInterval, "detection interval in seconds")
+	watchOnCmd.Flags().IntVar(&watchKeep, "keep", watchDefaultKeep, "max auto-saves to keep")
+	watchDaemonCmd.Flags().IntVar(&watchInterval, "interval", core.DefaultAutoSaveInterval, "detection interval in seconds")
+	watchDaemonCmd.Flags().IntVar(&watchKeep, "keep", watchDefaultKeep, "max auto-saves to keep")
 	watchCmd.AddCommand(watchOnCmd)
 	watchCmd.AddCommand(watchOffCmd)
 	watchCmd.AddCommand(watchStatusCmd)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"slices"
 
@@ -26,7 +27,7 @@ var saveCmd = &cobra.Command{
 			return err
 		}
 
-		store, cfg, err := porcelain.OpenProject(cwd)
+		store, cfg, err := openProjectOrReport("Save", cwd)
 		if err != nil {
 			return err
 		}
@@ -35,7 +36,7 @@ var saveCmd = &cobra.Command{
 		message := saveMessage
 		if message == "" {
 			statusFailed("Save", "-m <message> is required.", "use 'drift save -m \"your message\"' to describe this snapshot.")
-		return ErrSilent
+			return ErrSilent
 		}
 
 		author := cfg.User.Name
@@ -51,36 +52,49 @@ var saveCmd = &cobra.Command{
 		if err != nil {
 			if errors.Is(err, porcelain.ErrNothingToSave) {
 				statusFailed("Save", "nothing to save.", "modify some files first to create a meaningful checkpoint.")
-			return ErrSilent
+				return ErrSilent
 			}
 			return err
 		}
 
-		// Compute added/modified/deleted by comparing with the previous snapshot
+		// Compute added/modified/deleted by comparing with the previous snapshot.
+		// The snapshot is already saved at this point; computeChanges only
+		// produces the diff display, so a failure here is downgraded to a
+		// warning rather than aborting the command.
 		add, mod, del, err := computeChanges(ctx, store, snapshot)
+		changesOK := true
 		if err != nil {
-			return err
+			slog.Warn("compute changes failed", "error", err)
+			add, mod, del = nil, nil, nil
+			changesOK = false
 		}
 
 		sid := snapshot.ShortID()
 		msgLine := snapshot.Message
 		if saveTag != "" {
-			if err := porcelain.SaveTag(ctx, store, saveTag, snapshot.ID.Hash); err != nil {
-				statusFailed("Save", err.Error(), "")
-			return ErrSilent
+			if err := porcelain.SaveTag(ctx, store, cwd, saveTag, snapshot.ID.Hash); err != nil {
+				// The snapshot was already saved successfully; only the tag failed.
+				// Report it as a warning rather than a hard failure so the user
+				// knows the snapshot exists and can retry tagging it.
+				statusOK("Saved [%s]", sid)
+				fmt.Println(msgLine)
+				fmt.Fprintf(os.Stderr, "  warning: tag '%s' failed: %v\n", saveTag, err)
+				return ErrSilent
 			}
 			msgLine += "  [" + saveTag + "]"
 		}
 		statusOK("Saved [%s]", sid)
 		fmt.Println(msgLine)
 
-		// Print file list with sizes
-		printFileListWithSize(add, mod, del)
+		if changesOK {
+			// Print file list with sizes
+			printFileListWithSize(add, mod, del)
 
-		// Summary
-		total := len(add) + len(mod) + len(del)
-		if total > 0 {
-			summaryLine(total, len(add), len(mod), len(del))
+			// Summary
+			total := len(add) + len(mod) + len(del)
+			if total > 0 {
+				summaryLine(total, len(add), len(mod), len(del))
+			}
 		}
 		return nil
 	},

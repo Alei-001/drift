@@ -67,7 +67,7 @@ func createBranchNoLock(ctx context.Context, store storage.Storer, name string) 
 func ListBranches(ctx context.Context, store storage.Storer) ([]*core.Reference, string, error) {
 	refs, err := store.ListRefs(ctx, "heads/")
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("list branches: %w", err)
 	}
 
 	current := ""
@@ -261,7 +261,7 @@ func DeleteBranch(ctx context.Context, store storage.Storer, cwd, name string) e
 		return fmt.Errorf("branch name is empty")
 	}
 	if name == "main" {
-		return fmt.Errorf("cannot delete 'main'")
+		return ErrCannotDeleteMain
 	}
 
 	if _, err := store.GetRef(ctx, "heads/"+name); err != nil {
@@ -276,7 +276,7 @@ func DeleteBranch(ctx context.Context, store storage.Storer, cwd, name string) e
 		return fmt.Errorf("read HEAD: %w", err)
 	}
 	if headRef.SymRef == "heads/"+name {
-		return fmt.Errorf("cannot delete the current branch '%s'", name)
+		return ErrCannotDeleteCurrentBranch
 	}
 
 	return store.DeleteRef(ctx, "heads/"+name)
@@ -306,7 +306,7 @@ func RenameBranch(ctx context.Context, store storage.Storer, cwd, oldName, newNa
 		return fmt.Errorf("new branch name is empty")
 	}
 	if oldName == "main" {
-		return fmt.Errorf("cannot rename 'main'")
+		return ErrCannotRenameMain
 	}
 
 	// Verify the source branch exists before any other check (including the
@@ -368,4 +368,64 @@ func RenameBranch(ctx context.Context, store storage.Storer, cwd, oldName, newNa
 	}
 
 	return nil
+}
+
+// ResolveSnapshotBranches assigns each snapshot to the branch whose tip is
+// the nearest descendant (fewest PrevID hops). A snapshot unreachable from
+// any branch tip gets no entry. Ties at equal distance are broken by branch
+// name for determinism.
+func ResolveSnapshotBranches(ctx context.Context, store storage.Storer) (map[string][]string, error) {
+	branches, _, err := ListBranches(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+
+	type branchWalk struct {
+		name string
+		dist map[string]int
+	}
+	var walks []branchWalk
+	for _, b := range branches {
+		if b.Target.IsZero() {
+			continue
+		}
+		name := strings.TrimPrefix(b.Name, "heads/")
+		bw := branchWalk{name: name, dist: make(map[string]int)}
+		currHash := b.Target
+		hops := 0
+		for !currHash.IsZero() {
+			hashStr := currHash.String()
+			if _, seen := bw.dist[hashStr]; seen {
+				break
+			}
+			bw.dist[hashStr] = hops
+			snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: currHash})
+			if err != nil {
+				break
+			}
+			if snap.PrevID == nil {
+				break
+			}
+			currHash = snap.PrevID.Hash
+			hops++
+		}
+		walks = append(walks, bw)
+	}
+
+	bestDist := make(map[string]int)
+	bestName := make(map[string]string)
+	for _, bw := range walks {
+		for hashStr, d := range bw.dist {
+			cur, ok := bestDist[hashStr]
+			if !ok || d < cur || (d == cur && bw.name < bestName[hashStr]) {
+				bestDist[hashStr] = d
+				bestName[hashStr] = bw.name
+			}
+		}
+	}
+	result := make(map[string][]string)
+	for hashStr, name := range bestName {
+		result[hashStr] = []string{name}
+	}
+	return result, nil
 }

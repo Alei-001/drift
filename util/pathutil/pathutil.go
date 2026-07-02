@@ -33,10 +33,16 @@ func Normalize(p string) string {
 func RelToWorkDir(workDir, path string) (string, error) {
 	path = Normalize(path)
 	if filepath.IsAbs(path) {
-		return Rel(workDir, path)
+		rel, err := Rel(workDir, path)
+		if err != nil {
+			return "", err
+		}
+		path = rel
 	}
 	// Reject paths that escape the workspace root after cleaning.
-	if strings.HasPrefix(path, "../") || path == ".." {
+	// This covers both relative inputs like "../foo" and absolute inputs
+	// outside workDir, which filepath.Rel turns into "../foo".
+	if path == ".." || strings.HasPrefix(path, "../") {
 		return "", fmt.Errorf("path escapes workspace root: %s", path)
 	}
 	return path, nil

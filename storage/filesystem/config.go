@@ -12,13 +12,6 @@ import (
 	"github.com/your-org/drift/util/fsutil"
 )
 
-// Clamp chunk sizes to reasonable ranges to prevent OOM.
-const (
-	maxChunkMinSize = 16 * 1024 * 1024  // 16MB
-	maxChunkAvgSize = 64 * 1024 * 1024  // 64MB
-	maxChunkMaxSize = 256 * 1024 * 1024 // 256MB
-)
-
 // GetConfig reads the drift configuration from the config file.
 // The file is unmarshaled on top of DefaultConfig(), so fields absent from
 // the JSON retain their default values rather than Go zero values. This
@@ -37,35 +30,18 @@ func (fs *FSStorage) GetConfig(ctx context.Context) (*core.Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", storage.ErrCorrupted)
 	}
-	// Chunk sizes of 0 mean "use engine defaults" — each filetype engine
-	// (text, binary, image, video) applies its own appropriate defaults.
-	// Do NOT override them here; only guard against negative values.
-	if cfg.Core.ChunkMinSize < 0 {
-		cfg.Core.ChunkMinSize = 0
+	// Apply shared normalization (handles negative/empty/zero fields by
+	// restoring defaults). Filesystem-specific upper-bound clamps are
+	// applied afterwards to prevent OOM on a malicious or mistaken config.
+	cfg.Core.Normalize()
+	if cfg.Core.ChunkMinSize > storage.MaxChunkMinSize {
+		cfg.Core.ChunkMinSize = storage.MaxChunkMinSize
 	}
-	if cfg.Core.ChunkAvgSize < 0 {
-		cfg.Core.ChunkAvgSize = 0
+	if cfg.Core.ChunkAvgSize > storage.MaxChunkAvgSize {
+		cfg.Core.ChunkAvgSize = storage.MaxChunkAvgSize
 	}
-	if cfg.Core.ChunkMaxSize < 0 {
-		cfg.Core.ChunkMaxSize = 0
-	}
-	if cfg.Core.ChunkMinSize > maxChunkMinSize {
-		cfg.Core.ChunkMinSize = maxChunkMinSize
-	}
-	if cfg.Core.ChunkAvgSize > maxChunkAvgSize {
-		cfg.Core.ChunkAvgSize = maxChunkAvgSize
-	}
-	if cfg.Core.ChunkMaxSize > maxChunkMaxSize {
-		cfg.Core.ChunkMaxSize = maxChunkMaxSize
-	}
-	if cfg.Core.IgnoreFile == "" {
-		cfg.Core.IgnoreFile = ".driftignore"
-	}
-	if cfg.Core.AutoSaveInterval <= 0 {
-		cfg.Core.AutoSaveInterval = 300
-	}
-	if cfg.Core.AutoSaveKeep <= 0 {
-		cfg.Core.AutoSaveKeep = 10
+	if cfg.Core.ChunkMaxSize > storage.MaxChunkMaxSize {
+		cfg.Core.ChunkMaxSize = storage.MaxChunkMaxSize
 	}
 	return cfg, nil
 }

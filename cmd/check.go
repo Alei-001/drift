@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -20,10 +21,9 @@ var checkCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := porcelain.OpenProject(cwd)
+		store, _, err := openProjectOrReport("Check", cwd)
 		if err != nil {
-			statusFailed("Check", ".drift/ directory not found.", "run 'drift init' first.")
-		return ErrSilent
+			return err
 		}
 		defer store.Close()
 
@@ -32,10 +32,16 @@ var checkCmd = &cobra.Command{
 			return err
 		}
 
-		// Collect unique chunk hashes
+		// Collect unique chunk hashes. ListSnapshots returns metadata-only
+		// snapshots (nil Files), so fetch each snapshot's full data to
+		// access its chunk references.
 		hashSet := make(map[core.Hash]bool)
 		for _, snap := range snapshots {
-			for _, entry := range snap.Files {
+			full, err := store.GetSnapshot(ctx, snap.ID)
+			if err != nil {
+				continue
+			}
+			for _, entry := range full.Files {
 				for _, hash := range entry.Chunks {
 					hashSet[hash] = true
 				}
@@ -47,7 +53,12 @@ var checkCmd = &cobra.Command{
 		missing := 0
 
 		for hash := range hashSet {
-			if !store.HasChunk(ctx, hash) {
+			has, err := store.HasChunk(ctx, hash)
+			if err != nil {
+				corrupt++
+				continue
+			}
+			if !has {
 				missing++
 				continue
 			}
@@ -77,8 +88,10 @@ var checkCmd = &cobra.Command{
 			fmt.Printf("%d blocks passed.\n", totalBlocks)
 
 			// 追加不可达快照提示
-			unreachable, err := porcelain.CountUnreachableSnapshots(ctx, store)
-			if err == nil && unreachable > 0 {
+			unreachable, err := porcelain.CountUnreachableSnapshots(ctx, store, cwd)
+			if err != nil {
+				slog.Warn("count unreachable snapshots failed", "error", err)
+			} else if unreachable > 0 {
 				fmt.Printf("  hint: %d unreachable snapshots detected. use 'drift gc --dry-run' to review.\n", unreachable)
 			}
 

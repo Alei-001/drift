@@ -12,21 +12,22 @@ import (
 	"github.com/your-org/drift/filetype"
 	"github.com/your-org/drift/porcelain"
 	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/storage/stream"
 	"github.com/your-org/drift/util/fsutil"
 	"github.com/your-org/drift/util/pathutil"
-	"github.com/zeebo/blake3"
 )
 
 var diffCmd = &cobra.Command{
 	Use:   "diff [<id1>] [<id2>] [<file>]",
 	Short: "Show changes between snapshots or workspace",
+	Args:  cobra.MaximumNArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		cwd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		store, cfg, err := porcelain.OpenProject(cwd)
+		store, cfg, err := openProjectOrReport("Diff", cwd)
 		if err != nil {
 			return err
 		}
@@ -163,6 +164,9 @@ func diffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 }
 
 // diffWorkspaceFileVsSnapshot shows content-level diff for a single file: workspace vs snapshot.
+// The workspace file is opened with os.Open and streamed through the engine,
+// and snapshot content is streamed from chunks via a chunkReader, so the file
+// bytes are never buffered whole in memory.
 func diffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshot *core.Snapshot, filePath string) error {
 	// Normalize path and resolve absolute paths
 	filePath, err := pathutil.RelToWorkDir(workDir, filePath)
@@ -181,78 +185,80 @@ func diffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, work
 
 	fmt.Printf(">>> Diff %s → workspace %s\n", snapshot.ShortID(), filePath)
 
-	// Read workspace file
 	fullPath := filepath.Join(workDir, filePath)
-	workData, workErr := os.ReadFile(fullPath)
+	info, statErr := os.Stat(fullPath)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return fmt.Errorf("stat %s: %w", fullPath, statErr)
+	}
 
 	if snapEntry == nil {
 		// File not in snapshot: added in workspace
-		if workErr != nil {
+		if os.IsNotExist(statErr) {
 			fmt.Fprintf(os.Stderr, "  hint: '%s' not found in snapshot or workspace.\n", filePath)
 			return nil
 		}
-		fmt.Printf("  +  %s  (new file, %s)\n", filePath, formatSize(int64(len(workData))))
+		fmt.Printf("  +  %s  (new file, %s)\n", filePath, formatSize(info.Size()))
 		return nil
 	}
 
-	if workErr != nil {
+	if os.IsNotExist(statErr) {
 		// File was in snapshot but deleted from workspace
 		fmt.Printf("  -  %s  (deleted, was %s)\n", filePath, formatSize(snapEntry.Size))
 		return nil
 	}
 
-	// Both exist: compare content
-	var snapData []byte
-
-	if int64(len(workData)) != snapEntry.Size {
-		goto assemble
-	}
-
-	// Same size: BLAKE3 hash comparison (low memory, no chunk assembly)
-	{
-		workHash := blake3.Sum256(workData)
-		snapHasher := blake3.New()
-		for _, h := range snapEntry.Chunks {
-			chunk, err := store.GetChunk(ctx, h)
-			if err != nil {
-				return fmt.Errorf("read chunk %s for %s: %w", h.String(), filePath, err)
-			}
-			snapHasher.Write(chunk.Data)
+	// Both exist. If sizes match, short-circuit on a streaming BLAKE3 hash
+	// comparison (the workspace file is hashed by streaming, not by reading
+	// it whole into memory).
+	if info.Size() == snapEntry.Size {
+		workHash, err := stream.HashFileContent(fullPath)
+		if err != nil {
+			return fmt.Errorf("hash %s: %w", fullPath, err)
 		}
-		var snapHash [32]byte
-		snapHasher.Sum(snapHash[:0])
-
+		snapHash, err := stream.HashChunkData(ctx, store, snapEntry.Chunks)
+		if err != nil {
+			return fmt.Errorf("hash snapshot chunks for %s: %w", filePath, err)
+		}
 		if workHash == snapHash {
 			fmt.Printf("  (no change)\n")
 			return nil
 		}
 	}
 
-assemble:
-	// Assemble snapshot data for diff
-	for _, h := range snapEntry.Chunks {
-		chunk, err := store.GetChunk(ctx, h)
-		if err != nil {
-			return fmt.Errorf("read chunk %s for %s: %w", h.String(), filePath, err)
-		}
-		snapData = append(snapData, chunk.Data...)
+	// Content differs: open the workspace file and run a streaming engine diff.
+	workFile, err := os.Open(fullPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", fullPath, err)
 	}
+	defer workFile.Close()
 
-	header := workData
-	if len(header) > 512 {
-		header = header[:512]
+		header, workReader, err := stream.PeekHeader(workFile, core.HeaderPeekSize)
+	if err != nil {
+		return fmt.Errorf("read header %s: %w", fullPath, err)
 	}
 	engine := filetype.DetectEngine(filePath, header)
+
+	snapReader := stream.NewChunkReader(ctx, store, snapEntry.Chunks)
+	oldLabel := snapshot.ShortID() + "/" + filePath
+	newLabel := "workspace/" + filePath
+
 	if engine != nil && engine.Name() == "text" {
-		diff, _ := engine.Diff(snapshot.ShortID()+"/"+filePath, snapData, "workspace/"+filePath, workData)
+		diff, diffErr := engine.Diff(oldLabel, snapReader, newLabel, workReader)
+		if diffErr != nil {
+			return fmt.Errorf("diff %s: %w", filePath, diffErr)
+		}
 		fmt.Println()
 		fmt.Println(diff)
 	} else {
 		fmt.Printf("  Size:       %s → %s (%+s)\n",
-			formatSize(snapEntry.Size), formatSize(int64(len(workData))),
-			formatSize(int64(len(workData))-snapEntry.Size))
-		oldDims := imageDimensions(snapData)
-		newDims := imageDimensions(workData)
+			formatSize(snapEntry.Size), formatSize(info.Size()),
+			formatSize(info.Size()-snapEntry.Size))
+		snapHeader, _, err := stream.PeekHeader(snapReader, core.HeaderPeekSize)
+		if err != nil {
+			return fmt.Errorf("read snapshot header %s: %w", filePath, err)
+		}
+		oldDims := imageDimensions(snapHeader)
+		newDims := imageDimensions(header)
 		if oldDims != "" || newDims != "" {
 			fmt.Printf("  Dimensions: %s → %s\n", oldDims, newDims)
 		}
@@ -346,51 +352,48 @@ func diffFileInSnapshots(ctx context.Context, store storage.Storer, workDir stri
 		fmt.Println("  (no change)")
 		return
 	}
-	{
-		var data1, data2 []byte
-		for _, h := range entry1.Chunks {
-			chunk, err := store.GetChunk(ctx, h)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  warning: cannot read chunk %s: %v\n", h.String(), err)
-				continue
-			}
-			data1 = append(data1, chunk.Data...)
-		}
-		for _, h := range entry2.Chunks {
-			chunk, err := store.GetChunk(ctx, h)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  warning: cannot read chunk %s: %v\n", h.String(), err)
-				continue
-			}
-			data2 = append(data2, chunk.Data...)
-		}
 
-		header := data2
-		if len(header) > 512 {
-			header = header[:512]
+	// Stream both snapshot versions from chunks; peek a header from each for
+	// engine detection and dimension parsing without buffering the file.
+	reader1 := stream.NewChunkReader(ctx, store, entry1.Chunks)
+	reader2 := stream.NewChunkReader(ctx, store, entry2.Chunks)
+	header1, fullReader1, err := stream.PeekHeader(reader1, core.HeaderPeekSize)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: cannot read chunk for %s: %v\n", filePath, err)
+		return
+	}
+	header2, fullReader2, err := stream.PeekHeader(reader2, core.HeaderPeekSize)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: cannot read chunk for %s: %v\n", filePath, err)
+		return
+	}
+	engine := filetype.DetectEngine(filePath, header2)
+	if engine != nil && engine.Name() == "text" {
+		diff, diffErr := engine.Diff(snap1.ShortID()+"/"+filePath, fullReader1, snap2.ShortID()+"/"+filePath, fullReader2)
+		if diffErr != nil {
+			fmt.Fprintf(os.Stderr, "  warning: cannot diff %s: %v\n", filePath, diffErr)
+			return
 		}
-		engine := filetype.DetectEngine(filePath, header)
-		if engine != nil && engine.Name() == "text" {
-			diff, _ := engine.Diff(snap1.ShortID()+"/"+filePath, data1, snap2.ShortID()+"/"+filePath, data2)
-			fmt.Println(diff)
-		} else {
-			sizeDiff := formatSize(entry2.Size - entry1.Size)
-			sign := "+"
-			if entry2.Size < entry1.Size {
-				sign = ""
-			}
-			fmt.Printf("  Size:       %s → %s (%s%s)\n",
-				formatSize(entry1.Size), formatSize(entry2.Size), sign, sizeDiff)
-			oldDims := imageDimensions(data1)
-			newDims := imageDimensions(data2)
-			if oldDims != "" || newDims != "" {
-				fmt.Printf("  Dimensions: %s → %s\n", oldDims, newDims)
-			}
-			fmt.Println("\n  (binary file — metadata only)")
+		fmt.Println(diff)
+	} else {
+		sizeDiff := formatSize(entry2.Size - entry1.Size)
+		sign := "+"
+		if entry2.Size < entry1.Size {
+			sign = ""
 		}
+		fmt.Printf("  Size:       %s → %s (%s%s)\n",
+			formatSize(entry1.Size), formatSize(entry2.Size), sign, sizeDiff)
+		oldDims := imageDimensions(header1)
+		newDims := imageDimensions(header2)
+		if oldDims != "" || newDims != "" {
+			fmt.Printf("  Dimensions: %s → %s\n", oldDims, newDims)
+		}
+		fmt.Println("\n  (binary file — metadata only)")
 	}
 }
 
 func init() {
 	rootCmd.AddCommand(diffCmd)
 }
+
+

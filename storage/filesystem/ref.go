@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,14 +18,12 @@ import (
 // Compile-time assertion that FSStorage implements storage.Storer.
 var _ storage.Storer = (*FSStorage)(nil)
 
-const maxSymRefDepth = 8
-
 func (fs *FSStorage) GetRef(ctx context.Context, name string) (*core.Reference, error) {
 	return fs.getRefRecursive(ctx, name, 0)
 }
 
 func (fs *FSStorage) getRefRecursive(ctx context.Context, name string, depth int) (*core.Reference, error) {
-	if depth > maxSymRefDepth {
+	if depth > storage.MaxSymRefDepth {
 		return nil, fmt.Errorf("symref recursion limit exceeded at %q: %w", name, storage.ErrInvalidRef)
 	}
 	if err := refname.Validate(name); err != nil {
@@ -65,6 +64,9 @@ func (fs *FSStorage) getRefRecursive(ctx context.Context, name string, depth int
 	b, err := hex.DecodeString(content)
 	if err != nil {
 		return nil, fmt.Errorf("decode ref %q target: %w", name, storage.ErrInvalidRef)
+	}
+	if len(b) != core.HashSize {
+		return nil, fmt.Errorf("ref %q target length %d, expected %d: %w", name, len(b), core.HashSize, storage.ErrInvalidRef)
 	}
 	var h core.Hash
 	copy(h[:], b)
@@ -126,9 +128,12 @@ func (fs *FSStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Refer
 		}
 		ref, err := fs.GetRef(ctx, rel)
 		if err != nil {
-			// Skip malformed/irrelevant files (e.g. .DS_Store, corrupt refs)
-			// instead of aborting the entire walk.
-			return nil
+			// Skip not-found refs (e.g. .DS_Store, corrupt refs) but
+			// propagate other errors instead of aborting silently.
+			if errors.Is(err, storage.ErrNotFound) {
+				return nil
+			}
+			return err
 		}
 		refs = append(refs, ref)
 		return nil
@@ -150,7 +155,10 @@ func (fs *FSStorage) DeleteRef(ctx context.Context, name string) error {
 		return fmt.Errorf("cannot delete HEAD: %w", storage.ErrInvalidRef)
 	}
 	path := filepath.Join(fs.root, RefsDir, name)
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete ref %q: %w", name, err)
+	}
+	return nil
 }
 
 func refType(name string) core.RefType {
