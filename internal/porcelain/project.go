@@ -11,6 +11,7 @@ import (
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
 	"github.com/your-org/drift/internal/storage/backends/filesystem"
+	"github.com/your-org/drift/internal/util/fsutil"
 )
 
 // StoreFactory builds a storage.Storer rooted at the given .drift path.
@@ -98,7 +99,7 @@ desktop.ini
 *.swp
 *~
 `)
-		if err := os.WriteFile(driftignorePath, driftignoreContent, 0644); err != nil {
+		if err := os.WriteFile(driftignorePath, driftignoreContent, fsutil.DefaultFilePerm); err != nil {
 			return fmt.Errorf("write .driftignore: %w", err)
 		}
 	}

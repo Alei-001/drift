@@ -18,7 +18,7 @@ func (e *TextEngine) Preview(header []byte, size int64, reader io.Reader, maxLin
 	}
 
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, scannerInitialBufSize), scannerMaxBufSize)
 	var lines []string
 	for i := 0; i < maxLines && scanner.Scan(); i++ {
 		lines = append(lines, scanner.Text())

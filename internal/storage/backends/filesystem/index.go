@@ -46,7 +46,7 @@ func (fs *FSStorage) SetIndex(ctx context.Context, index *core.Index) error {
 		return err
 	}
 	path := filepath.Join(fs.root, IndexFile)
-	return fsutil.WriteFileAtomic(path, data, 0644)
+	return fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
 }
 
 // --- protobuf conversion helpers ---

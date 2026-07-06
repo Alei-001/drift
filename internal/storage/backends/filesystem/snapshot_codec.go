@@ -13,7 +13,7 @@ func snapshotIDFromPath(path string) (core.SnapshotID, bool) {
 	name := filepath.Base(path)
 	parent := filepath.Base(filepath.Dir(path))
 	hexStr := parent + name
-	if len(hexStr) != 64 {
+	if len(hexStr) != core.HashSize*2 {
 		return core.SnapshotID{}, false
 	}
 	b, err := hex.DecodeString(hexStr)
@@ -89,7 +89,7 @@ func snapshotFromProto(p *core.SnapshotProto) *core.Snapshot {
 		for _, ch := range fe.ChunkHashes {
 			f.Chunks = append(f.Chunks, bytesToHash(ch))
 		}
-		if len(fe.FileHash) == 32 {
+		if len(fe.FileHash) == core.HashSize {
 			// New snapshots store the file-level hash directly; use it
 			// as-is to avoid recomputing from chunk hashes.
 			copy(f.Hash[:], fe.FileHash)

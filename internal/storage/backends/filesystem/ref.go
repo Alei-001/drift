@@ -89,7 +89,7 @@ func (fs *FSStorage) SetRef(ctx context.Context, name string, ref *core.Referenc
 	} else {
 		path = filepath.Join(fs.root, RefsDir, name)
 		dir := filepath.Dir(path)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, fsutil.DefaultDirPerm); err != nil {
 			return err
 		}
 	}
@@ -102,10 +102,10 @@ func (fs *FSStorage) SetRef(ctx context.Context, name string, ref *core.Referenc
 		if err := refname.Validate(symTarget); err != nil {
 			return err
 		}
-		return fsutil.WriteFileAtomic(path, []byte("ref: "+RefsDir+"/"+symTarget+"\n"), 0644)
+		return fsutil.WriteFileAtomic(path, []byte("ref: "+RefsDir+"/"+symTarget+"\n"), fsutil.DefaultFilePerm)
 	}
 	hexStr := ref.Target.FullString()
-	return fsutil.WriteFileAtomic(path, []byte(hexStr+"\n"), 0644)
+	return fsutil.WriteFileAtomic(path, []byte(hexStr+"\n"), fsutil.DefaultFilePerm)
 }
 
 func (fs *FSStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {

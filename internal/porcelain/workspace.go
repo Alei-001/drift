@@ -141,7 +141,7 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 		fullPath = safePath
 
 		if entry.Mode.IsDir() {
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
+			if err := os.MkdirAll(fullPath, fsutil.DefaultDirPerm); err != nil {
 				failedSet[entry.Path] = true
 				snapFiles[entry.Path] = true
 				failures = append(failures, fmt.Sprintf("create dir %s: %v", fullPath, err))
@@ -152,7 +152,7 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 		}
 
 		parentDir := filepath.Dir(fullPath)
-		if err := os.MkdirAll(parentDir, 0755); err != nil {
+		if err := os.MkdirAll(parentDir, fsutil.DefaultDirPerm); err != nil {
 			failedSet[entry.Path] = true
 			snapFiles[entry.Path] = true
 			failures = append(failures, fmt.Sprintf("create parent dir %s: %v", parentDir, err))
@@ -161,7 +161,7 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 
 		perm := os.FileMode(entry.Mode & 0o777)
 		if perm == 0 {
-			perm = 0644
+			perm = fsutil.DefaultFilePerm
 		}
 		if err := writeFileFromChunks(ctx, store, fullPath, entry.Chunks, perm); err != nil {
 			failedSet[entry.Path] = true

@@ -9,6 +9,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/util/cache"
+	"github.com/your-org/drift/internal/util/fsutil"
 )
 
 type FSStorage struct {
@@ -36,7 +37,7 @@ func NewFSStorage(root string) (*FSStorage, error) {
 		filepath.Join(root, RefsDir, TagsDir),
 	}
 	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
+		if err := os.MkdirAll(d, fsutil.DefaultDirPerm); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", d, err)
 		}
 	}

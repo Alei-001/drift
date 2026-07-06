@@ -11,6 +11,7 @@ import (
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
+	"github.com/your-org/drift/internal/util/fsutil"
 	"github.com/your-org/drift/internal/util/pathutil"
 )
 
@@ -122,21 +123,21 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 			fullPath = safePath
 
 			if entry.Mode.IsDir() {
-				if err := os.MkdirAll(fullPath, 0755); err != nil {
-					return backupID, fmt.Errorf("create dir %s: %w", fullPath, err)
-				}
-				continue
+			if err := os.MkdirAll(fullPath, fsutil.DefaultDirPerm); err != nil {
+				return backupID, fmt.Errorf("create dir %s: %w", fullPath, err)
 			}
+			continue
+		}
 
-			parentDir := filepath.Dir(fullPath)
-			if err := os.MkdirAll(parentDir, 0755); err != nil {
-				return backupID, fmt.Errorf("create parent dir %s: %w", parentDir, err)
-			}
+		parentDir := filepath.Dir(fullPath)
+		if err := os.MkdirAll(parentDir, fsutil.DefaultDirPerm); err != nil {
+			return backupID, fmt.Errorf("create parent dir %s: %w", parentDir, err)
+		}
 
-			perm := os.FileMode(entry.Mode & 0o777)
-			if perm == 0 {
-				perm = 0644
-			}
+		perm := os.FileMode(entry.Mode & 0o777)
+		if perm == 0 {
+			perm = fsutil.DefaultFilePerm
+		}
 			if err := writeFileFromChunks(ctx, store, fullPath, entry.Chunks, perm); err != nil {
 				return backupID, fmt.Errorf("write file %s: %w", fullPath, err)
 			}

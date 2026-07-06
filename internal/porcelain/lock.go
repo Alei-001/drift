@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/your-org/drift/internal/util/fsutil"
 )
 
 // workspaceLockData is the JSON payload stored in the workspace lock file.
@@ -36,7 +38,7 @@ var ErrLocked = errors.New("workspace is locked by another operation")
 // writer is never clobbered mid-write.
 func AcquireWorkspaceLock(cwd string) error {
 	lockPath := filepath.Join(cwd, ".drift", "workspace.lock")
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(lockPath), fsutil.DefaultDirPerm); err != nil {
 		return fmt.Errorf("create drift dir: %w", err)
 	}
 
@@ -98,7 +100,7 @@ func AcquireWorkspaceLock(cwd string) error {
 // createLockFile atomically creates the lock file with O_CREATE|O_EXCL and
 // writes data to it. It returns ErrLocked if the file already exists.
 func createLockFile(lockPath string, data []byte) error {
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, fsutil.DefaultFilePerm)
 	if err != nil {
 		if os.IsExist(err) {
 			return ErrLocked

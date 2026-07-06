@@ -9,6 +9,12 @@ import (
 	_ "image/png"  // register PNG decoder for ImageDimensions
 )
 
+const (
+	sizeKB = 1024
+	sizeMB = 1024 * 1024
+	sizeGB = 1024 * 1024 * 1024
+)
+
 // Bytes returns a human-readable size string (e.g. "2.5 MB").
 // Negative sizes are formatted with a leading minus sign.
 func Bytes(size int64) string {
@@ -23,14 +29,14 @@ func Bytes(size int64) string {
 // string using 1024-based units (B, KB, MB, GB).
 func bytesPositive(size uint64) string {
 	switch {
-	case size < 1024:
+	case size < sizeKB:
 		return fmt.Sprintf("%d B", size)
-	case size < 1024*1024:
+	case size < sizeMB:
 		return fmt.Sprintf("%.1f KB", float64(size)/1024)
-	case size < 1024*1024*1024:
-		return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
+	case size < sizeGB:
+		return fmt.Sprintf("%.1f MB", float64(size)/sizeMB)
 	default:
-		return fmt.Sprintf("%.1f GB", float64(size)/(1024*1024*1024))
+		return fmt.Sprintf("%.1f GB", float64(size)/sizeGB)
 	}
 }
 

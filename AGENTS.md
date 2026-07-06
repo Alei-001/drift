@@ -64,7 +64,7 @@ import any of the business packages, so the public surface is just the CLI.
 | Package | Sentinels |
 |---------|-----------|
 | `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrPermission`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
-| `internal/porcelain/` | `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain` |
+| `internal/porcelain/` | `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrTagNotFound`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain`, `ErrAmbiguousID`, `ErrCannotUndo`, `ErrUncommittedChanges` |
 
 Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify errors with `errors.Is` / `errors.As` — never `strings.Contains(err.Error(), …)`. Test code may use `strings.Contains` on error messages to assert user-facing text.
 

@@ -183,7 +183,7 @@ func addIgnoreRules(filePath string, patterns []string) (int, error) {
 		buf.WriteString(p)
 		buf.WriteByte('\n')
 	}
-	if err := fsutil.WriteFileAtomic(filePath, []byte(buf.String()), 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(filePath, []byte(buf.String()), fsutil.DefaultFilePerm); err != nil {
 		return 0, err
 	}
 	return len(added), nil
@@ -217,7 +217,7 @@ func removeIgnoreRule(filePath string, pattern string) error {
 	if !found {
 		return fmt.Errorf("pattern '%s' not found", pattern)
 	}
-	return fsutil.WriteFileAtomic(filePath, []byte(strings.Join(out, "\n")), 0644)
+	return fsutil.WriteFileAtomic(filePath, []byte(strings.Join(out, "\n")), fsutil.DefaultFilePerm)
 }
 
 func init() {

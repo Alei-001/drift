@@ -892,7 +892,7 @@ sequenceDiagram
     Cmd-->>User: ✓ 已恢复 (备份快照: 9f1e)
 ```
 
-### 5.3 drift new + switch 流程
+### 5.3 drift switch -c 流程
 
 ```mermaid
 sequenceDiagram

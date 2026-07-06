@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// scannerInitialBufSize and scannerMaxBufSize size the bufio.Scanner buffer
+// for reading potentially long lines in text files.
+const (
+	scannerInitialBufSize = 64 * 1024
+	scannerMaxBufSize     = 1024 * 1024
+)
+
 // Diff produces a unified diff between two text files using Myers diff.
 // Content is read streaming from oldReader/newReader via a line scanner;
 // the Myers algorithm still requires both line arrays in memory, but the
@@ -57,7 +64,7 @@ func (e *TextEngine) Diff(ctx context.Context, oldPath string, oldReader io.Read
 // trip the scanner's default 64 KiB limit.
 func readLines(r io.Reader) ([]string, error) {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, scannerInitialBufSize), scannerMaxBufSize)
 	var lines []string
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())

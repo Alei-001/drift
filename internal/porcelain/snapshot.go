@@ -208,7 +208,7 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
 	}
-	var hash [32]byte = blake3.Sum256(marshaled)
+	var hash [core.HashSize]byte = blake3.Sum256(marshaled)
 	snap.ID = core.SnapshotID{Hash: core.Hash(hash)}
 
 	if err := store.PutSnapshot(ctx, snap); err != nil {

@@ -118,7 +118,7 @@ func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 
 	path := fs.chunkPath(chunk.Hash)
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, fsutil.DefaultDirPerm); err != nil {
 		return fmt.Errorf("mkdir chunks: %w", err)
 	}
 
@@ -142,7 +142,7 @@ func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 		flags = 0x00
 	}
 
-	if err := fsutil.WriteFileAtomic(path, payload, 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(path, payload, fsutil.DefaultFilePerm); err != nil {
 		return fmt.Errorf("write chunk: %w", err)
 	}
 

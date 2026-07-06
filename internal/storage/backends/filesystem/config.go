@@ -43,5 +43,5 @@ func (fs *FSStorage) SetConfig(ctx context.Context, config *core.Config) error {
 		return err
 	}
 	path := filepath.Join(fs.root, ConfigFile)
-	return fsutil.WriteFileAtomic(path, data, 0644)
+	return fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
 }

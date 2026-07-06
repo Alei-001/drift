@@ -80,10 +80,10 @@ func (fs *FSStorage) PutSnapshot(ctx context.Context, snapshot *core.Snapshot) e
 	}
 	path := fs.snapshotPath(snapshot.ID)
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, fsutil.DefaultDirPerm); err != nil {
 		return err
 	}
-	if err := fsutil.WriteFileAtomic(path, data, 0644); err != nil {
+	if err := fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm); err != nil {
 		return err
 	}
 	return fs.writeManifest(snapshot)
@@ -99,10 +99,10 @@ func (fs *FSStorage) writeManifest(snapshot *core.Snapshot) error {
 	}
 	path := fs.manifestPath(snapshot.ID)
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, fsutil.DefaultDirPerm); err != nil {
 		return err
 	}
-	return fsutil.WriteFileAtomic(path, data, 0644)
+	return fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
 }
 
 // DeleteSnapshot removes a snapshot and its manifest from disk. It is
@@ -226,8 +226,8 @@ func (fs *FSStorage) backfillManifest(id core.SnapshotID, m *core.SnapshotManife
 	}
 	path := fs.manifestPath(id)
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, fsutil.DefaultDirPerm); err != nil {
 		return
 	}
-	_ = fsutil.WriteFileAtomic(path, data, 0644)
+	_ = fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
 }
