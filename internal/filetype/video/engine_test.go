@@ -2,6 +2,7 @@ package video
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"strings"
@@ -145,7 +146,7 @@ func TestDiffSizeChanged(t *testing.T) {
 	oldData := bytes.Repeat([]byte{0x01}, 100)
 	newData := bytes.Repeat([]byte{0x02}, 200)
 
-	diff, err := engine.Diff("old.mp4", bytes.NewReader(oldData), "new.mp4", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.mp4", bytes.NewReader(oldData), "new.mp4", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff returned error: %v", err)
 	}
@@ -159,7 +160,7 @@ func TestDiffNoChange(t *testing.T) {
 	engine := NewEngine()
 	data := bytes.Repeat([]byte{0x01}, 100)
 
-	diff, err := engine.Diff("old.mp4", bytes.NewReader(data), "new.mp4", bytes.NewReader(data))
+	diff, err := engine.Diff(context.Background(), "old.mp4", bytes.NewReader(data), "new.mp4", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Diff returned error: %v", err)
 	}

@@ -74,7 +74,9 @@ func Validate(name string) error {
 
 // IsWindowsReservedName checks if a name is reserved by Windows and cannot
 // be used as a filename. Covers CON, AUX, NUL, PRN, COM0-9, LPT0-9.
+// The check is case-insensitive, matching Windows filesystem behavior.
 func IsWindowsReservedName(name string) bool {
+	name = strings.ToLower(name)
 	switch name {
 	case "con", "aux", "nul", "prn":
 		return true

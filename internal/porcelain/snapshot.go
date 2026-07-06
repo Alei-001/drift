@@ -129,7 +129,7 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 			return nil, fmt.Errorf("seek %s: %w", f.path, err)
 		}
 
-		chunks, err := chunkFile(f.path, file, engine, f.info.Size(), cfg)
+		chunks, err := chunkFile(ctx, f.path, file, engine, f.info.Size(), cfg)
 		file.Close()
 		if err != nil {
 			return nil, fmt.Errorf("chunk file %s: %w", f.path, err)
@@ -279,7 +279,7 @@ func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
 		cfg = &core.DefaultConfig().Core
 	}
 
-	chunks, err := chunkFile(filePath, file, engine, info.Size(), cfg)
+	chunks, err := chunkFile(context.Background(), filePath, file, engine, info.Size(), cfg)
 	if err != nil {
 		return core.Hash{}, fmt.Errorf("chunk file %s: %w", filePath, err)
 	}

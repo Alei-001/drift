@@ -104,11 +104,6 @@ func TestIsWindowsReservedName(t *testing.T) {
 		"compute", // 4th char 'p' is not a digit
 		"lpt",     // too short
 		"com",     // too short
-		// IsWindowsReservedName is case-sensitive; the caller (Validate)
-		// lowercases the input first, so uppercase variants are NOT
-		// recognised by this function directly.
-		"CON", "AUX", "NUL",
-		"Com1", "LPT9",
 		// Multi-digit suffixes are NOT reserved on Windows: only COM0-9
 		// and LPT0-9 (exactly 4 chars) are reserved.
 		"com10", "lpt12", "com99",
@@ -116,6 +111,32 @@ func TestIsWindowsReservedName(t *testing.T) {
 	for _, name := range notReserved {
 		if IsWindowsReservedName(name) {
 			t.Errorf("IsWindowsReservedName(%q) = true, want false", name)
+		}
+	}
+}
+
+func TestIsWindowsReservedName_Uppercase(t *testing.T) {
+	uppercase := []string{
+		"CON", "AUX", "NUL", "PRN",
+		"COM0", "COM1", "COM9",
+		"LPT0", "LPT1", "LPT9",
+	}
+	for _, name := range uppercase {
+		if !IsWindowsReservedName(name) {
+			t.Errorf("IsWindowsReservedName(%q) = false, want true", name)
+		}
+	}
+}
+
+func TestIsWindowsReservedName_MixedCase(t *testing.T) {
+	mixed := []string{
+		"Con", "Aux", "Nul", "Prn",
+		"Com1", "Lpt9",
+		"cOn", "aUx", "nUl", "pRn",
+	}
+	for _, name := range mixed {
+		if !IsWindowsReservedName(name) {
+			t.Errorf("IsWindowsReservedName(%q) = false, want true", name)
 		}
 	}
 }

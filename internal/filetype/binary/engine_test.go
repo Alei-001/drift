@@ -2,6 +2,7 @@ package binary
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -126,7 +127,7 @@ func TestChunkerFor_AppliesConfig(t *testing.T) {
 	// Smoke-test: actually chunk some data and verify it produces chunks
 	// with size <= MaxSize.
 	data := bytes.Repeat([]byte{0xAB}, 1024*1024) // 1 MB
-	chunks, err := c.Chunk(bytes.NewReader(data))
+	chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Chunk failed: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestDiff_Identical(t *testing.T) {
 	engine := NewEngine()
 	data := []byte{0x00, 0x01, 0x02, 0x03, 0xFF}
 
-	diff, err := engine.Diff("old.bin", bytes.NewReader(data), "new.bin", bytes.NewReader(data))
+	diff, err := engine.Diff(context.Background(), "old.bin", bytes.NewReader(data), "new.bin", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestDiff_Different(t *testing.T) {
 	oldData := []byte{0x00, 0x01, 0x02, 0x03}
 	newData := []byte{0x00, 0x01, 0x02, 0x04}
 
-	diff, err := engine.Diff("old.bin", bytes.NewReader(oldData), "new.bin", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.bin", bytes.NewReader(oldData), "new.bin", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -177,7 +178,7 @@ func TestDiff_Different(t *testing.T) {
 func TestDiff_BothEmpty(t *testing.T) {
 	engine := NewEngine()
 
-	diff, err := engine.Diff("old.bin", bytes.NewReader([]byte{}), "new.bin", bytes.NewReader([]byte{}))
+	diff, err := engine.Diff(context.Background(), "old.bin", bytes.NewReader([]byte{}), "new.bin", bytes.NewReader([]byte{}))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestDiff_BothEmpty(t *testing.T) {
 func TestDiff_OneEmpty(t *testing.T) {
 	engine := NewEngine()
 
-	diff, err := engine.Diff("old.bin", bytes.NewReader([]byte{}), "new.bin", bytes.NewReader([]byte{0x01}))
+	diff, err := engine.Diff(context.Background(), "old.bin", bytes.NewReader([]byte{}), "new.bin", bytes.NewReader([]byte{0x01}))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestDiff_OldReaderError(t *testing.T) {
 	engine := NewEngine()
 	errReader := &errReader{err: io.ErrUnexpectedEOF}
 
-	_, err := engine.Diff("old.bin", errReader, "new.bin", bytes.NewReader([]byte{0x01}))
+	_, err := engine.Diff(context.Background(), "old.bin", errReader, "new.bin", bytes.NewReader([]byte{0x01}))
 	if err == nil {
 		t.Fatal("expected error from broken reader, got nil")
 	}
@@ -215,7 +216,7 @@ func TestDiff_NewReaderError(t *testing.T) {
 	engine := NewEngine()
 	errReader := &errReader{err: io.ErrUnexpectedEOF}
 
-	_, err := engine.Diff("old.bin", bytes.NewReader([]byte{0x01}), "new.bin", errReader)
+	_, err := engine.Diff(context.Background(), "old.bin", bytes.NewReader([]byte{0x01}), "new.bin", errReader)
 	if err == nil {
 		t.Fatal("expected error from broken reader, got nil")
 	}

@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"context"
 	"io"
 
 	cdc "github.com/PlakarKorp/go-cdc-chunkers"
@@ -133,8 +134,9 @@ func nearestPowerOfTwoBetween(minVal, maxVal int) int {
 
 // Chunk splits r into content-defined chunks using FastCDC. Each chunk is
 // BLAKE3-hashed and zero-length chunks are skipped. The returned slice is
-// empty for an empty reader.
-func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
+// empty for an empty reader. The context is checked at each cut point so a
+// cancelled context aborts the chunking loop promptly.
+func (f *FastCDCChunker) Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk, error) {
 	// Use "fastcdc-v1.0.0" instead of legacy "fastcdc": the legacy mode
 	// forces hardcoded masks computed for an 8KB NormalSize, which would
 	// skew cut points for our 128KB/256KB/512KB sizes. The v1.0.0 variant
@@ -151,6 +153,9 @@ func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
 	var chunks []*core.Chunk
 
 	err = ch.Split(func(offset, length uint, chunkData []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		// The chunker may emit a zero-length chunk (e.g. for an empty
 		// stream); skip it so callers never see empty chunks.
 		if length == 0 {

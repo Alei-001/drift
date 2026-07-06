@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -21,7 +22,7 @@ const wholeFileChunkThreshold = 64 * 1024
 // single chunk. Large files (>64 KB) are rejected on the nil-chunker path to
 // avoid OOM; engines that return nil are expected to do so only for small
 // files (see TextEngine.ChunkerFor).
-func chunkFile(path string, r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
+func chunkFile(ctx context.Context, path string, r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
 	c := engine.ChunkerFor(fileSize, cfg)
 	if fileSize == 0 {
 		c = nil
@@ -57,7 +58,7 @@ func chunkFile(path string, r io.Reader, engine filetype.Engine, fileSize int64,
 		}
 		return []*core.Chunk{chunk}, nil
 	}
-	return c.Chunk(r)
+	return c.Chunk(ctx, r)
 }
 
 // computeFileHashFromChunks derives the file-level hash by hashing the

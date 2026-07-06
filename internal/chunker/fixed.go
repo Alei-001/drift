@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -37,12 +38,16 @@ func NewFixedChunker(chunkSize int) *FixedChunker {
 
 // Chunk splits r into consecutive fixed-size chunks. The final chunk may be
 // shorter than the chunk size if the input length is not a multiple of it.
-// Each chunk is BLAKE3-hashed.
-func (f *FixedChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
+// Each chunk is BLAKE3-hashed. The context is checked before each read so a
+// cancelled context aborts the chunking loop promptly.
+func (f *FixedChunker) Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk, error) {
 	buf := make([]byte, f.chunkSize)
 	var chunks []*core.Chunk
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		n, err := io.ReadFull(r, buf)
 		if n == 0 && err == io.EOF {
 			break

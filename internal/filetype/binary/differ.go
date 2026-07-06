@@ -2,6 +2,7 @@ package binary
 
 import (
 	"bytes"
+	"context"
 	"io"
 )
 
@@ -14,7 +15,7 @@ const binaryDiffBufSize = 32 * 1024
 // rather than buffering either file in memory. It returns a placeholder
 // "binary files differ" message when the bytes are not equal, and an empty
 // string when they are identical. Binary files have no line-based diff.
-func (e *BinaryEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+func (e *BinaryEngine) Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
 	oldBuf := make([]byte, binaryDiffBufSize)
 	newBuf := make([]byte, binaryDiffBufSize)
 	for {

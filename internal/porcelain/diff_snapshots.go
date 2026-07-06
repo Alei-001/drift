@@ -145,7 +145,7 @@ func DiffFileInSnapshots(ctx context.Context, store storage.Storer, workDir stri
 	}
 	engine := filetype.DetectEngine(filePath, header2)
 	if engine != nil && engine.Name() == "text" {
-		diff, diffErr := engine.Diff(snap1.ShortID()+"/"+filePath, fullReader1, snap2.ShortID()+"/"+filePath, fullReader2)
+		diff, diffErr := engine.Diff(ctx, snap1.ShortID()+"/"+filePath, fullReader1, snap2.ShortID()+"/"+filePath, fullReader2)
 		if diffErr != nil {
 			fmt.Fprintf(os.Stderr, "  warning: cannot diff %s: %v\n", filePath, diffErr)
 			return

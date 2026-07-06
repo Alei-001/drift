@@ -40,7 +40,7 @@ func TestChunkerFor_TextMedium(t *testing.T) {
 	if c == nil {
 		t.Fatal("expected non-nil chunker for 1MB text, got nil")
 	}
-	chunks, err := c.Chunk(bytes.NewReader(make([]byte, 100*1024)))
+	chunks, err := c.Chunk(context.Background(), bytes.NewReader(make([]byte, 100*1024)))
 	if err != nil {
 		t.Fatalf("chunking failed: %v", err)
 	}

@@ -2,6 +2,7 @@ package image
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"hash/crc32"
 	"image"
@@ -153,7 +154,7 @@ func TestDiff_FormatChanged(t *testing.T) {
 	oldData := makePNGHeader(10, 10)
 	newData := makeJPEG(10, 10)
 
-	diff, err := engine.Diff("old.png", bytes.NewReader(oldData), "new.jpg", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.png", bytes.NewReader(oldData), "new.jpg", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestDiff_DimensionsChanged(t *testing.T) {
 	oldData := makePNGHeader(1920, 1080)
 	newData := makePNGHeader(3840, 2160)
 
-	diff, err := engine.Diff("old.png", bytes.NewReader(oldData), "new.png", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.png", bytes.NewReader(oldData), "new.png", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestDiff_FileSizeChanged(t *testing.T) {
 	oldData := makePNGHeader(4, 4)
 	newData := append(append([]byte{}, oldData...), 0x00, 0x00, 0x00)
 
-	diff, err := engine.Diff("old.png", bytes.NewReader(oldData), "new.png", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.png", bytes.NewReader(oldData), "new.png", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestDiff_Identical(t *testing.T) {
 	engine := NewEngine()
 	data := makePNGHeader(8, 8)
 
-	diff, err := engine.Diff("old.png", bytes.NewReader(data), "new.png", bytes.NewReader(data))
+	diff, err := engine.Diff(context.Background(), "old.png", bytes.NewReader(data), "new.png", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestChunkerFor(t *testing.T) {
 	}
 	// Verify the chunker actually chunks data end-to-end.
 	data := bytes.Repeat([]byte("image-bytes-pattern-"), 20000)
-	chunks, err := c.Chunk(bytes.NewReader(data))
+	chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Chunk failed: %v", err)
 	}

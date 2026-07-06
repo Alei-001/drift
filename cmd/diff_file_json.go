@@ -79,7 +79,7 @@ func diffFileJSON(ctx context.Context, store storage.Storer, cwd string, snap1, 
 
 	engine := filetype.DetectEngine(normalizedPath, header2)
 	if engine != nil && engine.Name() == "text" {
-		diff, diffErr := engine.Diff(label1+"/"+filePath, fullReader1, label2+"/"+filePath, fullReader2)
+		diff, diffErr := engine.Diff(ctx, label1+"/"+filePath, fullReader1, label2+"/"+filePath, fullReader2)
 		if diffErr != nil {
 			reportFailed("Diff", "diff", fmt.Sprintf("cannot diff %s: %s.", filePath, diffErr), "")
 			return ErrSilent
@@ -182,7 +182,7 @@ func diffWorkspaceFileJSON(ctx context.Context, store storage.Storer, cwd string
 	snapReader := stream.NewChunkReader(ctx, store, snapEntry.Chunks)
 
 	if engine != nil && engine.Name() == "text" {
-		diff, diffErr := engine.Diff(snapLabel+"/"+filePath, snapReader, "workspace/"+filePath, workReader)
+		diff, diffErr := engine.Diff(ctx, snapLabel+"/"+filePath, snapReader, "workspace/"+filePath, workReader)
 		if diffErr != nil {
 			reportFailed("Diff", "diff", fmt.Sprintf("cannot diff %s: %s.", filePath, diffErr), "")
 			return ErrSilent

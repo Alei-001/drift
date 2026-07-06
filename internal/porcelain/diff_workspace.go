@@ -170,7 +170,7 @@ func DiffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, work
 	newLabel := "workspace/" + filePath
 
 	if engine != nil && engine.Name() == "text" {
-		diff, diffErr := engine.Diff(oldLabel, snapReader, newLabel, workReader)
+		diff, diffErr := engine.Diff(ctx, oldLabel, snapReader, newLabel, workReader)
 		if diffErr != nil {
 			return fmt.Errorf("diff %s: %w", filePath, diffErr)
 		}

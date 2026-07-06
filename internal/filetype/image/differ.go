@@ -2,6 +2,7 @@ package image
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 
@@ -22,7 +23,7 @@ import (
 // The full file bytes are never held in memory: only the fixed-size header
 // buffer and the 32-byte hash digest are retained, so memory stays constant
 // regardless of image size.
-func (e *ImageEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+func (e *ImageEngine) Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
 	oldHeader, oldRest, err := peekDiffHeader(oldReader)
 	if err != nil {
 		return "", fmt.Errorf("read old image %s: %w", oldPath, err)

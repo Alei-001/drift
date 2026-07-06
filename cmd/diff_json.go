@@ -198,7 +198,8 @@ func diffWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cf
 func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *core.Snapshot, label1, label2 string) error {
 	stats, err := computeStatSnapshots(ctx, store, snap1, snap2)
 	if err != nil {
-		return err
+		reportFailed("Diff", "diff", err.Error(), "")
+		return ErrSilent
 	}
 	return outputStatJSON(label1, label2, stats)
 }
@@ -207,7 +208,8 @@ func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, sna
 func diffStatWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
 	stats, err := computeStatWorkspace(ctx, store, cwd, cfg, snap)
 	if err != nil {
-		return err
+		reportFailed("Diff", "diff", err.Error(), "")
+		return ErrSilent
 	}
 	return outputStatJSON(snapLabel, "workspace", stats)
 }

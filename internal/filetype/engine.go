@@ -1,6 +1,7 @@
 package filetype
 
 import (
+	"context"
 	"io"
 
 	"github.com/your-org/drift/internal/chunker"
@@ -45,11 +46,12 @@ type ChunkerSelector interface {
 
 // Differ compares two files and returns a unified diff or summary.
 // Implementations read content streaming from oldReader/newReader rather
-// than receiving the whole file in memory.
+// than receiving the whole file in memory. The context lets callers cancel
+// a long-running diff mid-stream.
 type Differ interface {
 	// Diff compares two files. oldPath/newPath are used for the diff header
 	// and file type context; oldReader/newReader provide streaming content.
-	Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error)
+	Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error)
 }
 
 // Previewer generates a short, human-readable preview of a file.

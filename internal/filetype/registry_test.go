@@ -2,6 +2,7 @@ package filetype
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -140,7 +141,7 @@ func TestTextEnginePreviewDefaultLines(t *testing.T) {
 
 func TestBinaryDiff(t *testing.T) {
 	engine := DetectEngine("a.bin", []byte{0x00, 0x01})
-	diff, err := engine.Diff("old.bin", bytes.NewReader([]byte{0x00, 0x01}), "new.bin", bytes.NewReader([]byte{0x00, 0x02}))
+	diff, err := engine.Diff(context.Background(), "old.bin", bytes.NewReader([]byte{0x00, 0x01}), "new.bin", bytes.NewReader([]byte{0x00, 0x02}))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestBinaryDiff(t *testing.T) {
 	}
 
 	// Same data should produce empty diff
-	diff, err = engine.Diff("old.bin", bytes.NewReader([]byte{0x00, 0x01}), "new.bin", bytes.NewReader([]byte{0x00, 0x01}))
+	diff, err = engine.Diff(context.Background(), "old.bin", bytes.NewReader([]byte{0x00, 0x01}), "new.bin", bytes.NewReader([]byte{0x00, 0x01}))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestTextDiff(t *testing.T) {
 
 	oldData := []byte("line1\nline2\nline3\n")
 	newData := []byte("line1\nline2_modified\nline3\n")
-	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestTextDiffIdentical(t *testing.T) {
 	engine := DetectEngine("file.txt", []byte("text"))
 
 	data := []byte("line1\nline2\nline3\n")
-	diff, err := engine.Diff("old.txt", bytes.NewReader(data), "new.txt", bytes.NewReader(data))
+	diff, err := engine.Diff(context.Background(), "old.txt", bytes.NewReader(data), "new.txt", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Diff failed: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestTextDiff_CRLF(t *testing.T) {
 	engine := DetectEngine("file.txt", []byte("text"))
 	oldData := []byte("line1\r\nline2\r\nline3\r\n")
 	newData := []byte("line1\nline2\nline3\n")
-	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,7 @@ func TestTextDiff_HunkMerge(t *testing.T) {
 	engine := DetectEngine("file.txt", []byte("text"))
 	oldData := []byte("line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n")
 	newData := []byte("line1\nCHANGED2\nline3\nline4\nline5\nline6\nCHANGED7\nline8\n")
-	diff, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
+	diff, err := engine.Diff(context.Background(), "old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestTextDiff_LargeFile(t *testing.T) {
 	newLines[5000] = "CHANGED"
 	oldData := []byte(strings.Join(oldLines, "\n"))
 	newData := []byte(strings.Join(newLines, "\n"))
-	_, err := engine.Diff("old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
+	_, err := engine.Diff(context.Background(), "old.txt", bytes.NewReader(oldData), "new.txt", bytes.NewReader(newData))
 	if err != nil {
 		t.Fatal(err)
 	}

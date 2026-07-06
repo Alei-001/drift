@@ -170,7 +170,7 @@ func computeSnapFileStat(ctx context.Context, store storage.Storer, e1, e2 *core
 	if engine == nil || engine.Name() != "text" {
 		return 0, 0, true
 	}
-	diff, err := engine.Diff(path, bytes.NewReader(c1), path, bytes.NewReader(c2))
+	diff, err := engine.Diff(ctx, path, bytes.NewReader(c1), path, bytes.NewReader(c2))
 	if err != nil {
 		return 0, 0, true
 	}
@@ -197,7 +197,7 @@ func computeWorkFileStat(ctx context.Context, store storage.Storer, workPath str
 	if engine == nil || engine.Name() != "text" {
 		return 0, 0, true
 	}
-	diff, err := engine.Diff(e1.Path, bytes.NewReader(c1), e1.Path, bytes.NewReader(c2))
+	diff, err := engine.Diff(ctx, e1.Path, bytes.NewReader(c1), e1.Path, bytes.NewReader(c2))
 	if err != nil {
 		return 0, 0, true
 	}

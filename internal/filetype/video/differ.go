@@ -1,6 +1,7 @@
 package video
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -15,7 +16,7 @@ import (
 // drift only invokes video Diff on explicitly diffed files, never on bulk
 // snapshot diffs. The readers are consumed entirely because the byte count is
 // the comparison signal.
-func (e *VideoEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+func (e *VideoEngine) Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
 	oldSize, err := io.Copy(io.Discard, oldReader)
 	if err != nil {
 		return "", fmt.Errorf("read old video %s: %w", oldPath, err)

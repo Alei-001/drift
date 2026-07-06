@@ -1,5 +1,7 @@
 package text
 
+import "context"
+
 type editAction int
 
 const (
@@ -18,48 +20,59 @@ const maxDiffLines = 500000
 // myersDiff computes the edit script using the Myers diff algorithm with
 // Hirschberg's divide-and-conquer strategy for linear space. O(N*M) time,
 // O(N) space. Inputs exceeding maxDiffLines fall back to coarse prefix/suffix
-// diff to avoid excessive runtime.
-func myersDiff(a, b []string) []editOp {
+// diff to avoid excessive runtime. The context is checked before dispatching
+// so a cancelled caller aborts before the DP work begins.
+func myersDiff(ctx context.Context, a, b []string) ([]editOp, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(a) > maxDiffLines || len(b) > maxDiffLines {
-		return coarseDiff(a, b)
+		return coarseDiff(a, b), nil
 	}
 	if !hasCommonLines(a, b) {
-		return coarseDiff(a, b)
+		return coarseDiff(a, b), nil
 	}
-	return hirschbergDiff(a, b)
+	return hirschbergDiff(ctx, a, b)
 }
 
 // hirschbergDiff computes the edit script using Hirschberg's
 // divide-and-conquer algorithm. Splits a at its midpoint, finds the
 // optimal split in b via LCS row computation, then recurses on both
-// halves. O(N) space per level.
-func hirschbergDiff(a, b []string) []editOp {
+// halves. O(N) space per level. The context is checked before each
+// recursive call so a cancelled caller aborts the recursion promptly.
+func hirschbergDiff(ctx context.Context, a, b []string) ([]editOp, error) {
 	m, n := len(a), len(b)
 	if m == 0 && n == 0 {
-		return nil
+		return nil, nil
 	}
 	if m == 0 {
 		script := make([]editOp, 0, n)
 		for _, line := range b {
 			script = append(script, editOp{editInsert, line})
 		}
-		return script
+		return script, nil
 	}
 	if n == 0 {
 		script := make([]editOp, 0, m)
 		for _, line := range a {
 			script = append(script, editOp{editDelete, line})
 		}
-		return script
+		return script, nil
 	}
 	// Base case: small enough for classic Myers
 	if m <= 16 || n <= 16 {
-		return myersDiffBasic(a, b)
+		return myersDiffBasic(ctx, a, b)
 	}
 
 	mid := m / 2
-	lf := lcsLastRow(a[:mid], b)
-	lb := lcsLastRowReverse(a[mid:], b)
+	lf, err := lcsLastRow(ctx, a[:mid], b)
+	if err != nil {
+		return nil, err
+	}
+	lb, err := lcsLastRowReverse(ctx, a[mid:], b)
+	if err != nil {
+		return nil, err
+	}
 
 	bestJ := 0
 	bestSum := -1
@@ -71,68 +84,21 @@ func hirschbergDiff(a, b []string) []editOp {
 		}
 	}
 
-	left := hirschbergDiff(a[:mid], b[:bestJ])
-	right := hirschbergDiff(a[mid:], b[bestJ:])
-	return append(left, right...)
-}
-
-// lcsLastRow computes the last row of the LCS DP table for a vs b.
-// result[j] = LCS(a, b[0:j]). O(n) space.
-func lcsLastRow(a, b []string) []int {
-	n := len(b)
-	prev := make([]int, n+1)
-	curr := make([]int, n+1)
-	for i := 0; i < len(a); i++ {
-		curr[0] = 0
-		for j := 0; j < n; j++ {
-			if a[i] == b[j] {
-				curr[j+1] = prev[j] + 1
-			} else if prev[j+1] >= curr[j] {
-				curr[j+1] = prev[j+1]
-			} else {
-				curr[j+1] = curr[j]
-			}
-		}
-		prev, curr = curr, prev
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	return prev
-}
-
-// lcsLastRowReverse computes LCS(a, b[j:n]) for all j.
-// result[j] = LCS(a, b[j:n]). O(n) space.
-func lcsLastRowReverse(a, b []string) []int {
-	n := len(b)
-	ra := make([]string, len(a))
-	for i := range a {
-		ra[i] = a[len(a)-1-i]
+	left, err := hirschbergDiff(ctx, a[:mid], b[:bestJ])
+	if err != nil {
+		return nil, err
 	}
-	rb := make([]string, n)
-	for i := range b {
-		rb[i] = b[n-1-i]
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	row := lcsLastRow(ra, rb)
-	// row[j] = LCS(ra, rb[0:j]) = LCS(a, b[n-j:n])
-	// result[j] = LCS(a, b[j:n]) = row[n-j]
-	result := make([]int, n+1)
-	for j := 0; j <= n; j++ {
-		result[j] = row[n-j]
+	right, err := hirschbergDiff(ctx, a[mid:], b[bestJ:])
+	if err != nil {
+		return nil, err
 	}
-	return result
-}
-
-// hasCommonLines checks if any line in a appears in b.
-// O(m+n) time, O(n) space.
-func hasCommonLines(a, b []string) bool {
-	set := make(map[string]struct{}, len(b))
-	for _, line := range b {
-		set[line] = struct{}{}
-	}
-	for _, line := range a {
-		if _, ok := set[line]; ok {
-			return true
-		}
-	}
-	return false
+	return append(left, right...), nil
 }
 
 // coarseDiff produces a simple prefix/suffix diff for oversized inputs
@@ -166,25 +132,25 @@ func coarseDiff(a, b []string) []editOp {
 // myersDiffBasic computes the edit script using the classic Myers diff
 // algorithm. O(ND) time, O(D*(N+M)) space. Used as the base case for
 // Hirschberg recursion where inputs are small enough that trace storage
-// is negligible.
-func myersDiffBasic(a, b []string) []editOp {
+// is negligible. The context is checked at the top of the d-loop.
+func myersDiffBasic(ctx context.Context, a, b []string) ([]editOp, error) {
 	m, n := len(a), len(b)
 	if m == 0 && n == 0 {
-		return nil
+		return nil, nil
 	}
 	if m == 0 {
 		script := make([]editOp, 0, n)
 		for _, line := range b {
 			script = append(script, editOp{editInsert, line})
 		}
-		return script
+		return script, nil
 	}
 	if n == 0 {
 		script := make([]editOp, 0, m)
 		for _, line := range a {
 			script = append(script, editOp{editDelete, line})
 		}
-		return script
+		return script, nil
 	}
 
 	maxD := m + n
@@ -194,6 +160,9 @@ func myersDiffBasic(a, b []string) []editOp {
 
 	d := 0
 	for ; d <= maxD; d++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		vSnap := make([]int, len(v))
 		copy(vSnap, v)
 		trace = append(trace, vSnap)
@@ -262,5 +231,5 @@ func myersDiffBasic(a, b []string) []editOp {
 		script[lo], script[hi] = script[hi], script[lo]
 	}
 
-	return script
+	return script, nil
 }

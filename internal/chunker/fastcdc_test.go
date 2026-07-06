@@ -2,6 +2,7 @@ package chunker
 
 import (
 	"bytes"
+	"context"
 	"testing"
 )
 
@@ -46,7 +47,7 @@ func TestNewFastCDCChunkerWithParams_SmallText(t *testing.T) {
 
 	// 200KB of deterministic data (>> maxSize so multiple chunks are produced).
 	data := generateTestData(200*1024, 42)
-	chunks, err := c.Chunk(bytes.NewReader(data))
+	chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Chunk failed: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestNewFastCDCChunkerWithParams_LargeBinary(t *testing.T) {
 
 	// 10MB of deterministic data (>> maxSize so multiple chunks are produced).
 	data := generateTestData(10*1024*1024, 7)
-	chunks, err := c.Chunk(bytes.NewReader(data))
+	chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("Chunk failed: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestNewFastCDCChunkerWithParams_InvalidParams(t *testing.T) {
 
 			// Chunk() must work on the clamped params.
 			data := generateTestData(256*1024, 1)
-			chunks, err := c.Chunk(bytes.NewReader(data))
+			chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
 			if err != nil {
 				t.Fatalf("Chunk failed on clamped params: %v", err)
 			}
@@ -179,7 +180,7 @@ func TestNewFastCDCChunkerWithParams_PreservesData(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			original := generateTestData(tc.dataSize, 99)
 			c := NewFastCDCChunkerWithParams(tc.minSize, tc.avgSize, tc.maxSize)
-			chunks, err := c.Chunk(bytes.NewReader(original))
+			chunks, err := c.Chunk(context.Background(), bytes.NewReader(original))
 			if err != nil {
 				t.Fatalf("Chunk failed: %v", err)
 			}

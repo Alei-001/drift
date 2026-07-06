@@ -1,12 +1,14 @@
 package chunker
 
 import (
+	"context"
 	"io"
 
 	"github.com/your-org/drift/internal/core"
 )
 
-// Chunker splits an io.Reader into content-addressed chunks.
+// Chunker splits an io.Reader into content-addressed chunks. The context
+// lets callers cancel a long-running chunking operation mid-stream.
 type Chunker interface {
-	Chunk(r io.Reader) ([]*core.Chunk, error)
+	Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk, error)
 }

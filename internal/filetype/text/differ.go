@@ -2,6 +2,7 @@ package text
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"strings"
 )
@@ -9,8 +10,9 @@ import (
 // Diff produces a unified diff between two text files using Myers diff.
 // Content is read streaming from oldReader/newReader via a line scanner;
 // the Myers algorithm still requires both line arrays in memory, but the
-// file bytes are never buffered whole.
-func (e *TextEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+// file bytes are never buffered whole. The context is threaded into the
+// Myers/Hirschberg loops so a cancelled context aborts the diff promptly.
+func (e *TextEngine) Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
 	oldLines, err := readLines(oldReader)
 	if err != nil {
 		return "", err
@@ -24,7 +26,10 @@ func (e *TextEngine) Diff(oldPath string, oldReader io.Reader, newPath string, n
 		return "", nil
 	}
 
-	script := myersDiff(oldLines, newLines)
+	script, err := myersDiff(ctx, oldLines, newLines)
+	if err != nil {
+		return "", err
+	}
 
 	if isAllMatch(script) {
 		return "", nil
