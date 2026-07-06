@@ -68,6 +68,9 @@ func computeStatSnapshots(ctx context.Context, store storage.Storer, snap1, snap
 		delete(snap1Files, e2.Path)
 	}
 	for path, e1 := range snap1Files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		ins, del, bin := computeSnapFileStat(ctx, store, e1, nil)
 		stats = append(stats, fileStat{path: path, insertions: ins, deletions: del, binary: bin, oldSize: e1.Size})
 	}

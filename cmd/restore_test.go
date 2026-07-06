@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,7 +55,7 @@ func TestComputeRestoreChanges_HashDetectsSameSizeChange(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	added, modified, deleted, err := computeRestoreChanges(dir, &cfg, snap)
+	added, modified, deleted, err := computeRestoreChanges(context.Background(), dir, &cfg, snap)
 	if err != nil {
 		t.Fatalf("computeRestoreChanges: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestComputeRestoreChanges_IdenticalFileNotModified(t *testing.T) {
 		},
 	}
 
-	added, modified, deleted, err := computeRestoreChanges(dir, &cfg, snap)
+	added, modified, deleted, err := computeRestoreChanges(context.Background(), dir, &cfg, snap)
 	if err != nil {
 		t.Fatalf("computeRestoreChanges: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestComputeRestoreChanges_DifferentSizeModified(t *testing.T) {
 		t.Fatalf("write modified: %v", err)
 	}
 
-	_, modified, _, err := computeRestoreChanges(dir, &cfg, snap)
+	_, modified, _, err := computeRestoreChanges(context.Background(), dir, &cfg, snap)
 	if err != nil {
 		t.Fatalf("computeRestoreChanges: %v", err)
 	}

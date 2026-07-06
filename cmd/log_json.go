@@ -32,6 +32,9 @@ type logJSONData struct {
 func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.SnapshotSummary, branchMap map[string][]string) error {
 	entries := make([]logJSONEntry, 0, len(snapshots))
 	for _, s := range snapshots {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		add, mod, del := countSnapshotChanges(ctx, store, s)
 		tags := make([]string, 0, len(s.Tags))
 		for _, t := range s.Tags {

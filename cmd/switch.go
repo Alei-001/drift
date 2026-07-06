@@ -25,7 +25,7 @@ var switchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := openProjectOrReport("Switch", cwd)
+		store, cfg, err := openProjectOrReport("Switch", "switch", cwd)
 		if err != nil {
 			return err
 		}

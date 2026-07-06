@@ -29,7 +29,7 @@ var tagListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Tag", cwd)
+		store, _, err := openProjectOrReport("Tag", "tag", cwd)
 		if err != nil {
 			return err
 		}
@@ -93,7 +93,7 @@ var tagAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Tag", cwd)
+		store, _, err := openProjectOrReport("Tag", "tag", cwd)
 		if err != nil {
 			return err
 		}
@@ -117,8 +117,10 @@ var tagAddCmd = &cobra.Command{
 			}
 			return ErrSilent
 		}
-		statusOK("Tag added")
-		fmt.Printf("'%s' -> %s\n", name, snap.ShortID())
+		if !globalQuiet {
+			statusOK("Tag added")
+			fmt.Printf("'%s' -> %s\n", name, snap.ShortID())
+		}
 		return nil
 	},
 }
@@ -135,7 +137,7 @@ var tagDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Tag", cwd)
+		store, _, err := openProjectOrReport("Tag", "tag", cwd)
 		if err != nil {
 			return err
 		}
@@ -150,8 +152,10 @@ var tagDeleteCmd = &cobra.Command{
 			}
 			return ErrSilent
 		}
-		statusOK("Tag deleted")
-		fmt.Printf("'%s' has been removed.\n", name)
+		if !globalQuiet {
+			statusOK("Tag deleted")
+			fmt.Printf("'%s' has been removed.\n", name)
+		}
 		return nil
 	},
 }
@@ -168,7 +172,7 @@ var tagRenameCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Tag", cwd)
+		store, _, err := openProjectOrReport("Tag", "tag", cwd)
 		if err != nil {
 			return err
 		}

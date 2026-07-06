@@ -48,7 +48,7 @@ file changes of a single snapshot.`,
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Log", cwd)
+		store, _, err := openProjectOrReport("Log", "log", cwd)
 		if err != nil {
 			return err
 		}
@@ -67,7 +67,7 @@ file changes of a single snapshot.`,
 			// own commits, excluding commits inherited from parent branches
 			// (which are attributed to the parent by the nearest-tip rule).
 			if _, refErr := store.GetRef(ctx, "heads/"+logBranch); refErr != nil {
-				statusFailed("Log", fmt.Sprintf("branch '%s' not found.", logBranch), "use 'drift branch' to list existing branches.")
+				reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", logBranch), "use 'drift branch' to list existing branches.")
 				return ErrSilent
 			}
 			allSnaps, err := store.ListSnapshots(ctx, &storage.ListOptions{})
@@ -122,7 +122,7 @@ file changes of a single snapshot.`,
 			if logBranch != "" {
 				hint = fmt.Sprintf("branch '%s' has no snapshots yet.", logBranch)
 			}
-			statusFailed("Log", "no snapshots yet.", hint)
+			reportFailed("Log", "log", "no snapshots yet.", hint)
 			return ErrSilent
 		}
 
@@ -146,7 +146,10 @@ file changes of a single snapshot.`,
 		label += ")"
 		fmt.Printf(">>> %s\n", label)
 		for _, s := range filtered {
-			timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
 			add, mod, del := countSnapshotChanges(ctx, store, s)
 			changes := formatChangesCompact(add, mod, del)
 
@@ -199,7 +202,7 @@ file changes of a single snapshot.`,
 func logDetailMode(ctx context.Context, store storage.Storer, id string) error {
 	snapshot := resolveSnapshot(ctx, store, id)
 	if snapshot == nil {
-		statusFailed("Log", fmt.Sprintf("snapshot not found: %s.", id), "use 'drift log' to list available snapshots.")
+		reportFailed("Log", "log", fmt.Sprintf("snapshot not found: %s.", id), "use 'drift log' to list available snapshots.")
 		return ErrSilent
 	}
 

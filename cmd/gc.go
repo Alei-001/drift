@@ -31,7 +31,7 @@ func runGC(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	store, _, err := openProjectOrReport("GC", cwd)
+	store, _, err := openProjectOrReport("GC", "gc", cwd)
 	if err != nil {
 		return err
 	}

@@ -254,6 +254,9 @@ func UndoLastSave(ctx context.Context, store storage.Storer, workDir string, cfg
 	}
 	newIndex := &core.Index{UpdatedAt: time.Now().Unix()}
 	for _, entry := range prevSnap.Files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		newIndex.Entries = append(newIndex.Entries, core.IndexEntry{
 			Path:    entry.Path,
 			Size:    entry.Size,

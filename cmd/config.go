@@ -76,7 +76,7 @@ func runConfigList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	store, cfg, err := openProjectOrReport("Config", cwd)
+	store, cfg, err := openProjectOrReport("Config", "config", cwd)
 	if err != nil {
 		return err
 	}
@@ -133,7 +133,7 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	store, cfg, err := openProjectOrReport("Config", cwd)
+	store, cfg, err := openProjectOrReport("Config", "config", cwd)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	store, cfg, err := openProjectOrReport("Config", cwd)
+	store, cfg, err := openProjectOrReport("Config", "config", cwd)
 	if err != nil {
 		return err
 	}

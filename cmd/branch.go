@@ -31,7 +31,7 @@ var branchListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Branch", cwd)
+		store, _, err := openProjectOrReport("Branch", "branch", cwd)
 		if err != nil {
 			return err
 		}
@@ -95,7 +95,7 @@ var branchCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Branch", cwd)
+		store, _, err := openProjectOrReport("Branch", "branch", cwd)
 		if err != nil {
 			return err
 		}
@@ -118,8 +118,10 @@ var branchCreateCmd = &cobra.Command{
 				sid = headRef.Target.String()
 			}
 		}
-		statusOK("Branch created")
-		fmt.Printf("'%s' at snapshot %s.\n", name, sid)
+		if !globalQuiet {
+			statusOK("Branch created")
+			fmt.Printf("'%s' at snapshot %s.\n", name, sid)
+		}
 		return nil
 	},
 }
@@ -137,7 +139,7 @@ var branchDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Branch", cwd)
+		store, _, err := openProjectOrReport("Branch", "branch", cwd)
 		if err != nil {
 			return err
 		}
@@ -157,8 +159,10 @@ var branchDeleteCmd = &cobra.Command{
 			}
 			return ErrSilent
 		}
-		statusOK("Branch deleted")
-		fmt.Printf("'%s' has been removed.\n", name)
+		if !globalQuiet {
+			statusOK("Branch deleted")
+			fmt.Printf("'%s' has been removed.\n", name)
+		}
 		return nil
 	},
 }
@@ -181,7 +185,7 @@ var branchRenameCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Branch", cwd)
+		store, _, err := openProjectOrReport("Branch", "branch", cwd)
 		if err != nil {
 			return err
 		}

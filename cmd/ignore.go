@@ -29,7 +29,7 @@ var ignoreListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Ignore", cwd)
+		store, _, err := openProjectOrReport("Ignore", "ignore", cwd)
 		if err != nil {
 			return err
 		}
@@ -75,7 +75,7 @@ var ignoreAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Ignore", cwd)
+		store, _, err := openProjectOrReport("Ignore", "ignore", cwd)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ var ignoreRemoveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Ignore", cwd)
+		store, _, err := openProjectOrReport("Ignore", "ignore", cwd)
 		if err != nil {
 			return err
 		}

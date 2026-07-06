@@ -189,6 +189,9 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 	var cleanErr error
 	if len(failures) == 0 {
 		cleanErr = fsutil.Walk(workDir, ignoreFile, func(path string, info os.FileInfo) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if info.IsDir() {
 				return nil
 			}
@@ -210,6 +213,9 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 	// the workspace state is consistent, then report the cleanup failure.
 	newIndex := &core.Index{UpdatedAt: time.Now().Unix()}
 	for _, entry := range snap.Files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if failedSet[entry.Path] {
 			continue
 		}

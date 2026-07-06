@@ -43,7 +43,7 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Show", cwd)
+		store, _, err := openProjectOrReport("Show", "show", cwd)
 		if err != nil {
 			return err
 		}

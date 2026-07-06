@@ -19,7 +19,7 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := openProjectOrReport("Status", cwd)
+		store, cfg, err := openProjectOrReport("Status", "status", cwd)
 		if err != nil {
 			return err
 		}

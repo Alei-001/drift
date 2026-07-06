@@ -29,7 +29,7 @@ var diffCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := openProjectOrReport("Diff", cwd)
+		store, cfg, err := openProjectOrReport("Diff", "diff", cwd)
 		if err != nil {
 			return err
 		}

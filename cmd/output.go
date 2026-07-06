@@ -52,13 +52,14 @@ func statusFailed(action string, errMsg string, hint string) {
 	}
 }
 
-// openProjectOrReport opens the drift project at cwd. On failure it prints
-// a user-friendly statusFailed block and returns ErrSilent so the caller
+// openProjectOrReport opens the drift project at cwd. On failure it reports
+// the error via reportFailed (JSON-aware) and returns ErrSilent so the caller
 // can `return ErrSilent` directly. On success it returns the store and cfg.
-func openProjectOrReport(action, cwd string) (storage.Storer, *core.Config, error) {
+// command is the JSON "command" field value (e.g. "log", "branch").
+func openProjectOrReport(action, command, cwd string) (storage.Storer, *core.Config, error) {
 	store, cfg, err := porcelain.OpenProject(cwd)
 	if err != nil {
-		statusFailed(action, "not a drift repository.", "use 'drift init' to create one.")
+		reportFailed(action, command, "not a drift repository.", "use 'drift init' to create one.")
 		return nil, nil, ErrSilent
 	}
 	return store, cfg, nil
@@ -122,6 +123,9 @@ func countLinesFromChunks(ctx context.Context, store interface {
 }, entry core.FileEntry) int {
 	count := 0
 	for _, h := range entry.Chunks {
+		if err := ctx.Err(); err != nil {
+			return 0
+		}
 		chunk, err := store.GetChunk(ctx, h)
 		if err != nil {
 			return 0

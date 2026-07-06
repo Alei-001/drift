@@ -41,10 +41,12 @@ var watchOnCmd = &cobra.Command{
 			statusFailed("Watch", err.Error(), "use 'drift watch off' to stop it first.")
 			return ErrSilent
 		}
-		statusActive("Watching")
-		fmt.Printf("Daemon started (PID %d). Auto-save every %ds.\n", pid, watchInterval)
-		fmt.Printf("Keep last %d auto-saves (older ones auto-pruned).\n", watchKeep)
-		fmt.Println("Use 'drift watch off' to stop, 'drift watch status' to check.")
+		if !globalQuiet {
+			statusActive("Watching")
+			fmt.Printf("Daemon started (PID %d). Auto-save every %ds.\n", pid, watchInterval)
+			fmt.Printf("Keep last %d auto-saves (older ones auto-pruned).\n", watchKeep)
+			fmt.Println("Use 'drift watch off' to stop, 'drift watch status' to check.")
+		}
 		return nil
 	},
 }
@@ -131,7 +133,7 @@ var watchDaemonCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := openProjectOrReport("Watch", cwd)
+		store, cfg, err := openProjectOrReport("Watch", "watch", cwd)
 		if err != nil {
 			return err
 		}

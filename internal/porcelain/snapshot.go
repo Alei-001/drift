@@ -64,6 +64,9 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	}
 	var workspaceFiles []fileInfo
 	err = fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if info.IsDir() {
 			return nil
 		}

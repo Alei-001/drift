@@ -34,7 +34,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	store, _, err := openProjectOrReport("Check", cwd)
+	store, _, err := openProjectOrReport("Check", "check", cwd)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -30,7 +31,7 @@ var restoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := openProjectOrReport("Restore", cwd)
+		store, cfg, err := openProjectOrReport("Restore", "restore", cwd)
 		if err != nil {
 			return err
 		}
@@ -62,7 +63,7 @@ var restoreCmd = &cobra.Command{
 		var add, mod []core.FileEntry
 		var del []string
 		if filePath == "" {
-			add, mod, del, err = computeRestoreChanges(cwd, &cfg.Core, snapshot)
+			add, mod, del, err = computeRestoreChanges(ctx, cwd, &cfg.Core, snapshot)
 			if err != nil {
 				return err
 			}
@@ -150,13 +151,16 @@ var restoreCmd = &cobra.Command{
 // the snapshot (deleted). Modification is detected by comparing content
 // hashes (BLAKE3) rather than modtime, since tools like "cp -p" preserve
 // modtime while changing content.
-func computeRestoreChanges(workDir string, cfg *core.CoreConfig, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string, err error) {
+func computeRestoreChanges(ctx context.Context, workDir string, cfg *core.CoreConfig, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string, err error) {
 	type fileInfo struct {
 		size int64
 		path string
 	}
 	workspaceFiles := make(map[string]fileInfo)
 	walkErr := fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if info.IsDir() {
 			return nil
 		}
@@ -173,6 +177,9 @@ func computeRestoreChanges(workDir string, cfg *core.CoreConfig, snapshot *core.
 
 	snapFiles := make(map[string]bool)
 	for _, f := range snapshot.Files {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, nil, err
+		}
 		snapFiles[f.Path] = true
 		if ws, ok := workspaceFiles[f.Path]; !ok {
 			added = append(added, f)
