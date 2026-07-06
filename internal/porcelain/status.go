@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -44,11 +45,14 @@ func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir stri
 
 	index, err := store.GetIndex(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("read index: %w", err)
+		if !errors.Is(err, storage.ErrNotFound) {
+			return nil, fmt.Errorf("read index: %w", err)
+		}
+		index = &core.Index{}
 	}
 
 	workspaceFiles := make(map[string]os.FileInfo)
-	err = fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
+	err = fsutil.WalkCtx(ctx, workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
 		if info.IsDir() {
 			return nil
 		}
@@ -67,6 +71,9 @@ func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir stri
 	printed := make(map[string]bool)
 
 	for _, entry := range index.Entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if info, ok := workspaceFiles[entry.Path]; ok {
 			if info.Size() != entry.Size || info.ModTime().UnixNano() != entry.ModTime {
 				summary.Modified = append(summary.Modified, entry.Path)
@@ -79,6 +86,9 @@ func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir stri
 	}
 
 	for path := range workspaceFiles {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !printed[path] {
 			summary.Added = append(summary.Added, path)
 		}

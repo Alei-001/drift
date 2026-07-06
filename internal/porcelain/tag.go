@@ -188,6 +188,9 @@ func RenameTag(ctx context.Context, store storage.Storer, cwd string, oldName, n
 	if oldName == "" {
 		return fmt.Errorf("old tag name is required")
 	}
+	if err := refname.Validate("tags/" + oldName); err != nil {
+		return fmt.Errorf("invalid old tag name: %w", err)
+	}
 	if newName == "" {
 		return fmt.Errorf("new tag name is required")
 	}

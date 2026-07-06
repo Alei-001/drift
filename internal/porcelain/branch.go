@@ -140,6 +140,9 @@ func RenameBranch(ctx context.Context, store storage.Storer, cwd, oldName, newNa
 	if oldName == "" {
 		return fmt.Errorf("old branch name is empty")
 	}
+	if err := refname.Validate("heads/" + oldName); err != nil {
+		return fmt.Errorf("invalid old branch name: %w", err)
+	}
 	if newName == "" {
 		return fmt.Errorf("new branch name is empty")
 	}

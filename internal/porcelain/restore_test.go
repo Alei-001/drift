@@ -398,3 +398,89 @@ func TestRestore_PartialFailureReturnsBackupID(t *testing.T) {
 		t.Errorf("error message should contain backup ID %q, got: %v", backupID, err)
 	}
 }
+
+// TestRestore_FullRestoreMovesHEADToTarget verifies that a full restore
+// updates HEAD (and the current branch ref) to point at the restored
+// snapshot. Without this, the workspace would match the restored snapshot
+// while HEAD still references the pre-restore tip, tearing the workspace
+// apart from HEAD and breaking the history chain on the next save
+// (architecture.md §5.2 step 3).
+func TestRestore_FullRestoreMovesHEADToTarget(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := InitProject(dir); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+
+	store, _, err := OpenProject(dir)
+	if err != nil {
+		t.Fatalf("OpenProject failed: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// snap1: initial content.
+	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644); err != nil {
+		t.Fatalf("write file1: %v", err)
+	}
+	snap1, err := CreateSnapshot(ctx, store, dir, "first commit", "test", nil, nil)
+	if err != nil {
+		t.Fatalf("first CreateSnapshot failed: %v", err)
+	}
+
+	// snap2: modify file so a new snapshot is created (HEAD -> snap2).
+	// Use a different-length content so CreateSnapshot detects the change
+	// (it short-circuits on matching size+modtime).
+	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v2 modified"), 0644); err != nil {
+		t.Fatalf("modify file1: %v", err)
+	}
+	snap2, err := CreateSnapshot(ctx, store, dir, "second commit", "test", nil, nil)
+	if err != nil {
+		t.Fatalf("second CreateSnapshot failed: %v", err)
+	}
+
+	// Sanity: HEAD should be at snap2 before restore.
+	headBefore, err := store.GetRef(ctx, "HEAD")
+	if err != nil {
+		t.Fatalf("GetRef HEAD before restore: %v", err)
+	}
+	if headBefore.Target != snap2.ID.Hash {
+		t.Fatalf("precondition: HEAD should be at snap2 %s, got %s",
+			snap2.ID.Hash.String(), headBefore.Target.String())
+	}
+
+	// Full restore to snap1.
+	if _, err := RestoreSnapshot(ctx, store, dir, snap1.ID, "", true, nil); err != nil {
+		t.Fatalf("RestoreSnapshot failed: %v", err)
+	}
+
+	// HEAD must now point at snap1 (not snap2).
+	headAfter, err := store.GetRef(ctx, "HEAD")
+	if err != nil {
+		t.Fatalf("GetRef HEAD after restore: %v", err)
+	}
+	if headAfter.Target != snap1.ID.Hash {
+		t.Errorf("HEAD should point to snap1 %s after full restore, got %s",
+			snap1.ID.Hash.String(), headAfter.Target.String())
+	}
+
+	// The current branch ref must also point at snap1.
+	branchRef, err := store.GetRef(ctx, "heads/main")
+	if err != nil {
+		t.Fatalf("GetRef heads/main: %v", err)
+	}
+	if branchRef.Target != snap1.ID.Hash {
+		t.Errorf("heads/main should point to snap1 %s after full restore, got %s",
+			snap1.ID.Hash.String(), branchRef.Target.String())
+	}
+
+	// Workspace content must match snap1.
+	content, err := os.ReadFile(filepath.Join(dir, "file1.txt"))
+	if err != nil {
+		t.Fatalf("read file1: %v", err)
+	}
+	if string(content) != "content v1" {
+		t.Errorf("expected 'content v1', got %q", string(content))
+	}
+}

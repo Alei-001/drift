@@ -3,6 +3,8 @@ package filesystem
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/your-org/drift/internal/core"
@@ -153,5 +155,55 @@ func TestGetRef_NonHeadSymRef(t *testing.T) {
 	}
 	if ref.Target != targetHash {
 		t.Errorf("Target = %v, want %v", ref.Target, targetHash)
+	}
+}
+
+// TestListRefs_SkipsInvalidRefFiles verifies that non-ref files in the
+// refs directory (e.g. .DS_Store on macOS, or files with non-hex content)
+// are skipped by ListRefs instead of aborting the entire walk. This
+// mirrors the documented behavior and the equivalent chunk-list logic.
+func TestListRefs_SkipsInvalidRefFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fs, err := NewFSStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFSStorage: %v", err)
+	}
+	defer fs.Close()
+
+	// Write one valid branch ref pointing at a snapshot hash.
+	targetHash := core.Hash{0x01, 0x02, 0x03}
+	if err := fs.SetRef(context.Background(), "heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: targetHash,
+	}); err != nil {
+		t.Fatalf("SetRef heads/main: %v", err)
+	}
+
+	// Drop a stray .DS_Store-like binary file inside refs/heads/. The
+	// content is deliberately non-hex so GetRef returns ErrInvalidRef.
+	headsDir := filepath.Join(tmpDir, RefsDir, HeadsDir)
+	if err := os.WriteFile(filepath.Join(headsDir, ".DS_Store"), []byte{0x00, 0x01, 0xFF, 0xFE}, 0644); err != nil {
+		t.Fatalf("write .DS_Store: %v", err)
+	}
+
+	// Also drop a plainly corrupt text file with non-hex content.
+	if err := os.WriteFile(filepath.Join(headsDir, "corrupt"), []byte("not-a-hex-string"), 0644); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+
+	refs, err := fs.ListRefs(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListRefs should skip invalid ref files, got error: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 valid ref, got %d: %+v", len(refs), refs)
+	}
+	if refs[0].Name != "heads/main" {
+		t.Errorf("ref name = %q, want %q", refs[0].Name, "heads/main")
+	}
+	if refs[0].Target != targetHash {
+		t.Errorf("ref target = %v, want %v", refs[0].Target, targetHash)
 	}
 }

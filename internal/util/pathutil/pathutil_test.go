@@ -78,6 +78,20 @@ func TestRelToWorkDir_AllowsInnerTraversal(t *testing.T) {
 	}
 }
 
+func TestRelToWorkDir_RejectsUnixRootedPath(t *testing.T) {
+	_, err := RelToWorkDir("/project", "/etc/passwd")
+	if err == nil {
+		t.Errorf("RelToWorkDir(%q) should have returned error for Unix-rooted path", "/etc/passwd")
+	}
+}
+
+func TestRelToWorkDir_RejectsBackslashRootedPath(t *testing.T) {
+	_, err := RelToWorkDir("/project", "\\foo")
+	if err == nil {
+		t.Errorf("RelToWorkDir(%q) should have returned error for backslash-rooted path", "\\foo")
+	}
+}
+
 func TestRel_ForwardSlashOutput(t *testing.T) {
 	got, err := Rel("/project", "/project/src/main.go")
 	if err != nil {

@@ -12,9 +12,17 @@ import (
 // Bytes returns a human-readable size string (e.g. "2.5 MB").
 // Negative sizes are formatted with a leading minus sign.
 func Bytes(size int64) string {
+	if size < 0 {
+		mag := uint64(-(size + 1)) + 1 // safe abs for MinInt64
+		return "-" + bytesPositive(mag)
+	}
+	return bytesPositive(uint64(size))
+}
+
+// bytesPositive formats a non-negative magnitude as a human-readable size
+// string using 1024-based units (B, KB, MB, GB).
+func bytesPositive(size uint64) string {
 	switch {
-	case size < 0:
-		return fmt.Sprintf("-%s", Bytes(-size))
 	case size < 1024:
 		return fmt.Sprintf("%d B", size)
 	case size < 1024*1024:

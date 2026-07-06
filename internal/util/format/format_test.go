@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,19 @@ func TestBytes_Negative(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "KB") {
 		t.Errorf("Bytes(-1024) = %q, want KB suffix", got)
+	}
+}
+
+func TestBytes_MinInt64(t *testing.T) {
+	// Regression: Bytes(math.MinInt64) must not stack-overflow.
+	// The naive recursion Bytes(-size) overflows because -math.MinInt64
+	// equals math.MinInt64 in two's complement int64. The magnitude of
+	// MinInt64 is 2^63, which exceeds 1024^3, so it formats as GB:
+	// 2^63 / 2^30 = 2^33 = 8589934592.0 GB.
+	got := Bytes(math.MinInt64)
+	want := "-8589934592.0 GB"
+	if got != want {
+		t.Errorf("Bytes(math.MinInt64) = %q, want %q", got, want)
 	}
 }
 

@@ -16,33 +16,35 @@ import (
 // writeFileFromChunks reconstructs a file at path by concatenating chunk data
 // in order. It writes to a temporary file first, then renames atomically. On
 // any error the temp file is removed and the original file is left untouched.
-func writeFileFromChunks(ctx context.Context, store storage.Storer, path string, chunks []core.Hash, perm os.FileMode) error {
+func writeFileFromChunks(ctx context.Context, store storage.Storer, path string, chunks []core.Hash, perm os.FileMode) (err error) {
 	tmpPath := path + ".drifttmp"
 	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
+	defer func() {
+		f.Close()
+		if err != nil {
+			os.Remove(tmpPath)
+		}
+	}()
 
 	for _, h := range chunks {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
 		chunk, err := store.GetChunk(ctx, h)
 		if err != nil {
-			f.Close()
-			os.Remove(tmpPath)
 			return fmt.Errorf("get chunk %s: %w", h.String(), err)
 		}
 		if _, err := f.Write(chunk.Data); err != nil {
-			f.Close()
-			os.Remove(tmpPath)
 			return fmt.Errorf("write chunk data: %w", err)
 		}
 	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+	if err = f.Sync(); err != nil {
 		return err
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
+	if err = f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(tmpPath, path)

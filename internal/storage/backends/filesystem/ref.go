@@ -138,7 +138,7 @@ func (fs *FSStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Refer
 		if err != nil {
 			// Skip not-found refs (e.g. .DS_Store, corrupt refs) but
 			// propagate other errors instead of aborting silently.
-			if errors.Is(err, storage.ErrNotFound) {
+			if errors.Is(err, storage.ErrNotFound) || errors.Is(err, storage.ErrInvalidRef) {
 				return nil
 			}
 			return err

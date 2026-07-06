@@ -229,10 +229,6 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 			Hash:    entry.Hash,
 		})
 	}
-	if err := store.SetIndex(ctx, newIndex); err != nil {
-		return nil, fmt.Errorf("update index: %w", err)
-	}
-
 	branchRef := &core.Reference{
 		Name:   symRef,
 		Type:   core.RefTypeBranch,
@@ -240,6 +236,10 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	}
 	if err := store.SetRef(ctx, symRef, branchRef); err != nil {
 		return nil, fmt.Errorf("update branch: %w", err)
+	}
+
+	if err := store.SetIndex(ctx, newIndex); err != nil {
+		return nil, fmt.Errorf("update index: %w", err)
 	}
 
 	return snap, nil

@@ -131,6 +131,10 @@ func diffWorkspaceFileJSON(ctx context.Context, store storage.Storer, cwd string
 			reportFailed("Diff", "diff", fmt.Sprintf("'%s' not found in snapshot or workspace.", filePath), "")
 			return ErrSilent
 		}
+		if statErr != nil {
+			reportFailed("Diff", "diff", fmt.Sprintf("cannot stat workspace file %s: %s", filePath, statErr), "")
+			return ErrSilent
+		}
 		return outputJSON(JSONEnvelope{
 			Command: "diff", Status: "ok",
 			Data: diffFileData{Base: snapLabel, Target: "workspace", Mode: "file", File: filePath, Type: "added", NewSize: info.Size()},

@@ -60,6 +60,34 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 		if err = restoreFilesToWorkspace(ctx, store, workDir, cfg.IgnoreFile, snap); err != nil {
 			return backupID, fmt.Errorf("restore workspace: %w", err)
 		}
+		// Update HEAD (and the current branch, when attached) to point at
+		// the restored snapshot. Without this the workspace would match
+		// snapshotID while HEAD still references the pre-restore tip, so
+		// the next save would link to the wrong parent and sever the
+		// history chain. Mirrors architecture.md §5.2 step 3.
+		headRef, headErr := store.GetRef(ctx, "HEAD")
+		if headErr != nil {
+			return backupID, fmt.Errorf("read HEAD for update: %w", headErr)
+		}
+		if headRef.SymRef != "" {
+			branchRef := &core.Reference{
+				Name:   headRef.SymRef,
+				Type:   core.RefTypeBranch,
+				Target: snapshotID.Hash,
+			}
+			if err = store.SetRef(ctx, headRef.SymRef, branchRef); err != nil {
+				return backupID, fmt.Errorf("update branch %s: %w", headRef.SymRef, err)
+			}
+			headRef.Target = snapshotID.Hash
+			if err = store.SetRef(ctx, "HEAD", headRef); err != nil {
+				return backupID, fmt.Errorf("update HEAD: %w", err)
+			}
+		} else {
+			headRef.Target = snapshotID.Hash
+			if err = store.SetRef(ctx, "HEAD", headRef); err != nil {
+				return backupID, fmt.Errorf("update HEAD: %w", err)
+			}
+		}
 	} else {
 		var pathErr error
 		filePath, pathErr = pathutil.RelToWorkDir(workDir, filePath)
@@ -74,6 +102,9 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 
 		var restoredEntry *core.FileEntry
 		for _, entry := range snap.Files {
+			if err = ctx.Err(); err != nil {
+				return backupID, err
+			}
 			if entry.Path != filePath {
 				continue
 			}

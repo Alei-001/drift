@@ -39,6 +39,12 @@ func RelToWorkDir(workDir, path string) (string, error) {
 		}
 		path = rel
 	}
+	// Reject Unix-style rooted paths that filepath.IsAbs misses on Windows
+	// (e.g. "/etc/passwd", "\foo"). These are absolute on Unix and should
+	// be rejected on all platforms for consistency.
+	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
+		return "", fmt.Errorf("path escapes workspace root: %s", path)
+	}
 	// Reject paths that escape the workspace root after cleaning.
 	// This covers both relative inputs like "../foo" and absolute inputs
 	// outside workDir, which filepath.Rel turns into "../foo".
