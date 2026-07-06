@@ -17,6 +17,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// CreateSnapshot scans workDir, chunks new or modified files, stores them,
+// and writes a new snapshot on the current branch (HEAD's symbolic target,
+// defaulting to heads/main). The workspace lock is acquired for the duration
+// of the save. message must be non-empty; author defaults to "drift" when
+// empty; tags may be nil or empty; cfg may be nil (core.DefaultConfig is
+// used). Returns ErrNothingToSave when the workspace matches the index.
 func CreateSnapshot(ctx context.Context, store storage.Storer, workDir string, message string, author string, tags []string, cfg *core.CoreConfig) (*core.Snapshot, error) {
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return nil, fmt.Errorf("acquire workspace lock: %w", err)
@@ -78,6 +84,9 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	changed := false
 
 	for _, f := range workspaceFiles {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		relPath, err := pathutil.Rel(workDir, f.path)
 		if err != nil {
 			return nil, fmt.Errorf("relative path for %s: %w", f.path, err)
@@ -110,6 +119,10 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 			return nil, fmt.Errorf("read header %s: %w", f.path, err)
 		}
 		engine := filetype.DetectEngine(relPath, header)
+		if engine == nil {
+			file.Close()
+			return nil, fmt.Errorf("no engine detected for %s", relPath)
+		}
 
 		if _, err := file.Seek(0, io.SeekStart); err != nil {
 			file.Close()
@@ -232,6 +245,11 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	return snap, nil
 }
 
+// ComputeFileHash returns the BLAKE3 file hash for filePath by chunking it
+// with the detected engine and hashing the concatenation of chunk hashes.
+// cfg may be nil (core.DefaultConfig is used). The hash is independent of
+// chunk data layout and matches the hash CreateSnapshot would produce for
+// the same file.
 func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -244,6 +262,9 @@ func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
 		return core.Hash{}, fmt.Errorf("read header %s: %w", filePath, err)
 	}
 	engine := filetype.DetectEngine(filePath, header)
+	if engine == nil {
+		return core.Hash{}, fmt.Errorf("no engine detected for %s", filePath)
+	}
 
 	info, err := file.Stat()
 	if err != nil {

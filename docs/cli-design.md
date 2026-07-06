@@ -5,8 +5,28 @@
 - **无 Git 术语** — 用创作者的日常语言：保存、恢复、分支，而非 commit/rebase/reset
 - **零暂存区** — `save` 自动捕获所有变更，不要求用户手动选择文件
 - **命令精简** — 每个命令只做一件明确的事，避免像 git 那样一个命令有几十个 flag
-- **不安全操作不暴露** — 没有 `reset --hard`，恢复永远可撤销
+- **不安全操作不暴露** — 没有 `reset --hard`，恢复永远可撤销；`save` 可 `undo`
 - **GUI 为视觉主力** — 缩略图时间线在 GUI 中展现，CLI 专注快速、精确、可脚本化操作
+- **UTF-8 全集** — 用户内容（message、tag、分支名）必须支持 UTF-8 全集，包括中文、日文等任意 Unicode 文本；CLI 输出的结构符号优先使用 ASCII 以保证跨终端兼容性
+
+---
+
+## 全局选项
+
+所有命令共享以下选项，必须在子命令参数之前使用：
+
+| 选项 | 说明 |
+|------|------|
+| `-C, --cwd <path>` | 在指定目录执行命令（而非当前工作目录）。对脚本和 GUI 调用至关重要 |
+| `--json` | 以 JSON 格式输出。所有支持 `--json` 的命令输出结构一致（见"输出格式规范"） |
+| `-q, --quiet` | 静默模式，只输出错误。退出码仍是判定成功的权威来源 |
+
+示例：
+```
+drift -C ~/Documents/my-novel status
+drift log --json
+drift -q save -m "auto checkpoint"
+```
 
 ---
 
@@ -56,13 +76,36 @@ Error: <错误描述>
   hint: <解决建议>
 ```
 
+### ASCII 与 Unicode 使用规则
+
+- **结构符号用 ASCII**：状态行 `>>>`、箭头 `->`、变更标记 `+/-/~`、状态标识 `[ok]`/`[failed]` 等。保证在任意终端（含老 CMD、PowerShell 默认编码、SSH 非 UTF-8 locale）下稳定显示
+- **用户内容用 UTF-8 全集**：message、tag、分支名、文件路径支持任意 Unicode 文本（中文、日文、emoji 等）。程序在 Windows 上需主动设置 console output 为 UTF-8（CP_UTF8），保证中文等非 ASCII 内容正确显示
+
 ### 命令分类
 
 | 类型 | 命令 | 输出特点 |
 |------|------|---------|
-| 执行 | init, save, restore, branch, switch, ignore | 状态行 + 文件列表 + 总结 |
-| 查询 | log, show, status, diff, check | 状态行 + 查询结果 + 总结 |
+| 执行 | init, save, restore, branch, switch, ignore, tag, undo | 状态行 + 文件列表 + 总结 |
+| 查询 | log, show, status, diff, check, config | 状态行 + 查询结果 + 总结 |
 | 驻留 | watch | 状态行 + 实时日志流 + 结束总结 |
+
+### JSON 输出规范
+
+`--json` 模式下所有命令输出统一的信封结构：
+
+```json
+{
+  "command": "save",
+  "status": "ok",
+  "data": { ... },
+  "hint": null
+}
+```
+
+- `command`：命令名
+- `status`：`ok` / `failed` / `warning` / `active`
+- `data`：命令特定的结构化数据（每个命令的 schema 见各命令章节）
+- `hint`：可选的提示字符串，失败时通常非空
 
 ---
 
@@ -70,26 +113,47 @@ Error: <错误描述>
 
 ```
 drift
-├── init         初始化项目，开始追踪
-├── save         保存当前状态为快照
-├── log          浏览历史快照
-├── show         预览某个快照的内容
-├── status       查看自上次保存后的变更
-├── diff         比较两个快照的差异
-├── restore      恢复文件到指定快照
-├── branch       创建 / 列出 / 删除 / 重命名分支
-├── switch       切换到主分支或其他分支
-├── ignore       忽略文件或目录
-├── watch        自动监听并保存（后台守护）
-│   ├── on        启动监听
-│   ├── off       停止监听
-│   └── status    查看状态
-├── check        校验数据完整性
-├── gc           回收无引用的快照与块
-├── remote       管理远程存储（后续版本）
-├── sync         同步到远程（后续版本）
-└── help         帮助信息
+├── init            初始化项目
+├── save            保存当前状态为快照
+├── undo            撤销最后一次 save（保持"恢复永远可撤销"的对称性）
+├── log             浏览历史快照
+├── show            查看快照内容（文件列表或单文件）
+├── status          查看变更情况
+├── diff            比较差异
+├── restore         恢复文件到指定快照（自动备份）
+├── branch          分支管理（list/create/delete/rename 子命令）
+├── switch          切换分支
+├── tag             标签管理（list/add/delete/rename 子命令）
+├── ignore          忽略规则管理（list/add/remove 子命令）
+├── watch           后台监听（on/off/status/pause/resume 子命令）
+├── check           校验数据完整性
+├── gc              回收无引用的快照与块
+├── config          配置管理（get/set/list）
+├── remote          管理远程存储（后续版本）
+├── sync            同步到远程（后续版本）
+└── help            帮助信息
 ```
+
+---
+
+## 版本引用语法
+
+所有接受 `<snapshot-id>` 参数的命令（show、diff、restore、log 等）统一使用以下语法：
+
+| 语法 | 含义 | 示例 |
+|------|------|------|
+| `@id:<hash-prefix>` | 按快照哈希前缀定位（至少 4 位） | `@id:12ab` |
+| `@tag:<name>` | 按 tag 定位 | `@tag:submission` |
+| `@branch:<name>` | 按分支定位（取分支头快照） | `@branch:main` |
+| `@head` | 当前 HEAD 指向的快照 | `@head` |
+| `<name>`（裸名） | 等价于 `@branch:<name>`，见解析规则 2 | `main`、`dev` |
+
+**解析规则**：
+1. 带 `@` 前缀的引用按前缀分派，无歧义
+2. 裸名按 `@branch:<name>` 解析。分支名是用户自定义的可读名称，不会与机器生成的 hash 冲突，因此裸写安全。Tag 和 hash 必须显式带前缀
+3. 不支持"裸 hash 前缀"（如 `12ab`）—— 必须写 `@id:12ab`，消除分支名与 hash 前缀冲突的歧义
+
+**NFC 规范化**：tag 名和分支名在存储前进行 Unicode NFC 规范化，避免同形异码问题（如 `é` 的两种编码视为同一个名字）。
 
 ---
 
@@ -105,6 +169,7 @@ drift init [path]
 示例：
   drift init
   drift init ~/Documents/my-novel
+  drift -C ~/Projects init
 ```
 
 Output：
@@ -130,20 +195,22 @@ Error: already a drift repository.
 ### `drift save`
 
 ```
-drift save -m <message> [--tag <name>]
+drift save [-m <message>] [--tag <name>...]
 
-保存当前所有变更，创建一个新快照。-m 为必填。
+保存当前所有变更，创建一个新快照。
 
 选项：
-  -m, --message    快照消息（必填）
-  --tag            为这个快照起一个固定别名，如 --tag "交稿v1"
+  -m, --message    快照消息（可选；省略时使用默认消息 "snapshot <timestamp>"）
+  --tag            为这个快照起一个或多个固定别名，可重复：--tag "v1" --tag "交稿"
 
 示例：
-  drift save -m "Chapter 3 draft complete"          # inline message
-  drift save -m "Update cover" --tag "submission"   # message + tag
+  drift save -m "Chapter 3 draft complete"
+  drift save -m "Update cover" --tag "submission" --tag "v1"
+  drift save                              # 快速存档，使用默认消息
+  drift save -m "第三章初稿完成"            # 中文消息
 ```
 
-Output：
+Output — 带 message：
 
 ```
 >>> Saved [12ab] [ok]
@@ -156,24 +223,27 @@ Chapter 3 draft complete
   3 files: +2 ~1
 ```
 
+Output — 无 message（快速存档）：
+
+```
+>>> Saved [12ab] [ok]
+[no message] snapshot 2026-07-06 14:30
+
+  +  chapter4.md      12.3 KB
+
+  1 file: +1
+```
+
 Output — 带 tag：
 
 ```
 >>> Saved [9f1e] [ok]
-Submit to client  [submission]
+Submit to client  [submission] [v1]
 
   +  chapter4.md      12.3 KB
   ~  chapter3.md      45.2 KB
 
   2 files: +1 ~1
-```
-
-Error（缺少消息）：
-
-```
->>> Save [failed]
-Error: -m <message> is required.
-  hint: use 'drift save -m "your message"' to describe this snapshot.
 ```
 
 Error（无变更）：
@@ -188,28 +258,85 @@ Error: nothing to save.
 - 对新增的大文件进行 CDC 分块，只存储变化的块
 - 对图片类文件自动生成缩略图并缓存（供 GUI 使用）
 - 与 `drift watch` 自动保存不同：手动 save 代表有意义的检查点
+- `-m` 可选：省略时使用默认消息，便于快速存档；用户可后续用 `drift tag` 或未来的 `drift log --edit-message` 补充
+- `--tag` 可重复，支持一次打多个 tag
+
+---
+
+### `drift undo`
+
+```
+drift undo
+
+撤销最后一次 save。HEAD 回退到 PrevID，被撤销的快照标记为不可达（下次 gc 清理）。
+
+这是 save 的逆操作，保证"用户主动操作也可撤销"——与 restore 自动备份的"恢复可撤销"精神一致。
+
+示例：
+  drift undo
+```
+
+Output — 撤销成功：
+
+```
+>>> Undone [ok]
+Removed snapshot 12ab ("Chapter 3 draft complete").
+HEAD now at a3c2 ("Update cover color scheme").
+
+  hint: the undone snapshot is now unreachable. It will be removed by 'drift gc'.
+```
+
+Output — 连续撤销（撤销倒数第二次）：
+
+```
+>>> Undone [ok]
+Removed snapshot a3c2 ("Update cover color scheme").
+HEAD now at 9f1e ("Submit to client").
+```
+
+Error — 没有可撤销的快照：
+
+```
+>>> Undo [failed]
+Error: no snapshot to undo.
+  hint: HEAD is already at the initial snapshot.
+```
+
+Error — 工作区有未保存变更：
+
+```
+>>> Undo [failed]
+Error: uncommitted changes would be lost.
+  hint: use 'drift save' or 'drift restore' first.
+```
+
+- 撤销的是 HEAD 的前移，不影响工作区文件
+- 如果工作区有未保存变更，拒绝执行（避免丢失）
+- 被撤销的快照在 gc 前仍可通过 `@id:<hash>` 访问（恢复误撤销）
 
 ---
 
 ### `drift log`
 
 ```
-drift log [-l <n>] [--json] [--all]
-drift log -v <id>
+drift log [--limit <n>] [--detail <id>] [--all] [--branch <name>] [--json]
 
 浏览历史快照。默认只显示用户手动创建的快照，[auto] 快照隐藏。
 
 选项：
-  -l, --limit     显示最近 N 条记录（默认 10）
-  -v, --verbose    查看某个快照的文件变更明细
-  --json          以 JSON 格式输出，适合脚本处理
-  --all           包括自动保存 (drift watch) 的快照
+  -l, --limit      显示最近 N 条记录（默认 30）
+  --detail <id>    查看某个快照的文件变更明细（替代旧的 -v）
+  --all            包括自动保存 (drift watch) 的快照
+  --branch <name>  只显示某分支的快照
+  --json           JSON 格式输出
 
 示例：
   drift log
   drift log -l 20
-  drift log -v 12ab
+  drift log --detail @id:12ab
   drift log --all
+  drift log --branch feature
+  drift log --json
 ```
 
 Output — 默认：
@@ -223,15 +350,15 @@ a3c2  2026-06-27 22:15  main          Update cover color scheme                 
 
 > 第三列为分支名（仅显示指向该快照的分支头，类似 git --decorate）。
 
-消息或标签过长时自动截断，末尾加 `…`：
+消息或标签过长时自动截断，末尾加 `...`：
 
 ```
 >>> History (3 snapshots)
-12ab  2026-06-28 16:30  main          Chapter 3 draft complete, revised by editor…  +2 ~1
-b4e1  2026-06-27 22:15  dev           Fix typo                        [typo-fix-…]  ~1
+12ab  2026-06-28 16:30  main          Chapter 3 draft complete, revised by editor...  +2 ~1
+b4e1  2026-06-27 22:15  dev           Fix typo                        [typo-fix-...]  ~1
 ```
 
-> 被截断的完整内容可通过 `drift log -v <id>` 查看。`-v` 模式不限宽度，完整展示消息和文件列表。
+> 被截断的完整内容可通过 `drift log --detail @id:<id>` 查看。
 
 Output — `--all`：
 
@@ -244,7 +371,7 @@ f1a0  2026-06-27 22:10                [auto] 2026-06-27 22:10                   
 9f1e  2026-06-27 10:00  dev           Submit to client                [submission]  +1 ~1
 ```
 
-Output — `-v <id>`：
+Output — `--detail @id:<id>`：
 
 ```
 >>> Snapshot 12ab
@@ -259,13 +386,19 @@ Output — `-v <id>`：
 
 Output — `--json`：
 
-```
->>> History (3)
-[
-  {"id":"12ab","time":"2026-06-28T16:30:00","message":"Chapter 3 draft complete","tag":null,"changes":"+2 ~1 -0"},
-  {"id":"a3c2","time":"2026-06-27T22:15:00","message":"Update cover color scheme","tag":null,"changes":"+0 ~1 -0"},
-  {"id":"9f1e","time":"2026-06-27T10:00:00","message":"Submit to client","tag":"submission","changes":"+1 ~1 -0"}
-]
+```json
+{
+  "command": "log",
+  "status": "ok",
+  "data": {
+    "snapshots": [
+      {"id":"12ab","time":"2026-06-28T16:30:00","message":"Chapter 3 draft complete","tags":[],"branch":"main","changes":"+2 ~1 -0"},
+      {"id":"a3c2","time":"2026-06-27T22:15:00","message":"Update cover color scheme","tags":[],"branch":"main","changes":"+0 ~1 -0"},
+      {"id":"9f1e","time":"2026-06-27T10:00:00","message":"Submit to client","tags":["submission"],"branch":"dev","changes":"+1 ~1 -0"}
+    ]
+  },
+  "hint": null
+}
 ```
 
 Error：
@@ -283,30 +416,48 @@ Error: no snapshots yet.
 ### `drift show`
 
 ```
-drift show <version> <file> [--open]
+drift show [<snapshot-id>] [<file>] [--open]
 
-查看指定快照中某个文件的内容。文本文件用分页器展示；非文本文件默认显示元信息。
+查看指定快照的内容。
+- 无参数：显示帮助
+- 仅 snapshot-id：列出该快照包含的文件清单
+- snapshot-id + file：显示文件内容（文本）或元信息（二进制/图片）
+- 单个非 `@` 参数：作为文件路径，隐式取 `@head` 版本，等价于 `drift show @head <file>`
+
+> 单文件参数不会与“裸名按分支解析”规则冲突：文件路径必含 `.` 或 `/`，而分支名不允许包含这些字符。
 
 选项：
   --open    用系统默认程序打开文件
 
 示例：
-  drift show 12ab chapter1.md
-  drift show @tag:submission cover.psd
-  drift show @tag:submission cover.psd --open
-  drift show main README.md
+  drift show @id:12ab                         # 列出快照文件清单
+  drift show @id:12ab chapter1.md             # 查看文本文件内容
+  drift show @tag:submission cover.psd        # 查看二进制文件元信息
+  drift show @tag:submission cover.psd --open # 用系统程序打开
+  drift show README.md                       # 单文件参数隐式 @head：等价于 drift show @head README.md
+  drift show main README.md                   # 裸名按分支解析（等价于 @branch:main）
+```
+
+Output — 仅 snapshot-id（文件清单）：
+
+```
+>>> Snapshot @id:12ab (3 files)
+
+  chapter1.md       4.2 KB   text
+  chapter4.md      12.3 KB   text
+  sketch.png        2.1 MB   image (4200x3150)
+
+  3 files
 ```
 
 Output — 文本文件：
 
 ```
->>> File 12ab:chapter1.md
+>>> File @id:12ab:chapter1.md
 
 # Chapter 1: The Beginning
 The sun rose over the quiet village...
 ```
-
-> 文本文件内容直接输出到终端，可用 `--open` 调用系统程序查看。
 
 Output — 二进制文件：
 
@@ -321,9 +472,9 @@ Output — 二进制文件：
 Output — 图片文件（额外显示尺寸）：
 
 ```
->>> File 12ab:cover.png
+>>> File @id:12ab:cover.png
   Size:       2.1 MB
-  Dimensions: 4200×3150
+  Dimensions: 4200x3150
   Modified:   06-28 16:30
 
   hint: use --open to view with system program.
@@ -340,16 +491,19 @@ Error：
 
 ```
 >>> Show [failed]
-Error: 'cover.psd' not found in snapshot 12ab.
-  hint: use 'drift log -v 12ab' to list files in this snapshot.
+Error: 'cover.psd' not found in snapshot @id:12ab.
+  hint: use 'drift show @id:12ab' to list files in this snapshot.
 ```
+
+- `show <snapshot-id>` 列出文件清单，不再需要 `log --detail`
+- `show <snapshot-id> <file>` 显示文件内容
 
 ---
 
 ### `drift status`
 
 ```
-drift status [-s]
+drift status [--short]
 
 查看自上次 save 以来的变更情况。列出所有新增、修改、删除的文件。
 
@@ -359,6 +513,7 @@ drift status [-s]
 示例：
   drift status
   drift status -s
+  drift --json status
 ```
 
 Output：
@@ -405,24 +560,31 @@ Error: not a drift repository.
 ### `drift diff`
 
 ```
-drift diff                    对比工作区 vs 上次快照
-drift diff <id>               对比工作区 vs 指定快照
-drift diff <id1> <id2>        对比两个快照
-drift diff <id1> <id2> <file> 对比某文件在两个快照间的差异
+drift diff [--stat] [<base>] [<target>] [-- <file>]
 
-显示两个快照之间的文件级变更摘要。指定文件时显示行级差异。
+显示差异。
+- 无参数：工作区 vs HEAD
+- 1 个参数：工作区 vs 指定快照
+- 2 个参数：两个快照之间
+- `-- <file>`：限定单文件，文本输出 unified diff，二进制输出元信息变化
+
+`--` 分隔符明确区分快照参数与文件参数，消除歧义。
+
+选项：
+  --stat    只显示文件级摘要（不显示行级 diff）
 
 示例：
-  drift diff
-  drift diff 12ab
-  drift diff 12ab 9f1e
-  drift diff 12ab 9f1e chapter3.md
+  drift diff                                       # 工作区 vs HEAD
+  drift diff @id:12ab                              # 工作区 vs 12ab
+  drift diff @id:9f1e @id:12ab                     # 两快照之间
+  drift diff @id:9f1e @id:12ab -- chapter3.md      # 单文件行级 diff
+  drift diff --stat @id:9f1e @id:12ab              # 仅文件级摘要
 ```
 
 Output — 文件级：
 
 ```
->>> Diff 9f1e → 12ab
+>>> Diff @id:9f1e -> @id:12ab
 
   ~  chapter4.md
   +  assets/sketch.png
@@ -433,7 +595,7 @@ Output — 文件级：
 Output — 含删除的场景：
 
 ```
->>> Diff 12ab → 9f1e
+>>> Diff @id:12ab -> @id:9f1e
 
   -  assets/sketch.png
   ~  chapter4.md
@@ -441,14 +603,14 @@ Output — 含删除的场景：
   2 files: ~1 -1
 ```
 
-> `+` 在目标快照新增，`-` 在目标快照删除，`~` 两边都有但内容不同。`→` 左边为基准，右边为对比目标。
+> `+` 在目标快照新增，`-` 在目标快照删除，`~` 两边都有但内容不同。`->` 左边为基准，右边为对比目标。
 
 Output — 单文件文本差异：
 
 ```
->>> Diff 9f1e → 12ab chapter3.md
---- 9f1e/chapter3.md  (旧版)
-+++ 12ab/chapter3.md  (新版)
+>>> Diff @id:9f1e -> @id:12ab chapter3.md
+--- @id:9f1e/chapter3.md  (旧版)
++++ @id:12ab/chapter3.md  (新版)
 
 @@ -12,5 +12,5 @@
  The old man sat by the window,
@@ -464,22 +626,20 @@ Output — 单文件文本差异：
 
 | 符号 | 含义 |
 |------|------|
-| `---` | 旧版文件（`9f1e/chapter3.md`） |
-| `+++` | 新版文件（`12ab/chapter3.md`） |
-| `@@ -12,5 +12,5 @@` | 旧版第 12 行起 5 行 → 新版第 12 行起 5 行 |
+| `---` | 旧版文件（`@id:9f1e/chapter3.md`） |
+| `+++` | 新版文件（`@id:12ab/chapter3.md`） |
+| `@@ -12,5 +12,5 @@` | 旧版第 12 行起 5 行 -> 新版第 12 行起 5 行 |
 | 无前缀 | 上下文行，两边一样，没改过 |
 | `-` | 旧版有，新版没有 — **被删掉的内容** |
 | `+` | 新版有，旧版没有 — **新写的内容** |
-
-在上面这个例子中，作者把 "staring at the rain" 润色成 "gazing at the falling rain"，把 "a car passed" 改成了 "a black car rumbled past"。
 
 > 此格式与 `git diff` 完全兼容。
 
 Output — 二进制文件差异：
 
 ```
->>> Diff 9f1e → 12ab cover.psd
-  Size:       22.1 MB → 23.4 MB (+1.3 MB)
+>>> Diff @id:9f1e -> @id:12ab cover.psd
+  Size:       22.1 MB -> 23.4 MB (+1.3 MB)
 
   (binary file — metadata only)
 ```
@@ -487,39 +647,51 @@ Output — 二进制文件差异：
 Output — 图片文件差异（额外显示尺寸变化）：
 
 ```
->>> Diff 9f1e → 12ab cover.png
-  Size:       22.1 MB → 23.4 MB (+1.3 MB)
-  Dimensions: 4000×3000 → 4200×3150
+>>> Diff @id:9f1e -> @id:12ab cover.png
+  Size:       22.1 MB -> 23.4 MB (+1.3 MB)
+  Dimensions: 4000x3000 -> 4200x3150
 
   (binary file — metadata only)
 ```
 
-> 无 file 参数时所有文件一视同仁（只比较哈希）。指定 file 参数时，文本文件输出 unified diff；二进制文件显示元信息变化（图片额外显示尺寸）。
+Output — `--stat`：
+
+```
+>>> Diff @id:9f1e -> @id:12ab (stat)
+
+  chapter4.md       | 12 ++++++----
+  assets/sketch.png | Bin 0 -> 2.1 MB
+
+  2 files changed, 8 insertions(+), 4 deletions(-)
+```
+
+> 无 `-- <file>` 时所有文件一视同仁（只比较哈希）。指定 `-- <file>` 时，文本文件输出 unified diff；二进制文件显示元信息变化（图片额外显示尺寸）。
 
 ---
 
 ### `drift restore`
 
 ```
-drift restore <version> [<file>]
+drift restore <snapshot-id> [<file>]
 
 恢复项目（或单个文件）到指定快照的状态。
 
 ⚠ 恢复前会自动备份当前状态，避免误操作丢失。
 
 选项：
-  --no-backup     跳过自动备份
+  --no-backup     跳过自动备份（仅单文件恢复时允许；整快照恢复强制备份）
 
 示例：
-  drift restore 12ab
-  drift restore 12ab chapter3.md
+  drift restore @id:12ab
+  drift restore @id:12ab chapter3.md
   drift restore @tag:submission
+  drift restore @id:12ab chapter3.md --no-backup   # 单文件可跳过备份
 ```
 
-Output：
+Output — 整快照恢复：
 
 ```
->>> Restored to 12ab [ok]
+>>> Restored to @id:12ab [ok]
 
   +  chapter4.md
   +  sketch.png
@@ -529,12 +701,12 @@ Output：
   backup: [a4f1]
 ```
 
-> `backup: [a4f1]` 是恢复前自动保存的快照，保存了**被覆盖前的状态**。如果恢复错了，用 `drift restore a4f1` 即可撤销回去。
+> `backup: [a4f1]` 是恢复前自动保存的快照，保存了**被覆盖前的状态**。如果恢复错了，用 `drift restore @id:a4f1` 即可撤销回去。
 
 Output — 单文件：
 
 ```
->>> Restored 12ab:chapter3.md [ok]
+>>> Restored @id:12ab:chapter3.md [ok]
 
   ~  chapter3.md
 
@@ -542,7 +714,15 @@ Output — 单文件：
   backup: [b2e3]
 ```
 
-Error：
+Error — 整快照恢复尝试用 `--no-backup`：
+
+```
+>>> Restore [failed]
+Error: --no-backup is only allowed for single-file restore.
+  hint: full restore always creates a backup for safety.
+```
+
+Error — 工作区有未保存变更：
 
 ```
 >>> Restore [failed]
@@ -550,31 +730,29 @@ Error: uncommitted changes would be overwritten.
   hint: use 'drift save' first, or restore a single file.
 ```
 
+- 整快照恢复**强制备份**，`--no-backup` 仅对单文件恢复有效（影响范围小，可接受跳过）
+- 这保证了"恢复永远可撤销"的核心承诺不被破坏
+
 ---
 
 ### `drift branch`
 
 ```
-drift branch [<name>]
-drift branch -d <name>
-drift branch -m <new-name>
-drift branch -m <old-name> <new-name>
+drift branch list                              列出所有分支
+drift branch create <name>                     创建新分支（不切换）
+drift branch delete <name>                     删除分支
+drift branch rename [<old-name>] <new-name>    重命名分支
 
-不带参数时列出所有分支。带 name 时创建新分支（不切换）。
-使用 -d 删除指定分支。
-使用 -m 重命名分支：单参数时重命名当前分支，双参数时重命名指定分支。
+重命名单参数时重命名当前分支，双参数时重命名指定分支。
 重命名当前分支会同步更新 HEAD 指向新分支名。
 
-选项：
-  -d    删除分支
-  -m    重命名分支
-
 示例：
-  drift branch                      # list branches
-  drift branch new-color-scheme     # create branch
-  drift branch -d old-experiment    # delete branch
-  drift branch -m dev               # rename current branch to 'dev'
-  drift branch -m feature dev       # rename 'feature' to 'dev'
+  drift branch list
+  drift branch create new-color-scheme
+  drift branch create feature/foo              # 层级分支名（Git 语义）
+  drift branch delete old-experiment
+  drift branch rename dev                       # 重命名当前分支为 dev
+  drift branch rename feature dev               # 重命名 feature 为 dev
 ```
 
 Output — 创建：
@@ -607,7 +785,7 @@ Output — 重命名：
 'feature' has been renamed to 'dev'.
 ```
 
-Error：
+Error — 分支已存在：
 
 ```
 >>> Branch [failed]
@@ -628,7 +806,7 @@ Error — 删除不存在的分支：
 ```
 >>> Branch [failed]
 Error: branch 'old-experiment' not found.
-  hint: use 'drift branch' to list existing branches.
+  hint: use 'drift branch list' to list existing branches.
 ```
 
 Error — 删除 main 分支：
@@ -639,29 +817,6 @@ Error: cannot delete 'main'.
   hint: 'main' is the default branch and cannot be removed.
 ```
 
-Error — 重命名到已存在的分支名：
-
-```
->>> Branch [failed]
-Error: branch 'dev' already exists.
-  hint: use 'drift branch' to list existing branches.
-```
-
-Error — 重命名不存在的分支：
-
-```
->>> Branch [failed]
-Error: branch 'old-name' not found.
-  hint: use 'drift branch' to list existing branches.
-```
-
-Error — 重命名当前分支时未指定新名字：
-
-```
->>> Branch [failed]
-Error: new branch name required with -m.
-```
-
 Error — 重命名 main 分支：
 
 ```
@@ -669,6 +824,9 @@ Error — 重命名 main 分支：
 Error: cannot rename 'main'.
   hint: 'main' is the default branch and cannot be renamed.
 ```
+
+- 分支名支持层级（如 `feature/foo`、`release/v1`），与 Git 语义一致
+- 分支名经 NFC 规范化后存储
 
 ---
 
@@ -680,21 +838,31 @@ drift switch -c <name>         创建并切换到新分支
 drift switch main              切换到主线
 
 选项：
-  -c    创建新分支并切换
+  -c, --create    创建新分支并切换
+  --no-autosave   跳过切换前的自动保存（要求工作区干净）
 
 示例：
   drift switch main
   drift switch new-color-scheme
   drift switch -c experimental
+  drift switch main --no-autosave
 ```
 
-Output：
+Output — 自动保存当前工作区后切换：
 
 ```
 >>> Switched to 'experimental' [ok]
 
   0 files differ from main.
   autosave: [b72d]
+```
+
+Output — 工作区干净 + `--no-autosave`：
+
+```
+>>> Switched to 'main' [ok]
+
+  3 files differ from experimental.
 ```
 
 Output — 切换回 main（有差异）：
@@ -706,31 +874,114 @@ Output — 切换回 main（有差异）：
   autosave: [c91e]
 ```
 
-Error：
+Error — 分支不存在：
 
 ```
 >>> Switch [failed]
 Error: branch 'typo-branch' not found.
-  hint: use 'drift branch' to list existing branches.
+  hint: use 'drift branch list' to list existing branches.
 ```
+
+Error — `--no-autosave` 但工作区有变更：
+
+```
+>>> Switch [failed]
+Error: --no-autosave requires a clean working tree.
+  hint: use 'drift save' first, or drop --no-autosave to auto-save.
+```
+
+- 切换前自动保存当前工作区（创建 [auto] 快照），保证未提交变更不丢失
+- `--no-autosave` 用于用户已手动 save 后切换、不想产生额外 [auto] 快照的场景，要求工作区干净
+- `autosave:` 行在未产生自动保存时不显示
+
+---
+
+### `drift tag`
+
+```
+drift tag list                                 列出所有 tag
+drift tag add <name> <snapshot-id>                 给已有快照打 tag
+drift tag delete <name>                        删除 tag
+drift tag rename <old-name> <new-name>         重命名 tag
+
+示例：
+  drift tag list
+  drift tag add submission @id:9f1e
+  drift tag add 交稿v1 @id:12ab                 # 中文 tag 名
+  drift tag delete submission
+  drift tag rename v1 final-v1
+```
+
+Output — 列表：
+
+```
+>>> Tags (3)
+  submission   -> 9f1e  Submit to client
+  v1           -> 12ab  Chapter 3 draft complete
+  交稿v1        -> 12ab  Chapter 3 draft complete
+```
+
+Output — 添加：
+
+```
+>>> Tag added [ok]
+'submission' -> 9f1e
+```
+
+Output — 删除：
+
+```
+>>> Tag deleted [ok]
+'submission' has been removed.
+```
+
+Output — 重命名：
+
+```
+>>> Tag renamed [ok]
+'v1' has been renamed to 'final-v1'.
+```
+
+Error — tag 已存在：
+
+```
+>>> Tag [failed]
+Error: tag 'submission' already exists.
+  hint: use 'drift tag delete submission' first, or pick another name.
+```
+
+Error — tag 不存在：
+
+```
+>>> Tag [failed]
+Error: tag 'submission' not found.
+  hint: use 'drift tag list' to see existing tags.
+```
+
+Error — 快照不存在：
+
+```
+>>> Tag [failed]
+Error: snapshot '@id:9f1e' not found.
+  hint: use 'drift log' to list available snapshots.
+```
+
+- tag 名经 NFC 规范化后存储
+- `save --tag` 仍可用（等价于 `save` 后 `tag add`），但 `tag` 命令族提供完整管理能力
 
 ---
 
 ### `drift ignore`
 
 ```
-drift ignore [--list | --remove <pattern> | <pattern...>]
-
-管理忽略规则。
-
-选项：
-  --list            列出当前忽略规则
-  --remove <p>      移除某条规则
+drift ignore list                              列出当前忽略规则
+drift ignore add <pattern>...                  添加忽略规则
+drift ignore remove <pattern>                  移除某条规则
 
 示例：
-  drift ignore "*.tmp" "*.psd"
-  drift ignore --list
-  drift ignore --remove "*.tmp"
+  drift ignore list
+  drift ignore add "*.tmp" "*.psd"
+  drift ignore remove "*.tmp"
 ```
 
 Output — 添加：
@@ -761,12 +1012,12 @@ Output — 移除：
   1 rule removed.
 ```
 
-Error：
+Error — 规则不存在：
 
 ```
 >>> Ignore [failed]
 Error: pattern '*.tmp' not found.
-  hint: use 'drift ignore --list' to see current rules.
+  hint: use 'drift ignore list' to see current rules.
 ```
 
 ---
@@ -774,15 +1025,17 @@ Error: pattern '*.tmp' not found.
 ### `drift watch`
 
 ```
-drift watch on  [--interval <seconds>]    启动后台监听
-drift watch off                           停止后台监听
-drift watch status                        查看监听状态
+drift watch on [--interval <seconds>] [--keep <n>]   启动后台监听
+drift watch off                                      停止后台监听
+drift watch status                                   查看监听状态
+drift watch pause                                    暂停监听（保留配置）
+drift watch resume                                   恢复监听
 
 后台守护进程，检测到文件变更后自动保存。仅在文件变化时才创建快照，无变更则跳过该轮。启动后不阻塞终端，可正常执行其他命令。
 
 选项（仅 on 模式）：
   --interval   检测间隔（默认 300 秒 = 5 分钟）。注意：这是检测频率，不是保存频率——无变更不保存
-  --keep       最多保留 N 个自动保存（默认 50）。超出后自动清理最旧的，防止存储膨胀
+  --keep       最多保留 N 个自动保存（默认 50）。超出后自动清理最旧的
 
 示例：
   drift watch on
@@ -790,6 +1043,8 @@ drift watch status                        查看监听状态
   drift watch on --keep 30
   drift watch off
   drift watch status
+  drift watch pause
+  drift watch resume
 ```
 
 Output — 启动：
@@ -810,6 +1065,21 @@ Auto-saves: 9 (50 max)
 Last save: 16:30  +2 ~1
 ```
 
+Output — 暂停：
+
+```
+>>> Watch [paused]
+Daemon paused. Configuration retained.
+Use 'drift watch resume' to continue.
+```
+
+Output — 恢复：
+
+```
+>>> Watching [active]
+Daemon resumed. Auto-save every 300s.
+```
+
 > 如果两次检测之间文件没变化，不会创建快照。`Auto-saves` 只统计实际保存的次数。
 
 Output — 手动停止：
@@ -820,12 +1090,6 @@ Daemon stopped. 9 auto-saves created.
 18 older auto-saves pruned during this session.
 ```
 
-- 守护进程在后台运行，不影响其他命令
-- 默认只保留最近 50 个自动保存，超出的自动删除（`--keep` 可调整）
-- 手动保存 (`drift save`) 不受影响，只清理 `[auto]` 快照
-- 自动快照是"安全网"，建议配合手动 `drift save -m "关键节点"` 使用
-- 关闭终端时守护进程自动退出
-
 Output — 状态（未运行）：
 
 ```
@@ -834,7 +1098,7 @@ No watch daemon running.
 Start with 'drift watch on'.
 ```
 
-Error：
+Error — 已在运行：
 
 ```
 >>> Watch [failed]
@@ -842,21 +1106,40 @@ Error: a watch daemon is already running (PID 4821).
   hint: use 'drift watch off' to stop it first.
 ```
 
+Error — 暂停时尝试暂停：
+
+```
+>>> Watch [failed]
+Error: daemon is not running (or already paused).
+  hint: use 'drift watch on' to start watching.
+```
+
 - 守护进程在后台运行，不影响其他命令
+- 默认只保留最近 50 个自动保存，超出的自动删除（`--keep` 可调整）
+- 手动保存 (`drift save`) 不受影响，只清理 `[auto]` 快照
 - 自动快照是"安全网"，建议配合手动 `drift save -m "关键节点"` 使用
 - 关闭终端时守护进程自动退出
+- `pause`/`resume` 保留 `--interval`/`--keep` 配置，无需重新指定
+
+> `watch` 系列命令不支持 `--json`：守护进程为实时日志流，不适合一次性 JSON 信封结构。程序化访问可通过 PID 文件或 `drift watch status` 的文本输出解析。
 
 ---
 
 ### `drift check`
 
 ```
-drift check
+drift check [--verbose] [--filter <pattern>]
 
 校验 .drift/ 目录中所有块的数据完整性，验证 BLAKE3 哈希。
 
+选项：
+  --verbose       显示每个块的校验结果（默认只显示汇总）
+  --filter <p>    只校验匹配 pattern 的文件
+
 示例：
   drift check
+  drift check --verbose
+  drift check --filter "chapter*.md"
 ```
 
 Output — 全部正常：
@@ -882,7 +1165,21 @@ Output — 有损坏：
   corrupt: 2
   missing: 0
 
-  hint: corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <id>'.
+  hint: corrupt chunks cannot be auto-repaired. Restore affected files from a known-good snapshot using 'drift restore <snapshot-id>'.
+```
+
+Output — `--verbose`：
+
+```
+>>> Check [warning]
+  12ab:chapter3.md  chunk 0  OK
+  12ab:chapter3.md  chunk 1  OK
+  12ab:chapter4.md  chunk 0  CORRUPT (hash mismatch)
+  ...
+
+  blocks:  142 total, 140 passed
+  corrupt: 2
+  missing: 0
 ```
 
 Error：
@@ -898,7 +1195,7 @@ Error: .drift/ directory not found.
 ### `drift gc`
 
 ```
-drift gc [--dry-run]
+drift gc [--dry-run] [--keep-auto <n>]
 
 回收不再被任何分支或标签引用的快照与块，释放存储空间。
 删除分支后留下的孤立快照、以及这些快照独占的块，都会被清理。
@@ -911,11 +1208,13 @@ drift gc [--dry-run]
   4. 先删快照、后删块，保证中途任何时刻都不会出现快照引用已删块的情况。
 
 选项：
-  --dry-run  只统计将要回收的数量，不实际删除
+  --dry-run     只统计将要回收的数量，不实际删除
+  --keep-auto   保留最近 N 个不可达的 [auto] 快照作为安全网（默认 0）
 
 示例：
-  drift gc --dry-run    # 预览将回收多少快照与块
-  drift gc              # 执行回收
+  drift gc --dry-run                   # 预览将回收多少快照与块
+  drift gc                             # 执行回收
+  drift gc --keep-auto 5               # 保留最近 5 个 auto 快照
 ```
 
 Output — 正常回收：
@@ -936,6 +1235,15 @@ Output — 预览模式：
   freed:      ~12.4 MB
 ```
 
+Output — 保留 auto 快照：
+
+```
+>>> GC [ok]
+  snapshots:  3 removed (2 auto-saves kept by --keep-auto=5)
+  chunks:     27 removed
+  freed:      12.4 MB
+```
+
 Output — 无可回收：
 
 ```
@@ -951,15 +1259,65 @@ Error: .drift/ directory not found.
   hint: run 'drift init' first.
 ```
 
+- `--keep-auto` 保留最近的 N 个 [auto] 快照（即使不可达），作为误操作的安全网
+- 手动 save 的快照不享受此保护（它们要么被分支/tag 引用，要么被回收）
+
 ---
 
-## 版本引用语法
+### `drift config`
 
 ```
-<N-hash>       快照哈希前缀（至少 4 位），如 12ab
-@tag:<name>    通过 tag 定位，如 @tag:submission
-main           主线分支名
-<branch>       分支名
+drift config list                              列出所有配置
+drift config get <key>                         查看某项配置
+drift config set <key> <value>                 修改配置
+
+配置项示例：
+  user.name              作者名（用于 snapshot.author）
+  compression.enabled    是否启用 zstd 压缩（true/false）
+  compression.level      zstd 压缩级别（1-19，默认 3）
+  chunk.min_size         分块最小尺寸
+  chunk.avg_size         分块平均尺寸
+  chunk.max_size         分块最大尺寸
+
+示例：
+  drift config list
+  drift config get user.name
+  drift config set user.name "张三"
+  drift config set compression.level 5
+```
+
+Output — 列表：
+
+```
+>>> Config
+  user.name             = drift
+  compression.enabled   = true
+  compression.level     = 3
+  chunk.min_size        = 4096
+  chunk.avg_size        = 8192
+  chunk.max_size        = 16384
+```
+
+Output — 获取：
+
+```
+>>> Config: user.name
+drift
+```
+
+Output — 设置：
+
+```
+>>> Config updated [ok]
+  user.name = "张三"
+```
+
+Error — 未知配置项：
+
+```
+>>> Config [failed]
+Error: unknown config key 'user.email'.
+  hint: use 'drift config list' to see available keys.
 ```
 
 ---
@@ -968,15 +1326,19 @@ main           主线分支名
 
 | User sees | Git equivalent | Difference |
 |---------|-----------|------|
-| `save` | `add + commit` | Auto-includes all changes, no staging area |
+| `save` | `add + commit` | Auto-includes all changes, no staging area; -m optional |
+| `undo` | `reset HEAD~1` | Undo last save; snapshot becomes unreachable |
 | `snap` / snapshot | `commit` | - |
 | `log` | `log --oneline --graph` | With thumbnail preview |
-| `restore` | `reset` / `checkout` | Auto-backup before restore |
-| `branch` | `branch` | Create and list; no merge |
-| `switch` | `checkout` / `switch` | Auto-save before switch |
-| `tag` | `tag` | Tag via `save --tag` |
+| `show` | `show` / `ls-tree` | Lists files or shows content |
+| `restore` | `reset` / `checkout` | Auto-backup before restore (forced for full restore) |
+| `branch` | `branch` | Create and list; no merge; subcommands |
+| `switch` | `checkout` / `switch` | Auto-save before switch; --no-autosave |
+| `tag` | `tag` | Full tag management via subcommands |
+| `ignore` | `.gitignore` + `git ignore` (proposed) | Subcommands for add/list/remove |
 | `main` | `main` / `master` | - |
-| `diff` | `diff` | Supports images, visual diff |
+| `diff` | `diff` | Supports images, visual diff; `--` separator |
+| `config` | `config` | - |
 | - | `merge`, `rebase`, `stash`, `cherry-pick`, `bisect` | Intentionally omitted |
 
 ---
@@ -986,15 +1348,15 @@ main           主线分支名
 ### 第一阶段：本地核心
 
 ```
-init    save    log    show    status    restore    check
+init    save    undo    log    show    status    restore    check
 ```
 
-这 7 个命令跑通，就是一个完整可用的本地版本管理工具。
+这 8 个命令跑通，就是一个完整可用的本地版本管理工具。
 
 ### 第二阶段：分支 + 自动化
 
 ```
-branch    switch    ignore    watch    gc
+branch    switch    tag    ignore    watch    gc
 ```
 
 ### 第三阶段：远程
@@ -1008,34 +1370,118 @@ remote    sync
 ## 命令速查卡
 
 ```
+# 全局选项
+drift -C <path> <command>              run in specified directory
+drift --json <command>                 JSON output
+drift -q <command>                     quiet (errors only)
+
+# 初始化与配置
 drift init                             initialize a project
+drift init ~/Documents/my-novel
+drift config list                      list all config
+drift config set user.name "张三"
+
+# 保存与撤销
 drift save -m "msg"                    save with message
-drift save -m "msg" --tag "v1"         save with tag
-drift log -l 10                        show last 10 entries
-drift log -v 12ab                      show file change details
-drift show 12ab chapter.md             view old version of a file
-drift show @tag:v1 cover.psd           show metadata for image
+drift save                             quick save (default message)
+drift save -m "msg" --tag v1 --tag v2  save with multiple tags
+drift undo                             undo last save
+
+# 浏览历史
+drift log                              show last 30 entries
+drift log -l 20                        show last 20
+drift log --detail @id:12ab            show file change details
+drift log --all                        include auto-saves
+drift log --branch feature             filter by branch
+drift show @id:12ab                    list files in snapshot
+drift show @id:12ab chapter.md         view old snapshot-id of a file
 drift show @tag:v1 cover.psd --open    open image with system app
 drift status                           show changes since last save
 drift status -s                        short format, paths only
-drift diff                             working tree vs last save
-drift diff 12ab 9f1e                   diff between two snapshots
-drift restore 12ab                     restore to a snapshot
-drift restore 12ab chapter.md          restore a single file
-drift branch                           list all branches
-drift branch "new-direction"           create a branch
-drift branch -d "old-experiment"       delete a branch
-drift branch -m "dev"                  rename current branch
-drift branch -m "feature" "dev"        rename a specific branch
-drift switch -c "experiment"           create and switch
-drift switch main                      switch back to main
-drift ignore "*.psd"                   ignore PSD files
-drift ignore --list                    list ignore rules
-drift ignore --remove "*.psd"          remove ignore rule
-drift watch on                          start auto-watch daemon
-drift watch off                         stop auto-watch daemon
-drift watch status                      check daemon status
+
+# 差异对比
+drift diff                             working tree vs HEAD
+drift diff @id:12ab                    working tree vs snapshot
+drift diff @id:9f1e @id:12ab           diff between two snapshots
+drift diff @id:9f1e @id:12ab -- chapter3.md   single file diff
+drift diff --stat @id:9f1e @id:12ab    stat only
+
+# 恢复
+drift restore @id:12ab                 restore to a snapshot (auto backup)
+drift restore @id:12ab chapter.md      restore a single file
+drift restore @id:12ab chapter.md --no-backup   single file, no backup
+
+# 分支
+drift branch list                      list all branches
+drift branch create new-direction      create a branch
+drift branch create feature/foo        hierarchical name
+drift branch delete old-experiment     delete a branch
+drift branch rename dev                rename current branch
+drift branch rename feature dev        rename a specific branch
+drift switch main                      switch to main
+drift switch -c experiment             create and switch
+drift switch main --no-autosave        switch without auto-save
+
+# 标签
+drift tag list                         list all tags
+drift tag add submission @id:9f1e      tag an existing snapshot
+drift tag add 交稿v1 @id:12ab           Chinese tag name
+drift tag delete submission            delete a tag
+drift tag rename v1 final-v1           rename a tag
+
+# 忽略规则
+drift ignore list                      list ignore rules
+drift ignore add "*.psd" "*.tmp"       add ignore rules
+drift ignore remove "*.psd"            remove ignore rule
+
+# 自动监听
+drift watch on                         start auto-watch daemon
+drift watch on --interval 600          custom interval
+drift watch on --keep 30               custom retention
+drift watch status                     check daemon status
+drift watch pause                      pause (keep config)
+drift watch resume                     resume
+drift watch off                        stop daemon
+
+# 维护
 drift check                            verify data integrity
-drift gc --dry-run                     preview reclaimable snapshots and chunks
-drift gc                               reclaim unreachable snapshots and chunks
+drift check --verbose                  per-chunk results
+drift gc --dry-run                     preview reclaimable data
+drift gc                               reclaim unreachable data
+drift gc --keep-auto 5                 keep recent 5 auto-saves
 ```
+
+---
+
+## 设计变更摘要（相对旧版）
+
+| 变更 | 原因 |
+|------|------|
+| 新增 `undo` 命令 | 保证 save 可撤销，与"恢复永远可撤销"原则对称 |
+| 新增 `tag` 命令族 | 原 `save --tag` 无法 list/delete/rename/补打 tag |
+| 新增 `config` 命令 | 用户需要 CLI 修改压缩级别、作者名等配置 |
+| 新增全局选项 `-C`/`--json`/`--no-pager`/`-q`/`-v` | 脚本友好、GUI 调用、可观测性 |
+| `save -m` 改为可选 | 零摩擦原则，支持快速存档；用户事后可补充 |
+| `save --tag` 支持多 tag | 一次保存多标签是常见需求 |
+| `restore --no-backup` 限制为单文件 | 整快照恢复强制备份，遵守"恢复永远可撤销"原则 |
+| `branch`/`ignore`/`watch` 统一子命令风格 | 扩展性、一致性；flag 风格在命令多了后会撞车 |
+| `watch` 新增 `pause`/`resume` | 临时禁用监听无需重新配置 |
+| `log -v` 改为 `--detail` | `-v` 习惯上是 boolean verbose，带参数易混淆 |
+| `log` 默认 limit 10 -> 30 | 活跃项目一屏看不全 |
+| `log` 新增 `--branch` | 按分支过滤历史 |
+| `show` 无 file 参数时列出文件清单 | 与 `log --detail` 功能合并，更符合"show 查看快照"的语义 |
+| `show` 单文件参数隐式 `@head` | 便利性：`drift show README.md` 比 `drift show @head README.md` 更自然；文件路径含 `.`/`/`，与裸分支名不冲突 |
+| 版本引用统一为 `@id:`/`@tag:`/`@branch:`/`@head` 前缀 | 消除分支名与 hash 前缀冲突的歧义 |
+| `diff` 用 `--` 分隔符区分快照参数与文件参数 | 三参数模式无法表达"工作区 vs 快照的单文件 diff" |
+| `diff` 新增 `--stat` | 只看文件级摘要，不看行级 diff |
+| `gc` 新增 `--keep-auto` | 保留最近 N 个 auto 快照作为误操作安全网 |
+| `check` 新增 `--verbose`/`--filter` | 详细校验结果、按文件过滤 |
+| `switch` 新增 `--no-autosave` | 用户已手动 save 后切换，不想产生 [auto] 快照 |
+| 结构符号统一 ASCII（`->` 替代 `→`，`...` 替代 `…`） | 跨终端兼容性（老 CMD、SSH 非 UTF-8 locale） |
+| 用户内容（message/tag/分支名）支持 UTF-8 全集 | 项目面向创作者，需支持中文等多语言内容 |
+| tag/分支名 NFC 规范化 | 避免 Unicode 同形异码问题 |
+| `--json` 升级为全局选项，统一信封结构 | 脚本友好，所有命令输出结构一致 |
+| 速查卡去除无空格参数的多余引号 | 避免误导新手 |
+| 移除全局 `--no-pager` | 当前未实现分页器，flag 为空操作；移除避免承诺未兑现 |
+| 移除全局 `-v`/`--verbose` | 与 `check --verbose` 命令级 flag 语义冲突且无读取处；移除避免混淆 |
+| `watch` 不支持 `--json` | 守护进程为实时日志流，不适合 JSON 信封；程序化访问可解析 `watch status` 文本输出 |

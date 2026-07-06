@@ -57,16 +57,16 @@ import any of the business packages, so the public surface is just the CLI.
 - **Memory**: use `storage/backends/memory.NewMemoryStorage()` for porcelain
   tests (no temp dirs).
 - **Filesystem**: the real on-disk `.drift/` store. Use
-  `backends/filesystem.InitStorage()` and `backends/filesystem.OpenStorage()`.
+  `backends/filesystem.NewFSStorage(root)`.
 
 ## Sentinels (use errors.Is, not string matching)
 
 | Package | Sentinels |
 |---------|-----------|
-| `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
+| `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrPermission`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
 | `internal/porcelain/` | `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain` |
 
-Always wrap with `fmt.Errorf("…: %w", err)`. Never `strings.Contains(err.Error(), …)`.
+Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify errors with `errors.Is` / `errors.As` — never `strings.Contains(err.Error(), …)`. Test code may use `strings.Contains` on error messages to assert user-facing text.
 
 ## Testing rules
 
@@ -112,5 +112,6 @@ Key deps: `cobra`, `zeebo/blake3`, `klauspost/compress/zstd`, `google.golang.org
 ## Reference docs
 
 - `docs/CODE_STANDARDS.md` — full coding conventions (authoritative for style, errors, tests, security)
+- `docs/CODE_REVIEW.md` — code review standard: bug definition, severity, fix termination criteria
 - `docs/architecture.md` — layered architecture diagram, data model, flow diagrams
 - `docs/engine-plugin.md` — guide for adding new filetype engines

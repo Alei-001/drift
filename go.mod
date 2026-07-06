@@ -1,6 +1,6 @@
 module github.com/your-org/drift
 
-go 1.24
+go 1.25.0
 
 require (
 	github.com/PlakarKorp/go-cdc-chunkers v1.1.0
@@ -8,6 +8,7 @@ require (
 	github.com/klauspost/compress v1.18.6
 	github.com/spf13/cobra v1.10.2
 	github.com/zeebo/blake3 v0.2.4
+	golang.org/x/text v0.36.0
 	google.golang.org/protobuf v1.36.11
 )
 

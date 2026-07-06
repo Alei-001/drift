@@ -8,6 +8,7 @@ import (
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
+	"github.com/your-org/drift/internal/storage/refname"
 )
 
 // CreateBranch creates a new branch pointing at the current HEAD snapshot.
@@ -26,11 +27,8 @@ func createBranchNoLock(ctx context.Context, store storage.Storer, name string) 
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
-	if strings.Contains(name, "..") {
-		return fmt.Errorf("invalid branch name: %q contains '..'", name)
-	}
-	if strings.ContainsAny(name, `/\`) {
-		return fmt.Errorf("invalid branch name: %q contains path separator", name)
+	if err := refname.Validate("heads/" + name); err != nil {
+		return fmt.Errorf("invalid branch name: %w", err)
 	}
 
 	if _, err := store.GetRef(ctx, "heads/"+name); err == nil {
@@ -97,6 +95,9 @@ func DeleteBranch(ctx context.Context, store storage.Storer, cwd, name string) e
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
 	}
+	if err := refname.Validate("heads/" + name); err != nil {
+		return fmt.Errorf("invalid branch name: %w", err)
+	}
 	if name == "main" {
 		return ErrCannotDeleteMain
 	}
@@ -162,11 +163,8 @@ func RenameBranch(ctx context.Context, store storage.Storer, cwd, oldName, newNa
 	}
 
 	// Validate the new name using the same rules as CreateBranch.
-	if strings.Contains(newName, "..") {
-		return fmt.Errorf("invalid branch name: %q contains '..'", newName)
-	}
-	if strings.ContainsAny(newName, `/\`) {
-		return fmt.Errorf("invalid branch name: %q contains path separator", newName)
+	if err := refname.Validate("heads/" + newName); err != nil {
+		return fmt.Errorf("invalid branch name: %w", err)
 	}
 
 	if _, err := store.GetRef(ctx, "heads/"+newName); err == nil {

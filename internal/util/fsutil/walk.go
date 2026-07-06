@@ -13,10 +13,20 @@ import (
 	"github.com/your-org/drift/internal/util/glob"
 )
 
+// Walk walks the file tree rooted at root, invoking fn for every file not
+// excluded by the ignore file. It is equivalent to WalkCtx with
+// context.Background. ignoreFile defaults to ".driftignore" when empty.
+// Symbolic links are not followed (filepath.WalkDir semantics). The .drift
+// directory is always skipped.
 func Walk(root, ignoreFile string, fn func(path string, info os.FileInfo) error) error {
 	return WalkCtx(context.Background(), root, ignoreFile, fn)
 }
 
+// WalkCtx is the context-aware variant of Walk. It honors context
+// cancellation: a cancelled context is surfaced before the walk starts and
+// re-checked between entries, causing the walk to stop descending
+// immediately. ignoreFile defaults to ".driftignore" when empty. Symbolic
+// links are not followed, and the .drift directory is always skipped.
 func WalkCtx(ctx context.Context, root, ignoreFile string, fn func(path string, info os.FileInfo) error) error {
 	if ignoreFile == "" {
 		ignoreFile = ".driftignore"

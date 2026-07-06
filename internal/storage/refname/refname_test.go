@@ -92,9 +92,6 @@ func TestIsWindowsReservedName(t *testing.T) {
 		"com1", "com2", "com9",
 		"lpt1", "lpt2", "lpt9",
 		"com0", "lpt0", // modern Windows
-		// IsWindowsReservedName only inspects name[3], so multi-digit
-		// suffixes like "com10" still match because name[3]=='1'.
-		"com10", "lpt12",
 	}
 	for _, name := range reserved {
 		if !IsWindowsReservedName(name) {
@@ -112,6 +109,9 @@ func TestIsWindowsReservedName(t *testing.T) {
 		// recognised by this function directly.
 		"CON", "AUX", "NUL",
 		"Com1", "LPT9",
+		// Multi-digit suffixes are NOT reserved on Windows: only COM0-9
+		// and LPT0-9 (exactly 4 chars) are reserved.
+		"com10", "lpt12", "com99",
 	}
 	for _, name := range notReserved {
 		if IsWindowsReservedName(name) {

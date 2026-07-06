@@ -2,8 +2,12 @@ package chunker
 
 import "github.com/your-org/drift/internal/core"
 
+// DefaultSelector is the default Chunker selector: it delegates to
+// BinaryChunkerFor for all files.
 type DefaultSelector struct{}
 
+// ChunkerFor returns a Chunker appropriate for the given file size and
+// configuration. It currently always delegates to BinaryChunkerFor.
 func (DefaultSelector) ChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
 	return BinaryChunkerFor(fileSize, cfg)
 }
@@ -17,6 +21,12 @@ const (
 	binaryHugeThreshold  = 500 * 1024 * 1024  // 500MB
 )
 
+// BinaryChunkerFor returns a Chunker tuned for binary file content of the
+// given size. Files below binaryLargeThreshold use FastCDC with the
+// configured sizes; files between binaryLargeThreshold and
+// binaryHugeThreshold use FastCDC with sizes scaled 4×; files at or above
+// binaryHugeThreshold use fixed chunking derived from the configured average
+// size scaled 8×. A nil cfg is treated as the package defaults.
 func BinaryChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
 	// Default to the package-level constants (which alias core defaults).
 	// A cfg with chunk sizes > 0 overrides them; 0 means "use engine default"

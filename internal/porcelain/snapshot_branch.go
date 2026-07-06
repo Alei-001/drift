@@ -2,7 +2,9 @@ package porcelain
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
@@ -66,6 +68,9 @@ func ResolveSnapshotBranches(ctx context.Context, store storage.Storer) (map[str
 		currHash := b.Target
 		hops := 0
 		for !currHash.IsZero() {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			hashStr := currHash.String()
 			if _, seen := bw.dist[hashStr]; seen {
 				break
@@ -100,4 +105,166 @@ func ResolveSnapshotBranches(ctx context.Context, store storage.Storer) (map[str
 		result[hashStr] = []string{name}
 	}
 	return result, nil
+}
+
+// ResolveHeadSnapshot returns the HEAD snapshot, or nil if none exists.
+//
+// When HEAD is a symbolic reference to a branch, the branch's target snapshot
+// is returned. Although storage backends auto-resolve SymRef into Target,
+// this function re-reads the referenced branch to be robust against backends
+// that may not populate Target for symrefs, mirroring cmd.resolveHead.
+func ResolveHeadSnapshot(ctx context.Context, store storage.Storer) *core.Snapshot {
+	headRef, err := store.GetRef(ctx, "HEAD")
+	if err != nil {
+		return nil
+	}
+	target := headRef.Target
+	if headRef.SymRef != "" {
+		branchRef, err := store.GetRef(ctx, headRef.SymRef)
+		if err != nil {
+			return nil
+		}
+		target = branchRef.Target
+	}
+	if target.IsZero() {
+		return nil
+	}
+	snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: target})
+	if err != nil {
+		return nil
+	}
+	return snap
+}
+
+// SnapshotFileDiff diffs the given snapshot against its predecessor, returning
+// the added, modified, and deleted file sets. When the snapshot has no
+// predecessor (initial snapshot), every file is treated as added.
+//
+// Modification is detected by comparing file Hash (BLAKE3), consistent with
+// countSnapshotDiff. Hash changes iff size or chunk list changes, so this is
+// equivalent to comparing (Size, Chunks) but simpler.
+func SnapshotFileDiff(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string, err error) {
+	currFiles := make(map[string]core.FileEntry)
+	for _, f := range snapshot.Files {
+		currFiles[f.Path] = f
+	}
+
+	// Get previous snapshot files.
+	var prevFiles map[string]core.FileEntry
+	if snapshot.PrevID != nil {
+		prevSnap, err := store.GetSnapshot(ctx, *snapshot.PrevID)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("read previous snapshot: %w", err)
+		}
+		prevFiles = make(map[string]core.FileEntry)
+		for _, f := range prevSnap.Files {
+			prevFiles[f.Path] = f
+		}
+	}
+
+	// Find added and modified.
+	for _, f := range snapshot.Files {
+		if prevFiles == nil {
+			added = append(added, f)
+			continue
+		}
+		if prev, ok := prevFiles[f.Path]; !ok {
+			added = append(added, f)
+		} else if prev.Hash != f.Hash {
+			modified = append(modified, f)
+		}
+	}
+
+	// Find deleted.
+	if prevFiles != nil {
+		for p := range prevFiles {
+			if _, ok := currFiles[p]; !ok {
+				deleted = append(deleted, p)
+			}
+		}
+	}
+
+	return added, modified, deleted, nil
+}
+
+// UndoLastSave reverts the last save operation by moving HEAD back to the
+// previous snapshot. The undone snapshot becomes unreachable (will be
+// collected by gc). It refuses if there are uncommitted workspace changes.
+//
+// If HEAD is a symbolic reference to a branch, the branch's target is moved
+// back. If HEAD is detached, HEAD's own target is moved back. The workspace
+// files are not touched; the index is rebuilt from the previous snapshot so
+// that subsequent status/save operations reflect the new HEAD.
+func UndoLastSave(ctx context.Context, store storage.Storer, workDir string, cfg *core.CoreConfig) error {
+	if cfg == nil {
+		cfg = &core.DefaultConfig().Core
+	}
+	if err := AcquireWorkspaceLock(workDir); err != nil {
+		return fmt.Errorf("acquire workspace lock: %w", err)
+	}
+	defer ReleaseWorkspaceLock(workDir)
+
+	headRef, err := store.GetRef(ctx, "HEAD")
+	if err != nil {
+		return fmt.Errorf("read HEAD: %w", err)
+	}
+
+	currentHash := headRef.Target
+	if currentHash.IsZero() {
+		return ErrCannotUndo
+	}
+
+	currentSnap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: currentHash})
+	if err != nil {
+		return fmt.Errorf("get current snapshot: %w", err)
+	}
+
+	if currentSnap.PrevID == nil || currentSnap.PrevID.Hash.IsZero() {
+		return ErrCannotUndo
+	}
+
+	summary, err := detectChangesNoLock(ctx, store, workDir, cfg)
+	if err != nil {
+		return fmt.Errorf("detect changes: %w", err)
+	}
+	if len(summary.Added) > 0 || len(summary.Modified) > 0 || len(summary.Deleted) > 0 {
+		return ErrUncommittedChanges
+	}
+
+	prevHash := currentSnap.PrevID.Hash
+	if headRef.SymRef != "" {
+		branchRef, err := store.GetRef(ctx, headRef.SymRef)
+		if err != nil {
+			return fmt.Errorf("read branch ref: %w", err)
+		}
+		branchRef.Target = prevHash
+		if err := store.SetRef(ctx, headRef.SymRef, branchRef); err != nil {
+			return fmt.Errorf("update branch ref: %w", err)
+		}
+	} else {
+		headRef.Target = prevHash
+		if err := store.SetRef(ctx, "HEAD", headRef); err != nil {
+			return fmt.Errorf("update HEAD: %w", err)
+		}
+	}
+
+	prevSnap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: prevHash})
+	if err != nil {
+		return fmt.Errorf("get previous snapshot: %w", err)
+	}
+	newIndex := &core.Index{UpdatedAt: time.Now().Unix()}
+	for _, entry := range prevSnap.Files {
+		newIndex.Entries = append(newIndex.Entries, core.IndexEntry{
+			Path:    entry.Path,
+			Size:    entry.Size,
+			ModTime: entry.ModTime,
+			Chunks:  entry.Chunks,
+			Hash:    entry.Hash,
+		})
+	}
+	if err := store.SetIndex(ctx, newIndex); err != nil {
+		return fmt.Errorf("update index: %w", err)
+	}
+
+	return nil
 }

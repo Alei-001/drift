@@ -26,13 +26,21 @@ type ChangeSummary struct {
 // switch, or restore (which would otherwise produce a tear: half the files
 // from the old state, half from the new).
 func DetectChanges(ctx context.Context, store storage.Storer, workDir string, cfg *core.CoreConfig) (*ChangeSummary, error) {
-	if cfg == nil {
-		cfg = &core.DefaultConfig().Core
-	}
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return nil, fmt.Errorf("acquire workspace lock: %w", err)
 	}
 	defer ReleaseWorkspaceLock(workDir)
+	return detectChangesNoLock(ctx, store, workDir, cfg)
+}
+
+// detectChangesNoLock performs the same comparison as DetectChanges but
+// assumes the caller already holds the workspace lock. Callers already
+// holding the lock (e.g. SwitchBranch, UndoLastSave) should use this to
+// avoid a non-re-entrant deadlock.
+func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir string, cfg *core.CoreConfig) (*ChangeSummary, error) {
+	if cfg == nil {
+		cfg = &core.DefaultConfig().Core
+	}
 
 	index, err := store.GetIndex(ctx)
 	if err != nil {

@@ -14,22 +14,20 @@ var initCmd = &cobra.Command{
 	Short: "Initialize a new drift repository",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		target := ""
+		// Honor the global -C/--cwd option so 'drift -C <path> init' works
+		// the same as 'drift init <path>'. cli-design.md documents both.
+		base, err := getCwd(cmd)
+		if err != nil {
+			return err
+		}
+		var target string
 		if len(args) > 0 {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			target, err = filepath.Abs(filepath.Join(cwd, args[0]))
+			target, err = filepath.Abs(filepath.Join(base, args[0]))
 			if err != nil {
 				return err
 			}
 		} else {
-			var err error
-			target, err = os.Getwd()
-			if err != nil {
-				return err
-			}
+			target = base
 		}
 
 		driftDir := filepath.Join(target, ".drift")
@@ -38,12 +36,13 @@ var initCmd = &cobra.Command{
 			return ErrSilent
 		}
 
-		err := porcelain.InitProject(target)
-		if err != nil {
+		if err := porcelain.InitProject(target); err != nil {
 			return err
 		}
-		statusOK("Initialized")
-		fmt.Println(driftDir)
+		if !globalQuiet {
+			statusOK("Initialized")
+			fmt.Println(driftDir)
+		}
 		return nil
 	},
 }

@@ -14,6 +14,15 @@ const (
 
 const HeaderPeekSize = 512
 
+// Zstd compression level bounds. DefaultZstdLevel is used when compression
+// is enabled but no explicit level is configured; MinZstdLevel and
+// MaxZstdLevel clamp out-of-range values in ZstdLevel().
+const (
+	DefaultZstdLevel = 3
+	MinZstdLevel     = 1
+	MaxZstdLevel     = 19
+)
+
 type UserConfig struct {
 	Name  string
 	Email string
@@ -42,7 +51,7 @@ func DefaultConfig() *Config {
 			ChunkAvgSize:     DefaultChunkAvgSize,
 			ChunkMaxSize:     DefaultChunkMaxSize,
 			Compression:      true,
-			CompressionLevel: 3,
+			CompressionLevel: DefaultZstdLevel,
 			IgnoreFile:       DefaultIgnoreFile,
 			AutoSaveInterval: DefaultAutoSaveInterval,
 			AutoSaveKeep:     DefaultAutoSaveKeep,
@@ -83,11 +92,11 @@ func (c *CoreConfig) Normalize() {
 }
 
 func (c *CoreConfig) ZstdLevel() int {
-	if c.CompressionLevel < 1 {
-		return 3
+	if c.CompressionLevel < MinZstdLevel {
+		return DefaultZstdLevel
 	}
-	if c.CompressionLevel > 19 {
-		return 19
+	if c.CompressionLevel > MaxZstdLevel {
+		return MaxZstdLevel
 	}
 	return c.CompressionLevel
 }

@@ -21,6 +21,9 @@ const (
 	fastCDCMinSizeFloor = 64
 )
 
+// FastCDCChunker implements Chunker using the FastCDC content-defined
+// chunking algorithm. Cut points depend on the data itself, so identical
+// regions of two files produce the same chunks.
 type FastCDCChunker struct {
 	minSize int
 	avgSize int
@@ -128,6 +131,9 @@ func nearestPowerOfTwoBetween(minVal, maxVal int) int {
 	return 0
 }
 
+// Chunk splits r into content-defined chunks using FastCDC. Each chunk is
+// BLAKE3-hashed and zero-length chunks are skipped. The returned slice is
+// empty for an empty reader.
 func (f *FastCDCChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
 	// Use "fastcdc-v1.0.0" instead of legacy "fastcdc": the legacy mode
 	// forces hardcoded masks computed for an 8KB NormalSize, which would

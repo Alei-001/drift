@@ -40,6 +40,9 @@ func (ms *MemoryStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID)
 func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOptions) ([]*core.SnapshotSummary, error) {
 	var summaries []*core.SnapshotSummary
 	for _, m := range ms.manifests {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		summaries = append(summaries, core.ManifestToSummary(m))
 	}
 
@@ -47,19 +50,5 @@ func (ms *MemoryStorage) ListSnapshots(ctx context.Context, opts *storage.ListOp
 		return summaries[i].Timestamp > summaries[j].Timestamp
 	})
 
-	if opts == nil {
-		return summaries, nil
-	}
-
-	if opts.Offset > 0 {
-		if opts.Offset >= len(summaries) {
-			return nil, nil
-		}
-		summaries = summaries[opts.Offset:]
-	}
-	if opts.Limit > 0 && opts.Limit < len(summaries) {
-		summaries = summaries[:opts.Limit]
-	}
-
-	return summaries, nil
+	return storage.ApplySummaryPagination(summaries, opts), nil
 }

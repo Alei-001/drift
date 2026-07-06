@@ -7,6 +7,11 @@ import (
 	"github.com/your-org/drift/internal/core"
 )
 
+// Engine bundles the per-filetype capabilities a registered engine must
+// provide: detection, chunker selection, diffing, preview, and metadata.
+// Composing these in one interface lets the registry treat all engines
+// uniformly and keeps each engine self-describing — adding a new filetype
+// requires no edits outside its own package.
 type Engine interface {
 	Detector
 	ChunkerSelector
@@ -21,6 +26,9 @@ type Engine interface {
 	Metadata() *core.FileMetadata
 }
 
+// Detector identifies whether a file belongs to an engine via three layered
+// signals, applied in priority order by the registry: magic bytes (strongest),
+// file extension, and heuristic sniffing (weakest, used only as a fallback).
 type Detector interface {
 	Name() string
 	DetectByMagic(header []byte) bool
@@ -28,6 +36,9 @@ type Detector interface {
 	DetectByHeuristic(path string, header []byte) bool
 }
 
+// ChunkerSelector chooses the chunking strategy for a file of the given size,
+// honouring caller-supplied config when present. Returning nil signals that
+// the caller should store the whole file as a single chunk.
 type ChunkerSelector interface {
 	ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker
 }

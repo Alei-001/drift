@@ -123,7 +123,7 @@ func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 	}
 
 	// fs.compression is read without a lock: the porcelain workspace
-	// lock guarantees single-threaded access, and SetCompression is only
+	// lock guarantees single-threaded access, and SetCompressionConfig is only
 	// called during initialization (before any data-access method).
 	useCompression := fs.compression
 

@@ -14,6 +14,14 @@ import (
 	"github.com/your-org/drift/internal/util/pathutil"
 )
 
+// RestoreSnapshot restores files from snapshotID into workDir. When filePath
+// is empty the entire snapshot is restored (workspace files absent from the
+// snapshot are removed); otherwise only that single file is restored and the
+// index is updated for it. When noBackup is false a backup snapshot of the
+// current workspace is created first and its short ID is returned in backupID
+// (empty when no backup was needed, e.g. ErrNothingToSave). cfg may be nil
+// (core.DefaultConfig is used). The named return err is wrapped by a defer
+// so that on failure the backup ID (if any) is appended for rollback guidance.
 func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool, cfg *core.CoreConfig) (backupID string, err error) {
 	if cfg == nil {
 		cfg = &core.DefaultConfig().Core

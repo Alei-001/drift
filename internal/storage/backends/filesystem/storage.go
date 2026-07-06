@@ -16,7 +16,7 @@ type FSStorage struct {
 	chunkCache   *cache.Cache[core.Hash, *core.Chunk]
 	previewCache *cache.Cache[string, []byte]
 	// lifecycleMu guards the lifecycle transitions of the zstd
-	// encoder/decoder (SetCompression and Close). It does NOT protect
+	// encoder/decoder (SetCompressionConfig and Close). It does NOT protect
 	// data-access methods (GetChunk/PutChunk): those rely on the
 	// porcelain workspace lock guaranteeing single-threaded access.
 	lifecycleMu  sync.Mutex
@@ -80,12 +80,17 @@ func (fs *FSStorage) Close() error {
 	return nil
 }
 
-func (fs *FSStorage) SetCompression(enabled bool, level zstd.EncoderLevel) error {
+// SetCompressionConfig applies the compression settings to the backend.
+// enabled toggles zstd compression of chunk payloads; level is the zstd
+// command-line level (1-19) and is converted to the library's EncoderLevel
+// internally. This satisfies storage.ConfigStorer so porcelain can apply
+// config uniformly across backends without type-asserting to FSStorage.
+func (fs *FSStorage) SetCompressionConfig(enabled bool, level int) error {
 	fs.lifecycleMu.Lock()
 	defer fs.lifecycleMu.Unlock()
 	fs.compression = enabled
 	if enabled {
-		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(level))
+		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(level)))
 		if err != nil {
 			return fmt.Errorf("create zstd encoder: %w", err)
 		}

@@ -138,7 +138,7 @@ func TestCreateSnapshot_ConcurrentWithSwitch(t *testing.T) {
 		defer wg.Done()
 		// Write a unique file so SwitchBranch's auto-save has something to capture.
 		writeFile(dir, "switch.txt", "switch content")
-		_, _, _, switchErr = SwitchBranch(context.Background(), store, dir, "feature", true, "test", nil)
+		_, _, _, switchErr = SwitchBranch(context.Background(), store, dir, "feature", true, false, "test", nil)
 	}()
 
 	wg.Wait()
@@ -176,7 +176,7 @@ func TestCollectGarbage_ConcurrentWithSave(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		_, gcErr = CollectGarbage(context.Background(), store, dir, true)
+		_, gcErr = CollectGarbage(context.Background(), store, dir, true, 0)
 	}()
 
 	wg.Wait()

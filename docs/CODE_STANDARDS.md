@@ -8,14 +8,12 @@ This document defines the code conventions for the **drift** project. It is the 
 
 ### 1.1 Acronyms
 
-All uppercase for initialisms in identifiers — `ID`, `URL`, `HTTP`, `FS`:
+All uppercase for initialisms in identifiers — `ID`, `URL`, `HTTP`, `FS`, `MIME`:
 
 ```
-✅ configID, fsPath, HTTPClient
-❌ configId, fsUrl, HttpClient
+✅ configID, fsPath, HTTPClient, MIMEType
+❌ configId, fsUrl, HttpClient, MimeType
 ```
-
-Exception: `MimeType` → `MIMEType`. This is a pre-existing violation in `internal/core/file_entry.go:5` that will be renamed.
 
 ### 1.2 Receivers
 
@@ -84,7 +82,7 @@ Use `errors.Is()` and `errors.As()`, never string matching:
 ❌ if strings.Contains(err.Error(), "not found") { ... }
 ```
 
-The project has pre-existing `strings.Contains(err.Error())` calls. These will be migrated.
+Production code must classify errors with `errors.Is` / `errors.As`. Test code is exempt: tests may use `strings.Contains(err.Error(), ...)` to assert user-facing error messages.
 
 ### 2.4 Silent error discarding
 
@@ -136,13 +134,11 @@ Use `defer` immediately after resource acquisition:
 
 ### 4.1 Named constants required
 
-All non-trivial literals must be named constants. Specific thresholds:
+All non-trivial literals must be named constants. Existing examples:
 
-| Value | Current locations | Action |
-|-------|------------------|--------|
-| `512` (header peek) | `internal/porcelain/snapshot.go`, `internal/cmd-adjacent code` | Extract to `core.HeaderPeekSize` (already done) |
-| `maxSymRefDepth = 8` | both storage backends | Extract to `storage.MaxSymRefDepth` (already done) |
-| `maxChunkMin/Avg/MaxSize` | both storage backends | Extract to `storage.MaxChunk...` (already done) |
+- `core.HeaderPeekSize = 512` (header peek buffer size)
+- `storage.MaxSymRefDepth = 8` (maximum symbolic reference chain depth)
+- `storage.MaxChunkMinSize` / `MaxChunkAvgSize` / `MaxChunkMaxSize` (chunk size bounds)
 
 ---
 
@@ -228,15 +224,7 @@ import any business package, so the only public surface is the CLI.
 
 ### 6.3 De-duplication rule
 
-Any function or constant that appears identically in two files must be extracted to the nearest shared ancestor package:
-
-| Duplicate | Where | Extract to |
-|-----------|-------|------------|
-| `cloneChunk()`, `cloneFileEntry()`, `cloneSnapshot()` | `internal/storage/backends/filesystem/`, `internal/storage/backends/memory/` | `internal/storage/` |
-| `maxSymRefDepth` | both storage backends | `internal/storage/` |
-| `maxChunkMin/Avg/MaxSize` | both storage backends | `internal/storage/` |
-| `formatSize` / `humanReadableSize` | `cmd/`, `internal/filetype/image/`, `internal/filetype/video/` | `internal/util/format/` |
-| `computeChanges` / `computeVerboseChanges` | `cmd/save.go`, `cmd/log.go` | merge into one, keep in cmd |
+Any function or constant that appears identically in two files must be extracted to the nearest shared ancestor package.
 
 ---
 

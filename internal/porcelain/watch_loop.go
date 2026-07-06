@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,149 +21,14 @@ import (
 // WatchState summarizes the runtime state of a watch daemon.
 type WatchState struct {
 	StartTime       int64  `json:"start_time"`
+	Interval        int    `json:"interval"`
 	AutoSaves       int    `json:"auto_saves"`
 	MaxSaves        int    `json:"max_saves"`
 	LastSaveTime    int64  `json:"last_save_time"`
 	LastSaveChanges string `json:"last_save_changes"`
 	Pruned          int    `json:"pruned"`
 	LastError       string `json:"last_error"`
-}
-
-// StartDaemon starts a background watch daemon for the project at cwd.
-// It returns the PID of the started process.
-func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, error) {
-	driftDir := filepath.Join(cwd, ".drift")
-	pidPath := filepath.Join(driftDir, "watch.pid")
-
-	if data, err := os.ReadFile(pidPath); err == nil {
-		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-		if err == nil && processExists(pid) {
-			return 0, fmt.Errorf("a watch daemon is already running (PID %d)", pid)
-		}
-		os.Remove(pidPath)
-	}
-
-	// Resolve the current executable path rather than trusting os.Args[0].
-	// A malicious drift binary placed earlier on PATH could otherwise hijack
-	// the daemon subprocess, since os.Args[0] is whatever the parent shell
-	// used to launch us and need not be an absolute path.
-	exePath, err := os.Executable()
-	if err != nil {
-		return 0, fmt.Errorf("resolve executable path: %w", err)
-	}
-	cmd := exec.Command(exePath, "_watch_daemon",
-		"--interval", strconv.Itoa(interval),
-		"--keep", strconv.Itoa(keep))
-	cmd.Dir = cwd
-	setSysProcAttr(cmd)
-
-	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("start daemon: %w", err)
-	}
-
-	pid := cmd.Process.Pid
-
-	// Create the pid file atomically with O_CREATE|O_EXCL. If another daemon
-	// won the race to create the pid file between our pre-check and cmd.Start,
-	// we must not overwrite its pid file — instead kill the subprocess we just
-	// spawned and report the failure. This closes the TOCTOU window that
-	// existed when the pid file was written with a rename-based atomic write
-	// (which silently clobbers an existing file).
-	f, err := os.OpenFile(pidPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if err != nil {
-		cmd.Process.Kill()
-		return 0, fmt.Errorf("write pid file: %w", err)
-	}
-	if _, err := f.Write([]byte(strconv.Itoa(pid))); err != nil {
-		f.Close()
-		os.Remove(pidPath)
-		cmd.Process.Kill()
-		return 0, fmt.Errorf("write pid file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(pidPath)
-		cmd.Process.Kill()
-		return 0, fmt.Errorf("close pid file: %w", err)
-	}
-
-	return pid, nil
-}
-
-// StopDaemon stops the watch daemon for the project at cwd.
-// Returns the number of auto-saves created and snapshots pruned during the session.
-func StopDaemon(ctx context.Context, cwd string) (int, int, error) {
-	driftDir := filepath.Join(cwd, ".drift")
-	pidPath := filepath.Join(driftDir, "watch.pid")
-	statePath := filepath.Join(driftDir, "watch.state")
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		return 0, 0, fmt.Errorf("no watch daemon running")
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid PID file")
-	}
-
-	autoSaves := 0
-	pruned := 0
-	if stateData, err := os.ReadFile(statePath); err == nil {
-		var state WatchState
-		if err := json.Unmarshal(stateData, &state); err == nil {
-			autoSaves = state.AutoSaves
-			pruned = state.Pruned
-		}
-	}
-
-	if err := killProcess(pid); err != nil {
-		// Log but don't fail — the pid file is still cleaned up below,
-		// and a failed kill usually means the process already exited.
-		slog.Warn("kill daemon failed", "pid", pid, "error", err)
-	}
-
-	os.Remove(pidPath)
-	os.Remove(statePath)
-	// The daemon may have been killed while holding the workspace lock.
-	// Only remove the lock if it still belongs to the daemon's PID, so we
-	// don't clobber a lock acquired by another command in the meantime.
-	removeLockIfOwned(filepath.Join(driftDir, "workspace.lock"), pid)
-
-	return autoSaves, pruned, nil
-}
-
-// DaemonStatus checks whether a watch daemon is running for the project at cwd.
-// If the daemon is alive, it returns the state and true.
-// If the daemon is not running, it cleans up stale files and returns nil, false, nil.
-func DaemonStatus(ctx context.Context, cwd string) (*WatchState, bool, error) {
-	driftDir := filepath.Join(cwd, ".drift")
-	pidPath := filepath.Join(driftDir, "watch.pid")
-	statePath := filepath.Join(driftDir, "watch.state")
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		return nil, false, nil
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		os.Remove(pidPath)
-		return nil, false, nil
-	}
-
-	if !processExists(pid) {
-		os.Remove(pidPath)
-		os.Remove(statePath)
-		return nil, false, nil
-	}
-
-	stateData, err := os.ReadFile(statePath)
-	if err != nil {
-		return nil, true, nil
-	}
-	var state WatchState
-	if err := json.Unmarshal(stateData, &state); err != nil {
-		return nil, true, nil
-	}
-	return &state, true, nil
+	Paused          bool   `json:"paused"`
 }
 
 // RunDaemonLoop runs the watch daemon loop. It periodically detects workspace
@@ -190,6 +53,8 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("daemon panic", "panic", r)
+			// Best-effort cleanup after a panic: the daemon is dying, so
+			// stale pid/state/lock files are harmless if removal fails.
 			os.Remove(pidPath)
 			os.Remove(statePath)
 			removeLockIfOwned(filepath.Join(driftDir, "workspace.lock"), os.Getpid())
@@ -198,6 +63,7 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 
 	state := &WatchState{
 		StartTime: time.Now().Unix(),
+		Interval:  interval,
 		MaxSaves:  keep,
 	}
 	writeState(statePath, state)
@@ -211,21 +77,35 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 	for {
 		select {
 		case <-sigChan:
+			// Best-effort cleanup: the daemon is exiting, so stale pid/state
+			// files are harmless if removal fails (the next start reclaims them).
 			os.Remove(pidPath)
 			os.Remove(statePath)
 			return
 		case <-ctx.Done():
+			// Best-effort cleanup: same rationale as sigChan — the daemon is
+			// exiting and leftover files will be reclaimed on next start.
 			os.Remove(pidPath)
 			os.Remove(statePath)
 			return
 		case <-ticker.C:
+			// Re-read state to pick up pause/resume toggles set by
+			// external commands (drift watch pause/resume). The in-memory
+			// state is refreshed so subsequent writeState calls preserve
+			// the flag.
+			if fileState, err := readState(statePath); err == nil {
+				state.Paused = fileState.Paused
+			}
+			if state.Paused {
+				continue
+			}
 			// DetectChanges acquires+releases the workspace lock; if another
 			// operation holds it, detection simply fails and we retry next
 			// tick. This replaces the former IsWorkspaceLocked pre-check.
 			changes, err := DetectChanges(ctx, store, cwd, cfg)
 			if err != nil {
 				state.LastError = "detect: " + err.Error()
-				writeState(statePath, state)
+				writeStateMergingPause(statePath, state)
 				continue
 			}
 			total := len(changes.Added) + len(changes.Modified) + len(changes.Deleted)
@@ -237,15 +117,15 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			// record it and wait for the next period rather than blocking.
 			if err := AcquireWorkspaceLock(cwd); err != nil {
 				state.LastError = err.Error()
-				writeState(statePath, state)
+				writeStateMergingPause(statePath, state)
 				continue
 			}
-			msg := "auto - " + time.Now().Format("2006-01-02 15:04")
+			msg := autoSavePrefix + " " + time.Now().Format("2006-01-02 15:04")
 			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", nil, cfg)
 			if err != nil {
 				state.LastError = "save: " + err.Error()
 				ReleaseWorkspaceLock(cwd)
-				writeState(statePath, state)
+				writeStateMergingPause(statePath, state)
 				continue
 			}
 
@@ -266,7 +146,7 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			}
 
 			ReleaseWorkspaceLock(cwd)
-			writeState(statePath, state)
+			writeStateMergingPause(statePath, state)
 		}
 	}
 }
@@ -285,7 +165,7 @@ func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (in
 
 	var autoSnaps []*core.SnapshotSummary
 	for _, s := range snapshots {
-		if strings.HasPrefix(s.Message, "auto -") {
+		if strings.HasPrefix(s.Message, autoSavePrefix) {
 			autoSnaps = append(autoSnaps, s)
 		}
 	}
@@ -312,6 +192,9 @@ func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (in
 	}
 	// BFS from roots following PrevID
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		sid := queue[0]
 		queue = queue[1:]
 		if reachable[sid] {
@@ -356,4 +239,30 @@ func writeState(path string, state *WatchState) {
 	if err := fsutil.WriteFileAtomic(path, data, 0644); err != nil {
 		slog.Warn("write watch state", "path", path, "error", err)
 	}
+}
+
+// writeStateMergingPause writes state to the state file after re-reading the
+// existing file to preserve the Paused flag. This prevents the daemon loop
+// from clobbering a Paused=true that PauseDaemon wrote concurrently during
+// the (potentially long) detect+save window of a tick. If the state file
+// cannot be read (e.g. it does not exist yet), the write proceeds as-is.
+func writeStateMergingPause(path string, state *WatchState) {
+	if latest, err := readState(path); err == nil && latest != nil {
+		state.Paused = latest.Paused
+	}
+	writeState(path, state)
+}
+
+// readState reads and unmarshals the watch state file. Returns an error if
+// the file is missing or cannot be parsed.
+func readState(path string) (*WatchState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var state WatchState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
 }

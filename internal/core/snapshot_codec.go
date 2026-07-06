@@ -24,11 +24,11 @@ func SnapshotToProto(s *Snapshot, withIDHash bool) *SnapshotProto {
 		TotalSize: s.TotalSize,
 	}
 	if s.PrevID != nil {
-		p.PrevIdHash = make([]byte, 32)
+		p.PrevIdHash = make([]byte, HashSize)
 		copy(p.PrevIdHash, s.PrevID.Hash[:])
 	}
 	if withIDHash && s.ID != (SnapshotID{}) {
-		p.IdHash = make([]byte, 32)
+		p.IdHash = make([]byte, HashSize)
 		copy(p.IdHash, s.ID.Hash[:])
 	}
 	p.Files = make([]*FileEntryProto, len(s.Files))
@@ -55,7 +55,7 @@ func fileEntryToProto(f *FileEntry) *FileEntryProto {
 	if len(f.Chunks) > 0 {
 		fp.ChunkHashes = make([][]byte, len(f.Chunks))
 		for i, c := range f.Chunks {
-			fp.ChunkHashes[i] = make([]byte, 32)
+			fp.ChunkHashes[i] = make([]byte, HashSize)
 			copy(fp.ChunkHashes[i], c[:])
 		}
 	}
@@ -72,7 +72,7 @@ func fileEntryToProto(f *FileEntry) *FileEntryProto {
 		}
 	}
 	if f.Hash != (Hash{}) {
-		fp.FileHash = make([]byte, 32)
+		fp.FileHash = make([]byte, HashSize)
 		copy(fp.FileHash, f.Hash[:])
 	}
 	return fp

@@ -73,8 +73,10 @@ func TestCreateBranch_InvalidName(t *testing.T) {
 		t.Error("expected error for name with '..', got nil")
 	}
 
-	if err := CreateBranch(context.Background(), store, "", "foo/bar"); err == nil {
-		t.Error("expected error for name with path separator, got nil")
+	// Hierarchical branch names (e.g. "feature/foo") follow Git semantics
+	// and are allowed by refname.Validate.
+	if err := CreateBranch(context.Background(), store, "", "feature/foo"); err != nil {
+		t.Errorf("expected hierarchical name to be allowed, got: %v", err)
 	}
 }
 
@@ -313,8 +315,9 @@ func TestRenameBranch_InvalidNewName(t *testing.T) {
 	if err := RenameBranch(context.Background(), store, "", "feature", "foo..bar"); err == nil {
 		t.Error("expected error for new name with '..', got nil")
 	}
-	if err := RenameBranch(context.Background(), store, "", "feature", "foo/bar"); err == nil {
-		t.Error("expected error for new name with path separator, got nil")
+	// Hierarchical names are allowed (Git semantics).
+	if err := RenameBranch(context.Background(), store, "", "feature", "release/v1"); err != nil {
+		t.Errorf("expected hierarchical new name to be allowed, got: %v", err)
 	}
 }
 

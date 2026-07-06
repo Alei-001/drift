@@ -14,12 +14,17 @@ import (
 // It auto-saves current changes, updates HEAD symref, and restores the target snapshot to workspace.
 // Returns autosave snapshot short ID (empty if nothing to save), the source branch name,
 // and the number of files that differ between the source and target branch snapshots.
-func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, name string, create bool, author string, cfg *core.CoreConfig) (string, string, int, error) {
+//
+// When noAutosave is true, the auto-save step is skipped and the workspace
+// must be clean (no uncommitted changes); otherwise ErrUncommittedChanges is
+// returned. This supports the 'drift switch --no-autosave' flow for users who
+// have already manually saved and want to avoid an extra [auto] snapshot.
+func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, name string, create, noAutosave bool, author string, cfg *core.CoreConfig) (string, string, int, error) {
 	if cfg == nil {
 		cfg = &core.DefaultConfig().Core
 	}
 	if err := AcquireWorkspaceLock(workDir); err != nil {
-		return "", "", 0, err
+		return "", "", 0, fmt.Errorf("acquire workspace lock: %w", err)
 	}
 	defer ReleaseWorkspaceLock(workDir)
 
@@ -46,13 +51,24 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 	}
 
 	autosaveID := ""
-	autosaveSnap, err := createSnapshotInLock(ctx, store, workDir, "auto - switch backup", author, nil, cfg)
-	if err != nil {
-		if !errors.Is(err, ErrNothingToSave) {
-			return "", "", 0, fmt.Errorf("auto-save: %w", err)
+	var autosaveSnap *core.Snapshot
+	if noAutosave {
+		summary, err := detectChangesNoLock(ctx, store, workDir, cfg)
+		if err != nil {
+			return "", "", 0, fmt.Errorf("check workspace changes: %w", err)
+		}
+		if len(summary.Added) > 0 || len(summary.Modified) > 0 || len(summary.Deleted) > 0 {
+			return "", "", 0, ErrUncommittedChanges
 		}
 	} else {
-		autosaveID = autosaveSnap.ShortID()
+		autosaveSnap, err = createSnapshotInLock(ctx, store, workDir, "auto - switch backup", author, nil, cfg)
+		if err != nil {
+			if !errors.Is(err, ErrNothingToSave) {
+				return "", "", 0, fmt.Errorf("auto-save: %w", err)
+			}
+		} else {
+			autosaveID = autosaveSnap.ShortID()
+		}
 	}
 
 	// Read target branch ref (before any modification).

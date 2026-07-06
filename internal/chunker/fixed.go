@@ -8,20 +8,36 @@ import (
 	"github.com/zeebo/blake3"
 )
 
+// fixedChunkMinSize and fixedChunkMaxSize bound the chunk size accepted by
+// NewFixedChunker. Sizes outside this range are clamped to the nearest bound.
+const (
+	fixedChunkMinSize = 4096
+	fixedChunkMaxSize = 64 * 1024 * 1024
+)
+
+// FixedChunker implements Chunker by splitting the input into fixed-size
+// chunks. Cut points are independent of the data, so identical bytes at
+// different offsets produce different chunks.
 type FixedChunker struct {
 	chunkSize int
 }
 
+// NewFixedChunker creates a FixedChunker with the given chunk size. Sizes
+// below fixedChunkMinSize or above fixedChunkMaxSize are clamped to the
+// nearest bound.
 func NewFixedChunker(chunkSize int) *FixedChunker {
-	if chunkSize < 4096 {
-		chunkSize = 4096
+	if chunkSize < fixedChunkMinSize {
+		chunkSize = fixedChunkMinSize
 	}
-	if chunkSize > 64*1024*1024 { // 64MB upper limit
-		chunkSize = 64 * 1024 * 1024
+	if chunkSize > fixedChunkMaxSize {
+		chunkSize = fixedChunkMaxSize
 	}
 	return &FixedChunker{chunkSize: chunkSize}
 }
 
+// Chunk splits r into consecutive fixed-size chunks. The final chunk may be
+// shorter than the chunk size if the input length is not a multiple of it.
+// Each chunk is BLAKE3-hashed.
 func (f *FixedChunker) Chunk(r io.Reader) ([]*core.Chunk, error) {
 	buf := make([]byte, f.chunkSize)
 	var chunks []*core.Chunk

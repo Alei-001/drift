@@ -22,8 +22,25 @@ var (
 	// exist.
 	ErrSnapshotNotFound = errors.New("snapshot not found")
 
+	// ErrAmbiguousID is returned when an @id:<prefix> reference matches more
+	// than one snapshot. The wrapped error message lists the matching
+	// snapshots so callers can surface them to the user.
+	ErrAmbiguousID = errors.New("ambiguous snapshot ID prefix")
+
 	// ErrTagAlreadyExists is returned when creating a tag that already exists.
 	ErrTagAlreadyExists = errors.New("tag already exists")
+
+	// ErrTagNotFound is returned when a referenced tag does not exist.
+	ErrTagNotFound = errors.New("tag not found")
+
+	// ErrCannotUndo is returned when UndoLastSave is called but HEAD is
+	// already at the initial snapshot (no previous snapshot to revert to).
+	ErrCannotUndo = errors.New("cannot undo: already at initial snapshot")
+
+	// ErrUncommittedChanges is returned when an operation that would lose
+	// workspace changes is attempted (e.g. undo with a dirty workspace, or
+	// switch --no-autosave with a dirty workspace).
+	ErrUncommittedChanges = errors.New("uncommitted changes would be lost")
 
 	// ErrCannotDeleteCurrentBranch is returned when attempting to delete the
 	// currently checked-out branch.

@@ -10,15 +10,22 @@ import (
 	"github.com/your-org/drift/internal/util/fsutil"
 )
 
-var ignoreList bool
-var ignoreRemove string
-
+// ignoreCmd is the parent command for ignore-rule management. It has no
+// RunE so cobra displays help when invoked without a subcommand.
 var ignoreCmd = &cobra.Command{
 	Use:   "ignore",
-	Short: "Manage ignore rules",
-	Args:  cobra.ArbitraryArgs,
+	Short: "Manage ignore rules (list, add, remove)",
+	Long:  "Manage .driftignore rules. Subcommands: list, add, remove.",
+}
+
+// ignoreListCmd prints all current ignore rules.
+var ignoreListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List current ignore rules",
+	Long:  "List all patterns currently in .driftignore.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := os.Getwd()
+		cwd, err := getCwd(cmd)
 		if err != nil {
 			return err
 		}
@@ -27,35 +34,54 @@ var ignoreCmd = &cobra.Command{
 			return err
 		}
 		defer store.Close()
+
 		ignorePath := filepath.Join(cwd, ".driftignore")
-
-		if ignoreList {
-			rules, err := listIgnoreRules(ignorePath)
-			if err != nil {
-				return err
+		rules, err := listIgnoreRules(ignorePath)
+		if err != nil {
+			return err
+		}
+		if globalJSON {
+			ruleList := rules
+			if ruleList == nil {
+				ruleList = []string{}
 			}
-			fmt.Printf(">>> Ignore rules (%d)\n", len(rules))
-			for _, r := range rules {
-				fmt.Println(r)
-			}
+			return outputJSON(JSONEnvelope{
+				Command: "ignore",
+				Status:  "ok",
+				Data:    ignoreJSONData{Rules: ruleList},
+			})
+		}
+		// Quiet mode: success produces no output (exit code is authoritative).
+		if globalQuiet {
 			return nil
 		}
-
-		if ignoreRemove != "" {
-			if err := removeIgnoreRule(ignorePath, ignoreRemove); err != nil {
-				statusFailed("Ignore", fmt.Sprintf("pattern '%s' not found.", ignoreRemove), "use 'drift ignore --list' to see current rules.")
-				return ErrSilent
-			}
-			statusOK("Ignore updated")
-			fmt.Printf("- %s\n", ignoreRemove)
-			fmt.Printf("\n  1 rule removed.\n")
-			return nil
+		fmt.Printf(">>> Ignore rules (%d)\n", len(rules))
+		for _, r := range rules {
+			fmt.Println(r)
 		}
+		return nil
+	},
+}
 
-		if len(args) == 0 {
-			return cmd.Help()
+// ignoreAddCmd appends one or more patterns to .driftignore, skipping
+// duplicates.
+var ignoreAddCmd = &cobra.Command{
+	Use:   "add <pattern>...",
+	Short: "Add ignore rules",
+	Long:  "Add one or more patterns to .driftignore. Duplicates are skipped.",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cwd, err := getCwd(cmd)
+		if err != nil {
+			return err
 		}
+		store, _, err := openProjectOrReport("Ignore", cwd)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
 
+		ignorePath := filepath.Join(cwd, ".driftignore")
 		existing, err := readIgnoreFile(ignorePath)
 		if err != nil {
 			return err
@@ -79,19 +105,56 @@ var ignoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		statusOK("Ignore updated")
-		for _, p := range newPatterns {
-			fmt.Printf("+ %s\n", p)
+		if !globalQuiet {
+			statusOK("Ignore updated")
+			for _, p := range newPatterns {
+				fmt.Printf("+ %s\n", p)
+			}
+			fmt.Printf("\n  %d rules added.\n", n)
 		}
-		fmt.Printf("\n  %d rules added.\n", n)
 		return nil
 	},
 }
 
+// ignoreRemoveCmd removes a single pattern from .driftignore.
+var ignoreRemoveCmd = &cobra.Command{
+	Use:   "remove <pattern>",
+	Short: "Remove an ignore rule",
+	Long:  "Remove a single pattern from .driftignore.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cwd, err := getCwd(cmd)
+		if err != nil {
+			return err
+		}
+		store, _, err := openProjectOrReport("Ignore", cwd)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+
+		ignorePath := filepath.Join(cwd, ".driftignore")
+		pattern := args[0]
+		if err := removeIgnoreRule(ignorePath, pattern); err != nil {
+			reportFailed("Ignore", "ignore", fmt.Sprintf("pattern '%s' not found.", pattern), "use 'drift ignore list' to see current rules.")
+			return ErrSilent
+		}
+		if !globalQuiet {
+			statusOK("Ignore updated")
+			fmt.Printf("- %s\n", pattern)
+			fmt.Printf("\n  1 rule removed.\n")
+		}
+		return nil
+	},
+}
+
+// readIgnoreFile reads the patterns from the ignore file at path.
 func readIgnoreFile(path string) ([]string, error) {
 	return fsutil.ReadIgnoreFile(path)
 }
 
+// addIgnoreRules appends patterns to the ignore file at filePath, skipping
+// duplicates. Returns the number of patterns actually added.
 func addIgnoreRules(filePath string, patterns []string) (int, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil && !os.IsNotExist(err) {
@@ -126,10 +189,13 @@ func addIgnoreRules(filePath string, patterns []string) (int, error) {
 	return len(added), nil
 }
 
+// listIgnoreRules reads the patterns from the ignore file at filePath.
 func listIgnoreRules(filePath string) ([]string, error) {
 	return readIgnoreFile(filePath)
 }
 
+// removeIgnoreRule removes the first occurrence of pattern from the ignore
+// file at filePath. Returns an error if the file or pattern is not found.
 func removeIgnoreRule(filePath string, pattern string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -155,7 +221,13 @@ func removeIgnoreRule(filePath string, pattern string) error {
 }
 
 func init() {
-	ignoreCmd.Flags().BoolVar(&ignoreList, "list", false, "list ignore rules")
-	ignoreCmd.Flags().StringVar(&ignoreRemove, "remove", "", "remove a rule")
+	ignoreCmd.AddCommand(ignoreListCmd)
+	ignoreCmd.AddCommand(ignoreAddCmd)
+	ignoreCmd.AddCommand(ignoreRemoveCmd)
 	rootCmd.AddCommand(ignoreCmd)
+}
+
+// ignoreJSONData is the data payload of the 'drift ignore list --json' envelope.
+type ignoreJSONData struct {
+	Rules []string `json:"rules"`
 }

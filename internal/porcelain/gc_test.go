@@ -22,7 +22,7 @@ func TestCollectGarbage_AllReachable(t *testing.T) {
 	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snapHash}, PrevID: nil})
 
-	report, err := CollectGarbage(context.Background(), store, dir, false)
+	report, err := CollectGarbage(context.Background(), store, dir, false, 0)
 	if err != nil {
 		t.Fatalf("CollectGarbage failed: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestCollectGarbage_ReclaimsUnreachable(t *testing.T) {
 	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk2, Size: 200, Data: []byte("chunk2")})
 	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk3, Size: 300, Data: []byte("chunk3")})
 
-	report, err := CollectGarbage(context.Background(), store, dir, false)
+	report, err := CollectGarbage(context.Background(), store, dir, false, 0)
 	if err != nil {
 		t.Fatalf("CollectGarbage failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestCollectGarbage_SharedChunkPreserved(t *testing.T) {
 	})
 	store.PutChunk(context.Background(), &core.Chunk{Hash: chunkA, Size: 150, Data: []byte("shared")})
 
-	report, err := CollectGarbage(context.Background(), store, dir, false)
+	report, err := CollectGarbage(context.Background(), store, dir, false, 0)
 	if err != nil {
 		t.Fatalf("CollectGarbage failed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestCollectGarbage_DryRunNoDelete(t *testing.T) {
 	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk1, Size: 100, Data: []byte("chunk1")})
 	store.PutChunk(context.Background(), &core.Chunk{Hash: chunk2, Size: 250, Data: []byte("chunk2")})
 
-	report, err := CollectGarbage(context.Background(), store, dir, true)
+	report, err := CollectGarbage(context.Background(), store, dir, true, 0)
 	if err != nil {
 		t.Fatalf("CollectGarbage dry-run failed: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestCollectGarbage_PrevIDChain(t *testing.T) {
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap3}, PrevID: &core.SnapshotID{Hash: snap2}})
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap4}, PrevID: nil})
 
-	report, err := CollectGarbage(context.Background(), store, dir, false)
+	report, err := CollectGarbage(context.Background(), store, dir, false, 0)
 	if err != nil {
 		t.Fatalf("CollectGarbage failed: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestCollectGarbage_TagKeepsSnapshot(t *testing.T) {
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap1}, PrevID: nil})
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snap2}, PrevID: nil})
 
-	report, err := CollectGarbage(context.Background(), store, dir, false)
+	report, err := CollectGarbage(context.Background(), store, dir, false, 0)
 	if err != nil {
 		t.Fatalf("CollectGarbage failed: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestCollectGarbage_ZeroTargetSkipped(t *testing.T) {
 	store.SetRef(context.Background(), "HEAD", &core.Reference{Name: "HEAD", Type: core.RefTypeHead, SymRef: "heads/main"})
 	store.PutSnapshot(context.Background(), &core.Snapshot{ID: core.SnapshotID{Hash: snapOrphan}, PrevID: nil})
 
-	report, err := CollectGarbage(context.Background(), store, dir, false)
+	report, err := CollectGarbage(context.Background(), store, dir, false, 0)
 	if err != nil {
 		t.Fatalf("CollectGarbage failed: %v", err)
 	}

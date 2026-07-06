@@ -5,30 +5,41 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/filetype"
-	"github.com/your-org/drift/internal/porcelain"
 	"github.com/your-org/drift/internal/storage"
 	"github.com/your-org/drift/internal/storage/stream"
 	"github.com/your-org/drift/internal/util/pathutil"
 )
 
+// Layout constants for showFileList output.
+const (
+	// minPathPadding is added to the longest path width so short paths
+	// still align with the size column.
+	minPathPadding = 3
+	// sizeColWidth is the field width for the formatted size in the file
+	// listing.
+	sizeColWidth = 8
+)
+
 var showOpen bool
 
 var showCmd = &cobra.Command{
-	Use:   "show [<snapshot-id>] <file>",
-	Short: "Show file content from a snapshot",
-	Args:  cobra.RangeArgs(1, 2),
+	Use:   "show [<version>] [<file>]",
+	Short: "Show snapshot contents or a file from a snapshot",
+	Long: "Show lists files in a snapshot, or displays a file's content.\n" +
+		"\n" +
+		"Without arguments, shows help.\n" +
+		"With only a version, lists files in that snapshot.\n" +
+		"With a version and a file, displays the file content (text) or metadata (binary/image).",
+	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := os.Getwd()
+		cwd, err := getCwd(cmd)
 		if err != nil {
 			return err
 		}
@@ -38,292 +49,191 @@ var showCmd = &cobra.Command{
 		}
 		defer store.Close()
 
-		var idStr, filePath string
+		if len(args) == 0 {
+			return cmd.Help()
+		}
+
+		// Argument parsing:
+		//   - 1 arg starting with '@': a version reference; list its files.
+		//   - 1 arg not starting with '@': treated as a file path with an
+		//     implicit HEAD version. This is an intentional UX decision:
+		//     `drift show README.md` reads more naturally than
+		//     `drift show @head README.md`. It does not conflict with
+		//     cli-design.md, whose examples always pass an explicit
+		//     version; the bare-name-as-branch grammar from cli-design.md
+		//     still applies when the user intends a branch (e.g.
+		//     `drift show main`).
+		//   - 2 args: version then file.
+		var versionLabel, filePath string
 		if len(args) == 1 {
-			headSnap := porcelain.ResolveHeadSnapshot(ctx, store)
-			if headSnap == nil {
-				statusFailed("Show", "no snapshot to show from.", "use 'drift save -m \"message\"' to create one first.")
-				return ErrSilent
+			if strings.HasPrefix(args[0], "@") {
+				versionLabel = args[0]
+			} else {
+				versionLabel = "@head"
+				filePath = args[0]
 			}
-			idStr = headSnap.ShortID()
-			filePath = args[0]
 		} else {
-			idStr = args[0]
+			versionLabel = args[0]
 			filePath = args[1]
 		}
 
-		snapshot := resolveSnapshot(ctx, store, idStr)
-		if snapshot == nil {
-			statusFailed("Show", fmt.Sprintf("snapshot not found: %s.", idStr), "use 'drift log' to list available snapshots.")
-			return ErrSilent
-		}
+		snapshot := resolveSnapshot(ctx, store, versionLabel)
+	if snapshot == nil {
+		reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
+			"use 'drift log' to list available snapshots.")
+		return ErrSilent
+	}
 
-		var targetEntry *core.FileEntry
-		normalizedPath, err := pathutil.RelToWorkDir(cwd, filePath)
-		if err != nil {
-			statusFailed("Show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
-				"use a relative path from the project root.")
-			return ErrSilent
-		}
-		for i := range snapshot.Files {
-			if snapshot.Files[i].Path == normalizedPath {
-				targetEntry = &snapshot.Files[i]
-				break
-			}
-		}
-		if targetEntry == nil {
-			statusFailed("Show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, snapshot.ShortID()),
-				fmt.Sprintf("use 'drift log -v %s' to list files in this snapshot.", snapshot.ShortID()))
-			return ErrSilent
-		}
-
-		// Stream the snapshot file from chunks. Peek a 512-byte header for
-		// engine detection and dimension parsing without buffering the file;
-		// fullReader replays the header followed by the remainder, so the
-		// whole stream remains available when needed.
-		chunkR := stream.NewChunkReader(ctx, store, targetEntry.Chunks)
-		header, fullReader, err := stream.PeekHeader(chunkR, core.HeaderPeekSize)
-		if err != nil {
-			return fmt.Errorf("read header for %s: %w", filePath, err)
-		}
-		engine := filetype.DetectEngine(normalizedPath, header)
-
-		// --open: launch system viewer for any file type
-		if showOpen {
-			return openExternal(snapshot, filePath, fullReader)
-		}
-
-		// Unknown file type: refuse to dump raw bytes to the terminal
-		if engine == nil {
-			fmt.Fprintf(os.Stderr, "cannot display binary file (unknown type)\n")
-			return nil
-		}
-
-		// Binary file handling (metadata only)
-		if engine.Name() != "text" {
-			// Show metadata
-			fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
-			fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
-			if dims := imageDimensions(header); dims != "" {
-				fmt.Printf("  Dimensions: %s\n", dims)
-			}
-			if targetEntry.ModTime > 0 {
-				modTimeStr := time.Unix(0, targetEntry.ModTime).Format("01-02 15:04")
-				fmt.Printf("  Modified:   %s\n", modTimeStr)
-			}
-			fmt.Println()
-			fmt.Println("  hint: use --open to view with system program.")
-			return nil
-		}
-
-		// Text file: print header then stream content to stdout
-		fmt.Printf(">>> File %s:%s\n", snapshot.ShortID(), filePath)
-		fmt.Println()
-		if _, err := io.Copy(os.Stdout, fullReader); err != nil {
-			return fmt.Errorf("stream %s: %w", filePath, err)
-		}
-		return nil
+	if filePath == "" {
+		return showFileList(ctx, store, snapshot, versionLabel)
+	}
+	return showFile(ctx, store, cwd, snapshot, versionLabel, filePath)
 	},
 }
 
-// safePreviewExts lists file extensions considered safe to hand to the
-// system viewer. Extensions outside this set are replaced with ".bin" so
-// that executable formats (e.g. .exe, .bat, .ps1) cannot be launched via
-// "drift show --open".
-var safePreviewExts = map[string]bool{
-	".png":  true,
-	".jpg":  true,
-	".jpeg": true,
-	".gif":  true,
-	".webp": true,
-	".bmp":  true,
-	".txt":  true,
-	".md":   true,
-	".pdf":  true,
-	".csv":  true,
-	".json": true,
-	".xml":  true,
-	".html": true,
-}
-
-// safePreviewExt returns the file extension to use for a preview temp file.
-// Unsafe or unknown extensions are replaced with ".bin" to prevent the
-// system viewer from executing dangerous file types.
-func safePreviewExt(filePath string) string {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if safePreviewExts[ext] {
-		return ext
+// showFileList prints the list of files in a snapshot with type info.
+// The status line uses versionLabel (the user-supplied reference) so the
+// output matches the input syntax rather than the resolved short ID.
+func showFileList(ctx context.Context, store storage.Storer, snap *core.Snapshot, versionLabel string) error {
+	if globalJSON {
+		return showFileListJSON(ctx, store, snap, versionLabel)
 	}
-	return ".bin"
-}
-
-func openExternal(snapshot *core.Snapshot, filePath string, r io.Reader) error {
-	fmt.Printf(">>> Opening [ok]\n")
-
-	// Use a drift-specific temp directory so old preview files can be
-	// cleaned up on subsequent invocations.
-	tmpDir := filepath.Join(os.TempDir(), "drift-previews")
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return fmt.Errorf("create preview dir: %w", err)
+	// Quiet mode: suppress file listing output.
+	if globalQuiet {
+		return nil
 	}
+	fmt.Printf(">>> Snapshot %s (%d %s)\n", versionLabel, len(snap.Files), pluralFile(len(snap.Files)))
+	if len(snap.Files) == 0 {
+		fmt.Println()
+		fmt.Println("  (no files)")
+		return nil
+	}
+	fmt.Println()
 
-	// Best-effort cleanup of stale preview files (older than 1 hour).
-	cleanOldPreviews(tmpDir, time.Hour)
-
-	ext := safePreviewExt(filePath)
-	tmpFile, err := os.CreateTemp(tmpDir, "drift_preview_*"+ext)
-	if err != nil {
-		return fmt.Errorf("cannot create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	if _, err := io.Copy(tmpFile, r); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("write preview file: %w", err)
-	}
-	tmpFile.Close()
-
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", tmpPath)
-	case "darwin":
-		cmd = exec.Command("open", tmpPath)
-	default:
-		cmd = exec.Command("xdg-open", tmpPath)
-	}
-	if err := cmd.Start(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	// Bound the viewer's lifetime so a hung process cannot leak the
-	// goroutine (and the temp file) forever.
-	timer := time.AfterFunc(30*time.Minute, func() {
-		if cmd.Process != nil {
-			cmd.Process.Kill()
+	pathWidth := 0
+	for _, f := range snap.Files {
+		if len(f.Path) > pathWidth {
+			pathWidth = len(f.Path)
 		}
-	})
-	go func() {
-		cmd.Wait()
-		timer.Stop()
-		os.Remove(tmpPath)
-	}()
-	fmt.Printf("Launched system viewer for %s:%s.\n", snapshot.ShortID(), filePath)
+	}
+	// Minimum padding so short paths still align with the size column.
+	pathWidth += minPathPadding
+
+	for i := range snap.Files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		f := &snap.Files[i]
+		typeLabel := fileTypeLabel(ctx, store, f)
+		fmt.Printf("  %-*s%*s   %s\n", pathWidth, f.Path, sizeColWidth, formatSize(f.Size), typeLabel)
+	}
+
+	fmt.Println()
+	fmt.Printf("  %d %s\n", len(snap.Files), pluralFile(len(snap.Files)))
 	return nil
 }
 
-// cleanOldPreviews removes files in dir older than maxAge. Best-effort;
-// errors are silently ignored.
-func cleanOldPreviews(dir string, maxAge time.Duration) {
-	entries, err := os.ReadDir(dir)
+// fileTypeLabel returns a human-readable type label for a file entry by
+// peeking the chunk header and running engine detection. Image files
+// include parsed dimensions when available.
+func fileTypeLabel(ctx context.Context, store storage.Storer, entry *core.FileEntry) string {
+	chunkR := stream.NewChunkReader(ctx, store, entry.Chunks)
+	header, _, err := stream.PeekHeader(chunkR, core.HeaderPeekSize)
 	if err != nil {
-		return
+		return "binary"
 	}
-	cutoff := time.Now().Add(-maxAge)
-	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			continue
+	engine := filetype.DetectEngine(entry.Path, header)
+	if engine == nil {
+		return "binary"
+	}
+	switch engine.Name() {
+	case "text":
+		return "text"
+	case "image":
+		if dims := imageDimensions(header); dims != "" {
+			return "image (" + dims + ")"
 		}
-		if info.ModTime().Before(cutoff) {
-			os.Remove(filepath.Join(dir, e.Name()))
+		return "image"
+	default:
+		return engine.Name()
+	}
+}
+
+// showFile displays a single file from a snapshot: text content is streamed
+// to stdout, binary/image files show metadata. versionLabel is used in the
+// status line so the output matches the user's input reference.
+func showFile(ctx context.Context, store storage.Storer, cwd string, snapshot *core.Snapshot, versionLabel, filePath string) error {
+	normalizedPath, err := pathutil.RelToWorkDir(cwd, filePath)
+	if err != nil {
+		reportFailed("Show", "show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
+			"use a relative path from the project root.")
+		return ErrSilent
+	}
+
+	var targetEntry *core.FileEntry
+	for i := range snapshot.Files {
+		if snapshot.Files[i].Path == normalizedPath {
+			targetEntry = &snapshot.Files[i]
+			break
 		}
 	}
+	if targetEntry == nil {
+		reportFailed("Show", "show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, versionLabel),
+			fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel))
+		return ErrSilent
+	}
+
+	if globalJSON {
+		return showFileJSON(ctx, store, cwd, snapshot, versionLabel, filePath)
+	}
+
+	chunkR := stream.NewChunkReader(ctx, store, targetEntry.Chunks)
+	header, fullReader, err := stream.PeekHeader(chunkR, core.HeaderPeekSize)
+	if err != nil {
+		reportFailed("Show", "show", fmt.Sprintf("cannot read '%s' from snapshot: %s.", filePath, err),
+			"the chunk data may be missing or corrupted; use 'drift check' to verify.")
+		return ErrSilent
+	}
+	engine := filetype.DetectEngine(normalizedPath, header)
+
+	if showOpen {
+		return openExternal(versionLabel, filePath, fullReader)
+	}
+
+	// Quiet mode: suppress file content/metadata output (--open still works
+	// because it returns above before this guard).
+	if globalQuiet {
+		return nil
+	}
+
+	if engine != nil && engine.Name() == "text" {
+		fmt.Printf(">>> File %s:%s\n", versionLabel, filePath)
+		fmt.Println()
+		if _, err := io.Copy(os.Stdout, fullReader); err != nil {
+			reportFailed("Show", "show", fmt.Sprintf("failed to stream '%s': %s.", filePath, err), "")
+			return ErrSilent
+		}
+		return nil
+	}
+
+	// Binary or image file: show metadata.
+	fmt.Printf(">>> File %s:%s\n", versionLabel, filePath)
+	fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
+	if engine != nil && engine.Name() == "image" {
+		if dims := imageDimensions(header); dims != "" {
+			fmt.Printf("  Dimensions: %s\n", dims)
+		}
+	}
+	if targetEntry.ModTime > 0 {
+		modTimeStr := time.Unix(0, targetEntry.ModTime).Format("01-02 15:04")
+		fmt.Printf("  Modified:   %s\n", modTimeStr)
+	}
+	fmt.Println()
+	fmt.Println("  hint: use --open to view with system program.")
+	return nil
 }
 
 func init() {
 	showCmd.Flags().BoolVar(&showOpen, "open", false, "open file with system viewer")
 	rootCmd.AddCommand(showCmd)
-}
-
-func resolveSnapshot(ctx context.Context, store storage.Storer, id string) *core.Snapshot {
-	// @tag:<name> — resolve via tags/<name> reference
-	if strings.HasPrefix(id, "@tag:") {
-		tagName := id[5:]
-		tagRef, err := store.GetRef(ctx, "tags/"+tagName)
-		if err != nil {
-			return nil
-		}
-		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: tagRef.Target})
-		if err != nil {
-			return nil
-		}
-		return snap
-	}
-
-	// Branch name resolution: "main" or the current branch name
-	headRef, headErr := store.GetRef(ctx, "HEAD")
-	if headErr == nil && headRef.SymRef != "" {
-		branchName := strings.TrimPrefix(headRef.SymRef, "heads/")
-		if id == branchName || id == "main" {
-			refName := headRef.SymRef
-			if id != branchName {
-				refName = "heads/main"
-			}
-			branchRef, err := store.GetRef(ctx, refName)
-			if err == nil && !branchRef.Target.IsZero() {
-				snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: branchRef.Target})
-				if err == nil {
-					return snap
-				}
-			}
-		}
-	}
-
-	if id == "HEAD" {
-		headRef, err := store.GetRef(ctx, "HEAD")
-		if err != nil {
-			return nil
-		}
-		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
-		if err != nil {
-			return nil
-		}
-		return snap
-	}
-
-	// Full hash (64 chars)
-	if len(id) == 64 {
-		var hash core.Hash
-		for i := 0; i < 32; i++ {
-			b, ok := parseHexByte(id[i*2 : i*2+2])
-			if !ok {
-				return nil
-			}
-			hash[i] = b
-		}
-		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: hash})
-		if err != nil {
-			return nil
-		}
-		return snap
-	}
-
-	// Short hash prefix — match via lightweight summaries, then load the
-	// full snapshot so the caller gets file data.
-	summaries, err := store.ListSnapshots(ctx, &storage.ListOptions{})
-	if err != nil {
-		return nil
-	}
-	var matches []*core.SnapshotSummary
-	for _, s := range summaries {
-		if strings.HasPrefix(s.ShortID(), id) || strings.HasPrefix(s.FullID(), id) {
-			matches = append(matches, s)
-		}
-	}
-	if len(matches) == 1 {
-		snap, err := store.GetSnapshot(ctx, matches[0].ID)
-		if err != nil {
-			return nil
-		}
-		return snap
-	}
-	if len(matches) > 1 {
-		fmt.Fprintf(os.Stderr, "ambiguous snapshot ID '%s' matches %d snapshots:\n", id, len(matches))
-		for _, m := range matches {
-			fmt.Fprintf(os.Stderr, "  %s\n", m.ShortID())
-		}
-		return nil
-	}
-	return nil
 }

@@ -55,7 +55,7 @@ func (fs *FSStorage) getRefRecursive(ctx context.Context, name string, depth int
 		}
 		return &core.Reference{
 			Name:   name,
-			Type:   refType(name),
+			Type:   refname.RefType(name),
 			SymRef: symRef,
 			Target: target.Target,
 		}, nil
@@ -73,7 +73,7 @@ func (fs *FSStorage) getRefRecursive(ctx context.Context, name string, depth int
 	ref := &core.Reference{
 		Name:   name,
 		Target: h,
-		Type:   refType(name),
+		Type:   refname.RefType(name),
 	}
 	return ref, nil
 }
@@ -109,10 +109,18 @@ func (fs *FSStorage) SetRef(ctx context.Context, name string, ref *core.Referenc
 }
 
 func (fs *FSStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {
+	// Bail out early if the caller has already cancelled, before we start
+	// walking the refs directory.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	refsRoot := filepath.Join(fs.root, RefsDir)
 	var refs []*core.Reference
 	err := filepath.WalkDir(refsRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if d.IsDir() {
@@ -159,17 +167,4 @@ func (fs *FSStorage) DeleteRef(ctx context.Context, name string) error {
 		return fmt.Errorf("delete ref %q: %w", name, err)
 	}
 	return nil
-}
-
-func refType(name string) core.RefType {
-	if name == "HEAD" {
-		return core.RefTypeHead
-	}
-	if strings.HasPrefix(name, HeadsDir+"/") {
-		return core.RefTypeBranch
-	}
-	if strings.HasPrefix(name, TagsDir+"/") {
-		return core.RefTypeTag
-	}
-	return core.RefTypeBranch
 }

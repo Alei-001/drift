@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 		t.Fatalf("modify file: %v", err)
 	}
 
-	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "feature", false, "test", nil)
+	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "feature", false, false, "test", nil)
 	if err != nil {
 		t.Fatalf("SwitchBranch failed: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestSwitchBranch_CreateNew(t *testing.T) {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
-	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "experimental", true, "test", nil)
+	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "experimental", true, false, "test", nil)
 	if err != nil {
 		t.Fatalf("SwitchBranch failed: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestSwitchBranch_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	store := setupSwitchStore()
 
-	_, _, _, err := SwitchBranch(context.Background(), store, dir, "nonexistent", false, "test", nil)
+	_, _, _, err := SwitchBranch(context.Background(), store, dir, "nonexistent", false, false, "test", nil)
 	if err == nil {
 		t.Fatal("expected error for non-existent branch, got nil")
 	}
@@ -177,7 +178,7 @@ func TestSwitchBranch_NoChanges(t *testing.T) {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
-	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "feature", false, "test", nil)
+	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "feature", false, false, "test", nil)
 	if err != nil {
 		t.Fatalf("SwitchBranch failed: %v", err)
 	}
@@ -215,5 +216,85 @@ func TestSwitchBranch_NoChanges(t *testing.T) {
 	}
 	if featureRef.Target != snap1.ID.Hash {
 		t.Error("expected feature branch to point to snap1")
+	}
+}
+
+// TestSwitchBranch_NoAutosave_CleanWorkspace verifies that noAutosave=true
+// with a clean workspace skips the auto-save step entirely: no [auto]
+// snapshot is created, autosaveID is empty, and HEAD moves to the target
+// branch which inherits the source branch's snapshot as its starting point.
+func TestSwitchBranch_NoAutosave_CleanWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	store := setupSwitchStore()
+
+	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+
+	// Workspace is clean (no changes since snap1). noAutosave=true should
+	// succeed without creating an [auto] snapshot.
+	autosaveID, fromBranch, diffCount, err := SwitchBranch(context.Background(), store, dir, "feature", false, true, "test", nil)
+	if err != nil {
+		t.Fatalf("SwitchBranch noAutosave clean: %v", err)
+	}
+	if autosaveID != "" {
+		t.Errorf("expected empty autosaveID (no autosave), got '%s'", autosaveID)
+	}
+	if fromBranch != "main" {
+		t.Errorf("expected fromBranch 'main', got '%s'", fromBranch)
+	}
+	if diffCount != 0 {
+		t.Errorf("expected diffCount 0, got %d", diffCount)
+	}
+
+	headRef, _ := store.GetRef(context.Background(), "HEAD")
+	if headRef.SymRef != "heads/feature" {
+		t.Errorf("expected HEAD symref 'heads/feature', got '%s'", headRef.SymRef)
+	}
+	featureRef, _ := store.GetRef(context.Background(), "heads/feature")
+	if featureRef.Target != snap1.ID.Hash {
+		t.Errorf("expected feature to inherit snap1, got %s", featureRef.Target.String())
+	}
+}
+
+// TestSwitchBranch_NoAutosave_DirtyWorkspace verifies that noAutosave=true
+// with uncommitted changes refuses with ErrUncommittedChanges. HEAD must
+// remain on the original branch and the workspace change must be preserved.
+func TestSwitchBranch_NoAutosave_DirtyWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	store := setupSwitchStore()
+
+	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	if err != nil {
+		t.Fatalf("CreateSnapshot: %v", err)
+	}
+	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+		t.Fatalf("CreateBranch: %v", err)
+	}
+
+	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v2 modified"), 0644)
+
+	_, _, _, err = SwitchBranch(context.Background(), store, dir, "feature", false, true, "test", nil)
+	if !errors.Is(err, ErrUncommittedChanges) {
+		t.Fatalf("expected ErrUncommittedChanges, got %v", err)
+	}
+
+	headRef, _ := store.GetRef(context.Background(), "HEAD")
+	if headRef.SymRef != "heads/main" {
+		t.Errorf("expected HEAD remain on 'heads/main', got '%s'", headRef.SymRef)
+	}
+	mainRef, _ := store.GetRef(context.Background(), "heads/main")
+	if mainRef.Target != snap1.ID.Hash {
+		t.Errorf("expected main remain at snap1, got %s", mainRef.Target.String())
+	}
+	content, _ := os.ReadFile(filepath.Join(dir, "file1.txt"))
+	if string(content) != "content v2 modified" {
+		t.Errorf("expected uncommitted change preserved, got %q", string(content))
 	}
 }

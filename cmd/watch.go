@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,14 +15,16 @@ var watchKeep int
 var watchCmd = &cobra.Command{
 	Use:   "watch",
 	Short: "Auto-watch and save changes",
+	Long:  "Manage the background watch daemon that auto-saves workspace changes. Subcommands: on, off, status, pause, resume.",
 }
 
 var watchOnCmd = &cobra.Command{
 	Use:   "on",
 	Short: "Start background watching",
+	Long:  "Start a background daemon that watches the workspace for file changes and auto-saves snapshots at the configured interval. Only creates a snapshot when changes are detected.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := os.Getwd()
+		cwd, err := getCwd(cmd)
 		if err != nil {
 			return err
 		}
@@ -51,9 +52,10 @@ var watchOnCmd = &cobra.Command{
 var watchOffCmd = &cobra.Command{
 	Use:   "off",
 	Short: "Stop background watching",
+	Long:  "Stop the running watch daemon. Reports the number of auto-saves created and snapshots pruned during the session.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := os.Getwd()
+		cwd, err := getCwd(cmd)
 		if err != nil {
 			return err
 		}
@@ -62,10 +64,12 @@ var watchOffCmd = &cobra.Command{
 			statusFailed("Watch", err.Error(), "")
 			return ErrSilent
 		}
-		statusOK("Stopped")
-		fmt.Printf("Daemon stopped. %d auto-saves created.\n", autoSaves)
-		if pruned > 0 {
-			fmt.Printf("%d older auto-saves pruned during this session.\n", pruned)
+		if !globalQuiet {
+			statusOK("Stopped")
+			fmt.Printf("Daemon stopped. %d auto-saves created.\n", autoSaves)
+			if pruned > 0 {
+				fmt.Printf("%d older auto-saves pruned during this session.\n", pruned)
+			}
 		}
 		return nil
 	},
@@ -74,9 +78,10 @@ var watchOffCmd = &cobra.Command{
 var watchStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show watch daemon status",
+	Long:  "Show whether the watch daemon is running, paused, or inactive. When active, displays uptime, auto-save count, and last save summary.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := os.Getwd()
+		cwd, err := getCwd(cmd)
 		if err != nil {
 			return err
 		}
@@ -84,10 +89,20 @@ var watchStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		// Quiet mode: success produces no output (exit code is authoritative).
+		if globalQuiet {
+			return nil
+		}
 		if !active || state == nil {
 			fmt.Println(">>> Watch [inactive]")
 			fmt.Println("No watch daemon running.")
 			fmt.Println("Start with 'drift watch on'.")
+			return nil
+		}
+		if state.Paused {
+			fmt.Println(">>> Watch [paused]")
+			fmt.Println("Daemon paused. Configuration retained.")
+			fmt.Println("Use 'drift watch resume' to continue.")
 			return nil
 		}
 		statusActive("Watching")
@@ -112,7 +127,7 @@ var watchDaemonCmd = &cobra.Command{
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := os.Getwd()
+		cwd, err := getCwd(cmd)
 		if err != nil {
 			return err
 		}
@@ -122,6 +137,63 @@ var watchDaemonCmd = &cobra.Command{
 		}
 		defer store.Close()
 		porcelain.RunDaemonLoop(ctx, store, cwd, watchInterval, watchKeep, &cfg.Core)
+		return nil
+	},
+}
+
+// watchPauseCmd pauses the running daemon without stopping it. The
+// configuration (--interval/--keep) is retained so resume can pick up
+// where pause left off.
+var watchPauseCmd = &cobra.Command{
+	Use:   "pause",
+	Short: "Pause the watch daemon",
+	Long:  "Pause the running watch daemon without stopping it. The configuration (--interval/--keep) is retained so 'drift watch resume' can pick up where pause left off.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		cwd, err := getCwd(cmd)
+		if err != nil {
+			return err
+		}
+		if _, err := porcelain.PauseDaemon(ctx, cwd); err != nil {
+			statusFailed("Watch", err.Error(), "use 'drift watch on' to start watching.")
+			return ErrSilent
+		}
+		if !globalQuiet {
+			fmt.Println(">>> Watch [paused]")
+			fmt.Println("Daemon paused. Configuration retained.")
+			fmt.Println("Use 'drift watch resume' to continue.")
+		}
+		return nil
+	},
+}
+
+// watchResumeCmd resumes a paused daemon. The interval from the
+// preserved state is echoed back so the user knows detection has resumed.
+var watchResumeCmd = &cobra.Command{
+	Use:   "resume",
+	Short: "Resume the watch daemon",
+	Long:  "Resume a paused watch daemon. Detection resumes on the next tick using the retained --interval and --keep configuration.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		cwd, err := getCwd(cmd)
+		if err != nil {
+			return err
+		}
+		state, err := porcelain.ResumeDaemon(ctx, cwd)
+		if err != nil {
+			statusFailed("Watch", err.Error(), "use 'drift watch on' to start watching.")
+			return ErrSilent
+		}
+		interval := state.Interval
+		if interval <= 0 {
+			interval = core.DefaultAutoSaveInterval
+		}
+		if !globalQuiet {
+			statusActive("Watching")
+			fmt.Printf("Daemon resumed. Auto-save every %ds.\n", interval)
+		}
 		return nil
 	},
 }
@@ -146,6 +218,8 @@ func init() {
 	watchCmd.AddCommand(watchOnCmd)
 	watchCmd.AddCommand(watchOffCmd)
 	watchCmd.AddCommand(watchStatusCmd)
+	watchCmd.AddCommand(watchPauseCmd)
+	watchCmd.AddCommand(watchResumeCmd)
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(watchDaemonCmd)
 }

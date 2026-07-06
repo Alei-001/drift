@@ -4,16 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
 )
+
+// autoSavePrefix is the message prefix that identifies auto-saved snapshots
+// (created by 'drift watch'). --keep-auto uses it to distinguish auto-saves
+// from manual saves when deciding which unreachable snapshots to preserve.
+const autoSavePrefix = "auto -"
 
 // GCReport describes the outcome of a garbage collection pass.
 type GCReport struct {
 	SnapshotsRemoved int
 	ChunksRemoved    int
 	FreedBytes       int64
+	// AutoKept is the number of unreachable [auto] snapshots preserved by
+	// --keep-auto. They are not counted in SnapshotsRemoved.
+	AutoKept int
 }
 
 // collectRoots gathers the target hashes of all branch and tag references.
@@ -57,6 +67,9 @@ func computeReachability(ctx context.Context, store storage.Storer) (map[core.Ha
 	}
 
 	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		h := queue[0]
 		queue = queue[1:]
 
@@ -91,12 +104,16 @@ func computeReachability(ctx context.Context, store storage.Storer) (map[core.Ha
 // the report reflects what would be reclaimed. FreedBytes is computed in
 // both modes (best-effort via GetChunk) and is an estimate when dryRun.
 //
+// keepAuto preserves the N most recent unreachable [auto] snapshots (those
+// whose message starts with the auto-save prefix) from deletion, acting as
+// a safety net against accidental data loss. Their chunks are also kept.
+//
 // GC does not touch workspace files, but it must not run concurrently with
 // CreateSnapshot: a save in progress may be about to link a chunk that GC
 // would otherwise delete as unreachable. Acquiring the workspace lock
 // serializes GC against save/switch/restore, which are the only operations
 // that add new chunks or snapshots.
-func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, dryRun bool) (GCReport, error) {
+func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, dryRun bool, keepAuto int) (GCReport, error) {
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return GCReport{}, fmt.Errorf("acquire workspace lock: %w", err)
 	}
@@ -109,9 +126,25 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 		return report, err
 	}
 
-	// --- Unreachable snapshots ---
+	// Partition snapshots into reachable and unreachable.
+	var unreachable []*core.SnapshotSummary
 	for _, snap := range allSnapshots {
-		if reachable[snap.ID.Hash] {
+		if !reachable[snap.ID.Hash] {
+			unreachable = append(unreachable, snap)
+		}
+	}
+
+	// keptAuto holds the hashes of unreachable [auto] snapshots that
+	// --keep-auto preserves from deletion (most recent N by timestamp).
+	keptAuto := selectKeptAutoSnapshots(unreachable, keepAuto)
+	report.AutoKept = len(keptAuto)
+
+	// --- Unreachable snapshots (except kept auto-saves) ---
+	for _, snap := range unreachable {
+		if err := ctx.Err(); err != nil {
+			return report, err
+		}
+		if keptAuto[snap.ID.Hash] {
 			continue
 		}
 		report.SnapshotsRemoved++
@@ -123,15 +156,15 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 	}
 
 	// --- Unreferenced chunks ---
-	// Collect chunk hashes referenced by reachable snapshots. ListSnapshots
-	// returns metadata-only snapshots (nil Files), so fetch each reachable
-	// snapshot's full data to access its chunk references.
+	// Collect chunk hashes referenced by reachable snapshots and kept
+	// auto-saves. ListSnapshots returns metadata-only snapshots (nil Files),
+	// so fetch each snapshot's full data to access its chunk references.
 	reachableChunks := make(map[core.Hash]bool)
 	for _, snap := range allSnapshots {
 		if err := ctx.Err(); err != nil {
 			return GCReport{}, err
 		}
-		if !reachable[snap.ID.Hash] {
+		if !reachable[snap.ID.Hash] && !keptAuto[snap.ID.Hash] {
 			continue
 		}
 		full, err := store.GetSnapshot(ctx, snap.ID)
@@ -194,6 +227,34 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 	}
 
 	return report, nil
+}
+
+// selectKeptAutoSnapshots returns a set of snapshot hashes to preserve from
+// deletion when --keep-auto is set. Among the unreachable snapshots, it
+// selects those whose message starts with the auto-save prefix, sorts them
+// newest-first by timestamp, and keeps at most keepAuto of them. When
+// keepAuto <= 0 the result is always empty.
+func selectKeptAutoSnapshots(unreachable []*core.SnapshotSummary, keepAuto int) map[core.Hash]bool {
+	if keepAuto <= 0 || len(unreachable) == 0 {
+		return nil
+	}
+	var autoSnaps []*core.SnapshotSummary
+	for _, s := range unreachable {
+		if strings.HasPrefix(s.Message, autoSavePrefix) {
+			autoSnaps = append(autoSnaps, s)
+		}
+	}
+	if len(autoSnaps) == 0 {
+		return nil
+	}
+	sort.Slice(autoSnaps, func(i, j int) bool {
+		return autoSnaps[i].Timestamp > autoSnaps[j].Timestamp
+	})
+	kept := make(map[core.Hash]bool, keepAuto)
+	for i := 0; i < keepAuto && i < len(autoSnaps); i++ {
+		kept[autoSnaps[i].ID.Hash] = true
+	}
+	return kept
 }
 
 // CountUnreachableSnapshots returns the number of snapshots that are not

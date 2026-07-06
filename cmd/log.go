@@ -2,11 +2,8 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -16,18 +13,38 @@ import (
 	"github.com/your-org/drift/internal/storage"
 )
 
+// autoSavePrefix is the message prefix that identifies auto-saved snapshots
+// (created by 'drift watch'). The log command hides these by default unless
+// --all is given. Mirrors the unexported porcelain.autoSavePrefix.
+const autoSavePrefix = "auto -"
+
+// Column widths for the default table view. Messages, branch names, and tags
+// longer than these widths are truncated with "..." (width-1 runes plus the
+// ellipsis).
+const (
+	msgColWidth    = 28
+	branchColWidth = 16
+	tagColWidth    = 12
+	tagMaxLen      = 10
+)
+
 var logLimit int
-var logVerbose string
-var logJSON bool
+var logDetail string
 var logAll bool
 var logBranch string
 
 var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: "Show snapshot history",
+	Long: `Browse snapshot history.
+
+By default only manually created snapshots are shown; auto-saves created by
+'drift watch' are hidden unless --all is given. Use --branch to filter by
+branch, --limit to cap the number of entries, and --detail to inspect the
+file changes of a single snapshot.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := os.Getwd()
+		cwd, err := getCwd(cmd)
 		if err != nil {
 			return err
 		}
@@ -37,8 +54,8 @@ var logCmd = &cobra.Command{
 		}
 		defer store.Close()
 
-		if logVerbose != "" {
-			return logVerboseMode(ctx, store, logVerbose)
+		if logDetail != "" {
+			return logDetailMode(ctx, store, logDetail)
 		}
 
 		var snapshots []*core.SnapshotSummary
@@ -67,9 +84,11 @@ var logCmd = &cobra.Command{
 				}
 			}
 		} else {
-			// Global: list all, build branch map for the column
-			opts := &storage.ListOptions{Limit: logLimit, Offset: 0}
-			snapshots, err = store.ListSnapshots(ctx, opts)
+			// Global: list ALL snapshots, then filter auto-saves and apply the
+			// limit afterwards. Applying the limit at the storage layer would
+			// surface only the N most recent entries — which may be dominated
+			// by auto-saves — hiding older manual snapshots from the user.
+			snapshots, err = store.ListSnapshots(ctx, &storage.ListOptions{})
 			if err != nil {
 				return err
 			}
@@ -79,10 +98,10 @@ var logCmd = &cobra.Command{
 			}
 		}
 
-		// Filter auto-saves unless --all
+		// Filter auto-saves unless --all.
 		var filtered []*core.SnapshotSummary
 		for _, s := range snapshots {
-			if !logAll && strings.HasPrefix(s.Message, "auto -") {
+			if !logAll && strings.HasPrefix(s.Message, autoSavePrefix) {
 				continue
 			}
 			filtered = append(filtered, s)
@@ -93,8 +112,8 @@ var logCmd = &cobra.Command{
 		// if snapshot A's PrevID points to snapshot B, then A is newer.
 		sortSnapshotSummariesNewestFirst(filtered)
 
-		// Apply limit after filtering for branch walk
-		if logBranch != "" && logLimit > 0 && len(filtered) > logLimit {
+		// Apply limit after filtering (both global and branch paths).
+		if logLimit > 0 && len(filtered) > logLimit {
 			filtered = filtered[:logLimit]
 		}
 
@@ -107,11 +126,16 @@ var logCmd = &cobra.Command{
 			return ErrSilent
 		}
 
-		if logJSON {
+		if globalJSON {
 			return logJSONMode(ctx, store, filtered, branchMap)
 		}
 
-		// Default table format
+		// Quiet mode: success produces no output (exit code is authoritative).
+		if globalQuiet {
+			return nil
+		}
+
+		// Default table format.
 		label := fmt.Sprintf("History (%d snapshots", len(filtered))
 		if logBranch != "" {
 			label += fmt.Sprintf(" on '%s'", logBranch)
@@ -127,17 +151,17 @@ var logCmd = &cobra.Command{
 			changes := formatChangesCompact(add, mod, del)
 
 			msg := s.Message
-			if len([]rune(msg)) > 28 {
-				msg = string([]rune(msg)[:27]) + "…"
+			if len([]rune(msg)) > msgColWidth {
+				msg = string([]rune(msg)[:msgColWidth-1]) + "..."
 			}
 
-			// Branch column
+			// Branch column.
 			branchCol := ""
 			if branches, ok := branchMap[s.ID.Hash.String()]; ok && len(branches) > 0 {
 				branchCol = strings.Join(branches, ",")
 			}
-			if len([]rune(branchCol)) > 16 {
-				branchCol = string([]rune(branchCol)[:15]) + "…"
+			if len([]rune(branchCol)) > branchColWidth {
+				branchCol = string([]rune(branchCol)[:branchColWidth-1]) + "..."
 			}
 
 			tag := ""
@@ -148,50 +172,70 @@ var logCmd = &cobra.Command{
 				}
 			}
 			if tag != "" {
-				if len([]rune(tag)) > 10 {
-					tag = string([]rune(tag)[:9]) + "…"
+				if len([]rune(tag)) > tagMaxLen {
+					tag = string([]rune(tag)[:tagMaxLen-1]) + "..."
 				}
 				tag = "[" + tag + "]"
 			}
 
 			suffix := ""
-			if strings.HasPrefix(s.Message, "auto -") {
+			if strings.HasPrefix(s.Message, autoSavePrefix) {
 				suffix = "    · dimmed"
 			}
-			fmt.Printf("%s  %s  %-16s  %-28s  %-12s  %s%s\n", s.ShortID(), timeStr, branchCol, msg, tag, changes, suffix)
+			fmt.Printf("%s  %s  %-*s  %-*s  %-*s  %s%s\n",
+				s.ShortID(), timeStr,
+				branchColWidth, branchCol,
+				msgColWidth, msg,
+				tagColWidth, tag,
+				changes, suffix)
 		}
 		return nil
 	},
 }
 
-func logVerboseMode(ctx context.Context, store storage.Storer, id string) error {
+// logDetailMode prints the file-change detail for a single snapshot. In JSON
+// mode it emits an envelope; in quiet mode it produces no output; otherwise
+// it prints the human-readable snapshot header, file list, and summary.
+func logDetailMode(ctx context.Context, store storage.Storer, id string) error {
 	snapshot := resolveSnapshot(ctx, store, id)
 	if snapshot == nil {
 		statusFailed("Log", fmt.Sprintf("snapshot not found: %s.", id), "use 'drift log' to list available snapshots.")
 		return ErrSilent
 	}
 
-	fmt.Printf(">>> Snapshot %s\n", snapshot.ShortID())
-	timeStr := time.Unix(snapshot.Timestamp, 0).Format("2006-01-02 15:04")
-	fmt.Printf("%s  %s\n", timeStr, snapshot.Message)
-
-	add, mod, del, err := computeChanges(ctx, store, snapshot)
+	add, mod, del, err := porcelain.SnapshotFileDiff(ctx, store, snapshot)
 	if err != nil {
 		return err
 	}
+
+	if globalJSON {
+		return logDetailJSONMode(ctx, store, snapshot, add, mod, del)
+	}
+
+	// Quiet mode: success produces no output.
+	if globalQuiet {
+		return nil
+	}
+
+	fmt.Printf(">>> Snapshot %s\n", snapshot.ShortID())
+	timeStr := time.Unix(snapshot.Timestamp, 0).Format("2006-01-02 15:04")
+	fmt.Printf("%s  %s\n", timeStr, snapshot.Message)
 	printFileListWithLineCount(add, mod, del, store)
 	total := len(add) + len(mod) + len(del)
 	summaryLine(total, len(add), len(mod), len(del))
 	return nil
 }
 
+// countSnapshotChanges loads a snapshot and computes its added/modified/deleted
+// file counts against its predecessor. Errors are logged and zero counts are
+// returned so that a single failure does not abort the whole log listing.
 func countSnapshotChanges(ctx context.Context, store storage.Storer, summary *core.SnapshotSummary) (added, modified, deleted int) {
 	snapshot, err := store.GetSnapshot(ctx, summary.ID)
 	if err != nil {
 		slog.Warn("load snapshot for changes", "snapshot", summary.ShortID(), "error", err)
 		return 0, 0, 0
 	}
-	a, m, d, err := computeChanges(ctx, store, snapshot)
+	a, m, d, err := porcelain.SnapshotFileDiff(ctx, store, snapshot)
 	if err != nil {
 		slog.Warn("compute snapshot changes failed", "snapshot", snapshot.ShortID(), "error", err)
 		return 0, 0, 0
@@ -200,7 +244,7 @@ func countSnapshotChanges(ctx context.Context, store storage.Storer, summary *co
 }
 
 // formatChangesCompact formats change counts as "+A ~M -D", omitting zero parts.
-// Example: 2 added, 1 modified, 0 deleted → "+2 ~1"
+// Example: 2 added, 1 modified, 0 deleted -> "+2 ~1"
 func formatChangesCompact(added, modified, deleted int) string {
 	var parts []string
 	if added > 0 {
@@ -218,97 +262,10 @@ func formatChangesCompact(added, modified, deleted int) string {
 	return strings.Join(parts, " ")
 }
 
-// sortSnapshotSummariesNewestFirst sorts snapshot summaries newest-first.
-// Primary sort key is timestamp (descending). When timestamps are equal (rapid
-// successive saves), it uses the PrevID chain: if A.PrevID == B.ID then A is
-// newer than B. This is stable for unrelated summaries.
-func sortSnapshotSummariesNewestFirst(snaps []*core.SnapshotSummary) {
-	summaryByID := make(map[core.SnapshotID]*core.SnapshotSummary, len(snaps))
-	for _, s := range snaps {
-		summaryByID[s.ID] = s
-	}
-
-	depth := make(map[core.SnapshotID]int, len(snaps))
-	for _, start := range snaps {
-		if _, ok := depth[start.ID]; ok {
-			continue
-		}
-		var chain []*core.SnapshotSummary
-		cur := start
-		for cur != nil {
-			if d, ok := depth[cur.ID]; ok {
-				for i := len(chain) - 1; i >= 0; i-- {
-					d++
-					depth[chain[i].ID] = d
-				}
-				chain = nil
-				break
-			}
-			chain = append(chain, cur)
-			if cur.PrevID != nil {
-				cur = summaryByID[*cur.PrevID]
-			} else {
-				cur = nil
-			}
-		}
-		for i := len(chain) - 1; i >= 0; i-- {
-			depth[chain[i].ID] = len(chain) - 1 - i
-		}
-	}
-
-	sort.SliceStable(snaps, func(i, j int) bool {
-		if snaps[i].Timestamp != snaps[j].Timestamp {
-			return snaps[i].Timestamp > snaps[j].Timestamp
-		}
-		return depth[snaps[i].ID] > depth[snaps[j].ID]
-	})
-}
-
-func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.SnapshotSummary, branchMap map[string][]string) error {
-	type jsonEntry struct {
-		ID      string   `json:"id"`
-		Time    string   `json:"time"`
-		Message string   `json:"message"`
-		Branch  []string `json:"branch,omitempty"`
-		Tag     *string  `json:"tag"`
-		Changes string   `json:"changes"`
-	}
-
-	var entries []jsonEntry
-	for _, s := range snapshots {
-		add, mod, del := countSnapshotChanges(ctx, store, s)
-		changes := fmt.Sprintf("+%d ~%d -%d", add, mod, del)
-		entry := jsonEntry{
-			ID:      s.ShortID(),
-			Time:    time.Unix(s.Timestamp, 0).Format("2006-01-02T15:04:05"),
-			Message: s.Message,
-			Changes: changes,
-		}
-		if branches, ok := branchMap[s.ID.Hash.String()]; ok && len(branches) > 0 {
-			entry.Branch = branches
-		}
-		if len(s.Tags) > 0 && s.Tags[0] != "" {
-			tag := s.Tags[0]
-			entry.Tag = &tag
-		}
-		entries = append(entries, entry)
-	}
-
-	data, err := json.MarshalIndent(entries, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Printf(">>> History (%d)\n", len(snapshots))
-	os.Stdout.Write(data)
-	fmt.Println()
-	return nil
-}
-
 func init() {
-	logCmd.Flags().IntVarP(&logLimit, "limit", "l", 10, "limit number of entries")
-	logCmd.Flags().StringVarP(&logVerbose, "verbose", "v", "", "show file details for a snapshot")
-	logCmd.Flags().StringVarP(&logBranch, "branch", "b", "", "filter history by branch")
-	logCmd.Flags().BoolVar(&logJSON, "json", false, "output in JSON format for scripting")
+	logCmd.Flags().IntVarP(&logLimit, "limit", "l", 30, "limit number of entries")
+	logCmd.Flags().StringVar(&logDetail, "detail", "", "show file change details for a snapshot (e.g. @id:12ab)")
+	logCmd.Flags().StringVar(&logBranch, "branch", "", "filter history by branch")
 	logCmd.Flags().BoolVar(&logAll, "all", false, "include auto-saved snapshots")
 	rootCmd.AddCommand(logCmd)
 }

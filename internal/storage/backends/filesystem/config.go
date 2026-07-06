@@ -30,19 +30,9 @@ func (fs *FSStorage) GetConfig(ctx context.Context) (*core.Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", storage.ErrCorrupted)
 	}
-	// Apply shared normalization (handles negative/empty/zero fields by
-	// restoring defaults). Filesystem-specific upper-bound clamps are
-	// applied afterwards to prevent OOM on a malicious or mistaken config.
-	cfg.Core.Normalize()
-	if cfg.Core.ChunkMinSize > storage.MaxChunkMinSize {
-		cfg.Core.ChunkMinSize = storage.MaxChunkMinSize
-	}
-	if cfg.Core.ChunkAvgSize > storage.MaxChunkAvgSize {
-		cfg.Core.ChunkAvgSize = storage.MaxChunkAvgSize
-	}
-	if cfg.Core.ChunkMaxSize > storage.MaxChunkMaxSize {
-		cfg.Core.ChunkMaxSize = storage.MaxChunkMaxSize
-	}
+	// Apply shared normalization (negative/empty/zero fields → defaults,
+	// plus storage-layer upper-bound clamps on chunk sizes).
+	storage.NormalizeConfig(cfg)
 	return cfg, nil
 }
 

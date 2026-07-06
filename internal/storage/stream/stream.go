@@ -37,6 +37,9 @@ func (cr *chunkReader) Read(p []byte) (int, error) {
 			if cr.idx >= len(cr.hashes) {
 				return 0, io.EOF
 			}
+			if err := cr.ctx.Err(); err != nil {
+				return 0, err
+			}
 			hash := cr.hashes[cr.idx]
 			chunk, err := cr.store.GetChunk(cr.ctx, hash)
 			if err != nil {
@@ -86,6 +89,9 @@ func HashFileContent(path string) (core.Hash, error) {
 func HashChunkData(ctx context.Context, store ChunkGetter, hashes []core.Hash) (core.Hash, error) {
 	h := blake3.New()
 	for _, ch := range hashes {
+		if err := ctx.Err(); err != nil {
+			return core.Hash{}, err
+		}
 		chunk, err := store.GetChunk(ctx, ch)
 		if err != nil {
 			return core.Hash{}, fmt.Errorf("read chunk %s: %w", ch.String(), err)

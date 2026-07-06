@@ -8,8 +8,37 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
 )
+
+// headsPrefix and tagsPrefix are the on-disk ref-name prefixes used by both
+// backends. They mirror filesystem.HeadsDir / filesystem.TagsDir but are
+// duplicated here so refname does not depend on a concrete backend package
+// (which would be a layering violation — backends import refname, not vice
+// versa).
+const (
+	headsPrefix = "heads/"
+	tagsPrefix  = "tags/"
+)
+
+// RefType derives the core.RefType from a reference name. "HEAD" maps to
+// RefTypeHead; names prefixed with "heads/" or "tags/" map to RefTypeBranch
+// or RefTypeTag respectively; anything else defaults to RefTypeBranch. This
+// logic is shared by the filesystem and memory backends so both return the
+// same Type for the same name without duplicating the dispatch.
+func RefType(name string) core.RefType {
+	if name == "HEAD" {
+		return core.RefTypeHead
+	}
+	if strings.HasPrefix(name, headsPrefix) {
+		return core.RefTypeBranch
+	}
+	if strings.HasPrefix(name, tagsPrefix) {
+		return core.RefTypeTag
+	}
+	return core.RefTypeBranch
+}
 
 // Validate validates a reference name. Returns nil if valid.
 func Validate(name string) error {
@@ -50,10 +79,12 @@ func IsWindowsReservedName(name string) bool {
 	case "con", "aux", "nul", "prn":
 		return true
 	}
-	if len(name) >= 4 {
+	// COM0-COM9 and LPT0-LPT9 are reserved as exactly 4-character names
+	// (3-letter prefix + single digit). Multi-digit suffixes like "com10"
+	// or "lpt99" are NOT reserved on Windows and must not match here.
+	if len(name) == 4 {
 		switch name[:3] {
 		case "com", "lpt":
-			// Windows reserves COM0-COM9 and LPT0-LPT9 on modern builds.
 			if name[3] >= '0' && name[3] <= '9' {
 				return true
 			}

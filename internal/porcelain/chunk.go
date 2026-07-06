@@ -10,6 +10,12 @@ import (
 	"github.com/zeebo/blake3"
 )
 
+// wholeFileChunkThreshold is the maximum file size that chunkFile will read
+// as a single chunk on the nil-chunker path. It matches TextEngine's
+// whole-file threshold: files larger than this require a real chunker to
+// avoid buffering the entire file in memory.
+const wholeFileChunkThreshold = 64 * 1024
+
 // chunkFile chunks a file using the engine-selected chunker. If the engine
 // returns a nil chunker (or the file is empty), the whole file is read as a
 // single chunk. Large files (>64 KB) are rejected on the nil-chunker path to
@@ -25,7 +31,7 @@ func chunkFile(path string, r io.Reader, engine filetype.Engine, fileSize int64,
 		// nil-chunker path reads the whole file as a single chunk, so
 		// a 500 MB video would OOM. 64 KB matches TextEngine's
 		// whole-file threshold.
-		if fileSize > 64*1024 {
+		if fileSize > wholeFileChunkThreshold {
 			return nil, fmt.Errorf("file %s too large (%d bytes) for whole-file chunking without chunker", path, fileSize)
 		}
 		data, err := io.ReadAll(r)

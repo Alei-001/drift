@@ -120,6 +120,9 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 	var failures []string
 
 	for _, entry := range snap.Files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		fullPath := filepath.Join(absWorkDir, entry.Path)
 
 		if fullPath != absWorkDir && !strings.HasPrefix(fullPath, absWorkDir+string(filepath.Separator)) {

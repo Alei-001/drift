@@ -38,12 +38,12 @@ func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth
 		resolved.Target = target.Target
 		// Derive Type from name, matching the filesystem backend's behavior
 		// (the stored Type field is ignored so both backends agree).
-		resolved.Type = refTypeFromName(name)
+		resolved.Type = refname.RefType(name)
 		return resolved, nil
 	}
 	clone := cloneReference(ref)
 	clone.Name = name
-	clone.Type = refTypeFromName(name)
+	clone.Type = refname.RefType(name)
 	return clone, nil
 }
 
@@ -66,22 +66,6 @@ func (ms *MemoryStorage) SetRef(ctx context.Context, name string, ref *core.Refe
 	return nil
 }
 
-// refTypeFromName derives the RefType from the ref name, matching the
-// filesystem backend's refType() logic so both backends return the same
-// Type for the same name.
-func refTypeFromName(name string) core.RefType {
-	if name == "HEAD" {
-		return core.RefTypeHead
-	}
-	if strings.HasPrefix(name, "heads/") {
-		return core.RefTypeBranch
-	}
-	if strings.HasPrefix(name, "tags/") {
-		return core.RefTypeTag
-	}
-	return core.RefTypeBranch
-}
-
 // ListRefs lists all references matching the given prefix.
 // HEAD is excluded to match the filesystem backend, which only walks the
 // refs/ directory (HEAD lives at the repository root, outside refs/).
@@ -94,6 +78,9 @@ func refTypeFromName(name string) core.RefType {
 func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {
 	var refs []*core.Reference
 	for name := range ms.refs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if name == "HEAD" {
 			continue
 		}

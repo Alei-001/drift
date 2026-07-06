@@ -41,6 +41,9 @@ func (ms *MemoryStorage) DeleteChunk(ctx context.Context, hash core.Hash) error 
 func (ms *MemoryStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 	var hashes []core.Hash
 	for key := range ms.chunks {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		b, err := hex.DecodeString(key)
 		if err != nil {
 			continue
