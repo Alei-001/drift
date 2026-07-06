@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/core"
-	"github.com/your-org/drift/porcelain"
+	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/porcelain"
 )
 
 var watchInterval int

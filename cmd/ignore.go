@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/util/fsutil"
+	"github.com/your-org/drift/internal/util/fsutil"
 )
 
 var ignoreList bool

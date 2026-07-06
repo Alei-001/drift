@@ -1,0 +1,485 @@
+package porcelain
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/storage/backends/memory"
+)
+
+func setupBranchStore() *memory.MemoryStorage {
+	store := memory.NewMemoryStorage()
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{},
+	})
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/main",
+	})
+	return store
+}
+
+func TestCreateBranch_FromHead(t *testing.T) {
+	store := setupBranchStore()
+
+	targetHash := core.Hash{0x12, 0xab}
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: targetHash,
+	})
+
+	err := CreateBranch(context.Background(), store, "", "feature")
+	if err != nil {
+		t.Fatalf("CreateBranch failed: %v", err)
+	}
+
+	ref, err := store.GetRef(context.Background(), "heads/feature")
+	if err != nil {
+		t.Fatalf("GetRef heads/feature failed: %v", err)
+	}
+	if ref.Target != targetHash {
+		t.Errorf("expected target %x, got %x", targetHash, ref.Target)
+	}
+}
+
+func TestCreateBranch_AlreadyExists(t *testing.T) {
+	store := setupBranchStore()
+
+	err := CreateBranch(context.Background(), store, "", "feature")
+	if err != nil {
+		t.Fatalf("first CreateBranch failed: %v", err)
+	}
+
+	err = CreateBranch(context.Background(), store, "", "feature")
+	if err == nil {
+		t.Fatal("expected error for duplicate branch, got nil")
+	}
+}
+
+func TestCreateBranch_InvalidName(t *testing.T) {
+	store := setupBranchStore()
+
+	if err := CreateBranch(context.Background(), store, "", ""); err == nil {
+		t.Error("expected error for empty name, got nil")
+	}
+
+	if err := CreateBranch(context.Background(), store, "", "foo..bar"); err == nil {
+		t.Error("expected error for name with '..', got nil")
+	}
+
+	if err := CreateBranch(context.Background(), store, "", "foo/bar"); err == nil {
+		t.Error("expected error for name with path separator, got nil")
+	}
+}
+
+func TestListBranches(t *testing.T) {
+	store := setupBranchStore()
+
+	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+		t.Fatalf("CreateBranch feature failed: %v", err)
+	}
+	if err := CreateBranch(context.Background(), store, "", "dev"); err != nil {
+		t.Fatalf("CreateBranch dev failed: %v", err)
+	}
+
+	branches, current, err := ListBranches(context.Background(), store)
+	if err != nil {
+		t.Fatalf("ListBranches failed: %v", err)
+	}
+
+	if len(branches) != 3 {
+		t.Errorf("expected 3 branches, got %d", len(branches))
+	}
+
+	if current != "main" {
+		t.Errorf("expected current branch 'main', got '%s'", current)
+	}
+}
+
+func TestDeleteBranch_Success(t *testing.T) {
+	store := setupBranchStore()
+	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+		t.Fatalf("CreateBranch failed: %v", err)
+	}
+
+	err := DeleteBranch(context.Background(), store, "", "feature")
+	if err != nil {
+		t.Fatalf("DeleteBranch failed: %v", err)
+	}
+
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err == nil {
+		t.Error("expected heads/feature to be deleted, but it still exists")
+	}
+}
+
+func TestDeleteBranch_NotFound(t *testing.T) {
+	store := setupBranchStore()
+
+	err := DeleteBranch(context.Background(), store, "", "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent branch, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error containing 'not found', got '%s'", err.Error())
+	}
+}
+
+func TestDeleteBranch_CurrentBranch(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "feature")
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/feature",
+	})
+
+	err := DeleteBranch(context.Background(), store, "", "feature")
+	if err == nil {
+		t.Fatal("expected error for deleting current branch, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot delete the current branch") {
+		t.Errorf("expected error containing 'cannot delete the current branch', got '%s'", err.Error())
+	}
+}
+
+func TestDeleteBranch_MainProtected(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "other")
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/other",
+	})
+
+	err := DeleteBranch(context.Background(), store, "", "main")
+	if err == nil {
+		t.Fatal("expected error for deleting main, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot delete 'main'") {
+		t.Errorf("expected error containing \"cannot delete 'main'\", got '%s'", err.Error())
+	}
+}
+
+func TestDeleteBranch_EmptyName(t *testing.T) {
+	store := setupBranchStore()
+
+	err := DeleteBranch(context.Background(), store, "", "")
+	if err == nil {
+		t.Fatal("expected error for empty name, got nil")
+	}
+}
+
+func TestRenameBranch_NonCurrent(t *testing.T) {
+	store := setupBranchStore()
+	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+		t.Fatalf("CreateBranch failed: %v", err)
+	}
+
+	err := RenameBranch(context.Background(), store, "", "feature", "dev")
+	if err != nil {
+		t.Fatalf("RenameBranch failed: %v", err)
+	}
+
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err == nil {
+		t.Error("expected heads/feature to be removed, but it still exists")
+	}
+	newRef, err := store.GetRef(context.Background(), "heads/dev")
+	if err != nil {
+		t.Fatalf("GetRef heads/dev failed: %v", err)
+	}
+	if newRef.Name != "heads/dev" {
+		t.Errorf("expected ref name 'heads/dev', got '%s'", newRef.Name)
+	}
+
+	// HEAD should be unchanged (still points to main).
+	headRef, _ := store.GetRef(context.Background(), "HEAD")
+	if headRef.SymRef != "heads/main" {
+		t.Errorf("expected HEAD still at 'heads/main', got '%s'", headRef.SymRef)
+	}
+}
+
+func TestRenameBranch_CurrentBranch_UpdatesHEAD(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "feature")
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/feature",
+	})
+
+	err := RenameBranch(context.Background(), store, "", "feature", "dev")
+	if err != nil {
+		t.Fatalf("RenameBranch failed: %v", err)
+	}
+
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err == nil {
+		t.Error("expected heads/feature to be removed, but it still exists")
+	}
+	if _, err := store.GetRef(context.Background(), "heads/dev"); err != nil {
+		t.Errorf("expected heads/dev to exist, got error: %v", err)
+	}
+	headRef, _ := store.GetRef(context.Background(), "HEAD")
+	if headRef.SymRef != "heads/dev" {
+		t.Errorf("expected HEAD SymRef 'heads/dev', got '%s'", headRef.SymRef)
+	}
+}
+
+func TestRenameBranch_TargetExists(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "feature")
+	CreateBranch(context.Background(), store, "", "dev")
+
+	err := RenameBranch(context.Background(), store, "", "feature", "dev")
+	if err == nil {
+		t.Fatal("expected error for existing target name, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected error containing 'already exists', got '%s'", err.Error())
+	}
+
+	// Both original branches should still be intact.
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err != nil {
+		t.Error("heads/feature should still exist after failed rename")
+	}
+}
+
+func TestRenameBranch_NotFound(t *testing.T) {
+	store := setupBranchStore()
+
+	err := RenameBranch(context.Background(), store, "", "nonexistent", "dev")
+	if err == nil {
+		t.Fatal("expected error for non-existent source branch, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error containing 'not found', got '%s'", err.Error())
+	}
+}
+
+func TestRenameBranch_MainProtected(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "other")
+	store.SetRef(context.Background(), "HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/other",
+	})
+
+	err := RenameBranch(context.Background(), store, "", "main", "trunk")
+	if err == nil {
+		t.Fatal("expected error for renaming main, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot rename 'main'") {
+		t.Errorf("expected error containing \"cannot rename 'main'\", got '%s'", err.Error())
+	}
+}
+
+func TestRenameBranch_SameName_NoOp(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "feature")
+
+	err := RenameBranch(context.Background(), store, "", "feature", "feature")
+	if err != nil {
+		t.Fatalf("rename to same name should be a no-op, got: %v", err)
+	}
+	if _, err := store.GetRef(context.Background(), "heads/feature"); err != nil {
+		t.Error("heads/feature should still exist after same-name rename")
+	}
+}
+
+func TestRenameBranch_SameName_NonExistent(t *testing.T) {
+	store := setupBranchStore()
+
+	// Renaming a non-existent branch to itself must NOT silently succeed;
+	// the source branch existence check runs before the same-name no-op.
+	err := RenameBranch(context.Background(), store, "", "ghost", "ghost")
+	if err == nil {
+		t.Fatal("expected error for non-existent branch, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error containing 'not found', got '%s'", err.Error())
+	}
+}
+
+func TestRenameBranch_InvalidNewName(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "feature")
+
+	if err := RenameBranch(context.Background(), store, "", "feature", "foo..bar"); err == nil {
+		t.Error("expected error for new name with '..', got nil")
+	}
+	if err := RenameBranch(context.Background(), store, "", "feature", "foo/bar"); err == nil {
+		t.Error("expected error for new name with path separator, got nil")
+	}
+}
+
+func TestRenameBranch_PreservesTarget(t *testing.T) {
+	store := setupBranchStore()
+	targetHash := core.Hash{0x12, 0xab}
+	store.SetRef(context.Background(), "heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: targetHash,
+	})
+	CreateBranch(context.Background(), store, "", "feature")
+	// Point feature at a distinct target.
+	store.SetRef(context.Background(), "heads/feature", &core.Reference{
+		Name:   "heads/feature",
+		Type:   core.RefTypeBranch,
+		Target: targetHash,
+	})
+
+	if err := RenameBranch(context.Background(), store, "", "feature", "dev"); err != nil {
+		t.Fatalf("RenameBranch failed: %v", err)
+	}
+	devRef, _ := store.GetRef(context.Background(), "heads/dev")
+	if devRef.Target != targetHash {
+		t.Errorf("expected target %x preserved, got %x", targetHash, devRef.Target)
+	}
+}
+
+func TestRenameBranch_EmptyNames(t *testing.T) {
+	store := setupBranchStore()
+	CreateBranch(context.Background(), store, "", "feature")
+
+	if err := RenameBranch(context.Background(), store, "", "", "dev"); err == nil {
+		t.Error("expected error for empty old name, got nil")
+	}
+	if err := RenameBranch(context.Background(), store, "", "feature", ""); err == nil {
+		t.Error("expected error for empty new name, got nil")
+	}
+}
+
+func TestResolveSnapshotBranches_Linear(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+
+	// Create snapshots: s1 (root) -> s2 -> s3
+	s1 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{1}},
+		Message: "first",
+		Timestamp: 100,
+	}
+	s2 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{2}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{1}},
+		Message: "second",
+		Timestamp: 200,
+	}
+	s3 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{3}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{2}},
+		Message: "third",
+		Timestamp: 300,
+	}
+	store.PutSnapshot(ctx, s1)
+	store.PutSnapshot(ctx, s2)
+	store.PutSnapshot(ctx, s3)
+
+	// main branch points at s3
+	store.SetRef(ctx, "heads/main", &core.Reference{
+		Name:   "heads/main",
+		Type:   core.RefTypeBranch,
+		Target: core.Hash{3},
+	})
+
+	result, err := ResolveSnapshotBranches(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveSnapshotBranches: %v", err)
+	}
+
+	// All snapshots should be attributed to main
+	if names := result[core.Hash{1}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s1: got %v, want [main]", names)
+	}
+	if names := result[core.Hash{2}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s2: got %v, want [main]", names)
+	}
+	if names := result[core.Hash{3}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s3: got %v, want [main]", names)
+	}
+}
+
+func TestResolveSnapshotBranches_NearerTipWins(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+
+	// s1 (root) -> s2 -> s3
+	//                   \-> s4 (on a different branch)
+	s1 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{1}},
+		Message: "root",
+		Timestamp: 100,
+	}
+	s2 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{2}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{1}},
+		Message: "shared",
+		Timestamp: 200,
+	}
+	s3 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{3}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{2}},
+		Message: "main tip",
+		Timestamp: 300,
+	}
+	s4 := &core.Snapshot{
+		ID:      core.SnapshotID{Hash: core.Hash{4}},
+		PrevID:  &core.SnapshotID{Hash: core.Hash{2}},
+		Message: "feature tip",
+		Timestamp: 250,
+	}
+
+	store.PutSnapshot(ctx, s1)
+	store.PutSnapshot(ctx, s2)
+	store.PutSnapshot(ctx, s3)
+	store.PutSnapshot(ctx, s4)
+
+	store.SetRef(ctx, "heads/main", &core.Reference{Name: "heads/main", Type: core.RefTypeBranch, Target: core.Hash{3}})
+	store.SetRef(ctx, "heads/feature", &core.Reference{Name: "heads/feature", Type: core.RefTypeBranch, Target: core.Hash{4}})
+
+	result, err := ResolveSnapshotBranches(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveSnapshotBranches: %v", err)
+	}
+
+	// s3 is tip of main, hops=0 from main tip, hops=2 from feature tip -> main wins
+	// s4 is tip of feature, hops=0 from feature tip, hops=2 from main tip -> feature wins
+	// s2 is hops=1 from main, hops=1 from feature -> tie, broken by name: "feature" < "main"
+	// s1 is hops=2 from main, hops=2 from feature -> tie, broken by name: "feature" < "main"
+
+	if names := result[core.Hash{3}.String()]; len(names) != 1 || names[0] != "main" {
+		t.Errorf("s3: got %v, want [main]", names)
+	}
+	if names := result[core.Hash{4}.String()]; len(names) != 1 || names[0] != "feature" {
+		t.Errorf("s4: got %v, want [feature]", names)
+	}
+	// At equal distance, alphabetically smaller branch name wins
+	if names := result[core.Hash{2}.String()]; len(names) != 1 || names[0] != "feature" {
+		t.Errorf("s2: got %v, want [feature] (alphabetically smaller)", names)
+	}
+	if names := result[core.Hash{1}.String()]; len(names) != 1 || names[0] != "feature" {
+		t.Errorf("s1: got %v, want [feature] (alphabetically smaller)", names)
+	}
+}
+
+func TestResolveSnapshotBranches_NoBranches(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewMemoryStorage()
+	store.SetRef(ctx, "HEAD", &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+	})
+	result, err := ResolveSnapshotBranches(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveSnapshotBranches: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(result))
+	}
+}

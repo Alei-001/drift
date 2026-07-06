@@ -15,7 +15,7 @@ All uppercase for initialisms in identifiers — `ID`, `URL`, `HTTP`, `FS`:
 ❌ configId, fsUrl, HttpClient
 ```
 
-Exception: `MimeType` → `MIMEType`. This is a pre-existing violation in `core/file_entry.go:5` that will be renamed.
+Exception: `MimeType` → `MIMEType`. This is a pre-existing violation in `internal/core/file_entry.go:5` that will be renamed.
 
 ### 1.2 Receivers
 
@@ -55,13 +55,13 @@ Define sentinel errors in the package that owns the concept:
 
 | Package | Sentinel errors |
 |---------|----------------|
-| `storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
-| `porcelain/` | `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists` |
+| `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
+| `internal/porcelain/` | `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrLocked`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain` |
 
 Message format: either prefixed (`drift: not found`, storage/) or plain (`nothing to save`, porcelain/). Be consistent within a package.
 
 ```go
-// storage/errors.go
+// internal/storage/errors.go
 var ErrNotFound = errors.New("drift: not found")
 ```
 
@@ -84,7 +84,7 @@ Use `errors.Is()` and `errors.As()`, never string matching:
 ❌ if strings.Contains(err.Error(), "not found") { ... }
 ```
 
-The project has pre-existing `strings.Contains(err.Error())` calls in `cmd/branch.go:61,64,109`. These will be migrated.
+The project has pre-existing `strings.Contains(err.Error())` calls. These will be migrated.
 
 ### 2.4 Silent error discarding
 
@@ -140,9 +140,9 @@ All non-trivial literals must be named constants. Specific thresholds:
 
 | Value | Current locations | Action |
 |-------|------------------|--------|
-| `512` (header peek) | `porcelain/snapshot.go:157`, `cmd/show.go:84`, `cmd/diff.go:235` | Extract to `core.HeaderPeekSize` |
-| `maxSymRefDepth = 8` | `storage/filesystem/ref.go:21`, `storage/memory/storage.go:146` | Extract to `storage.MaxSymRefDepth` |
-| `maxChunkMin/Avg/MaxSize` | `storage/filesystem/config.go`, `storage/memory/storage.go` | Extract to `storage.MaxChunk...` |
+| `512` (header peek) | `internal/porcelain/snapshot.go`, `internal/cmd-adjacent code` | Extract to `core.HeaderPeekSize` (already done) |
+| `maxSymRefDepth = 8` | both storage backends | Extract to `storage.MaxSymRefDepth` (already done) |
+| `maxChunkMin/Avg/MaxSize` | both storage backends | Extract to `storage.MaxChunk...` (already done) |
 
 ---
 
@@ -185,7 +185,7 @@ TestCreateBranch_InvalidName
 
 ### 5.4 Test backend
 
-Prefer `storage/memory.MemoryStorage` over temp directories for porcelain tests.
+Prefer `internal/storage/backends/memory.MemoryStorage` over temp directories for porcelain tests.
 
 ---
 
@@ -198,26 +198,33 @@ Aim for ≤ 300 lines per file. Split by concern when exceeding this.
 ### 6.2 Package layout
 
 ```
-cmd/          — CLI commands and display formatting
-porcelain/    — business logic (snapshot, branch, restore, lock, watch, GC)
-core/         — domain types, interfaces, protobuf codec
-storage/      — Storer interface + sentinel errors
-  filesystem/ — on-disk implementation
-  memory/     — in-memory implementation (for tests)
-  refname/    — reference name validation
-  stream/     — chunk streaming helpers
-chunker/      — content-defined chunking strategies
-filetype/     — engine interface, registry
-  text/       — text engine (detection, diff, preview)
-  image/      — image engine
-  video/      — video engine
-  binary/     — binary fallback engine
-util/         — generic utilities
-  cache/      — LRU cache wrapper
-  fsutil/     — filesystem helpers (atomic writes, walk)
-  glob/       — glob pattern matching
-  pathutil/   — cross-platform path normalization
+cmd/                  — CLI commands and display formatting (NO business logic)
+  drift/              — main binary entry point
+internal/             — business implementation (not importable externally)
+  porcelain/          — business logic (snapshot, branch, restore, lock, watch, GC)
+  core/               — domain types, interfaces, protobuf codec
+  storage/            — Storer interface + sentinel errors + shared clone helpers
+    backends/         — storage implementations (interface/impl physically separated)
+      filesystem/     — on-disk implementation (.drift/)
+      memory/         — in-memory implementation (for tests)
+    refname/          — reference name validation
+    stream/           — chunk streaming helpers
+  chunker/            — content-defined chunking strategies
+  filetype/           — engine interface, registry
+    text/             — text engine (detection, diff, preview)
+    image/            — image engine
+    video/            — video engine
+    binary/           — binary fallback engine
+  util/               — generic utilities
+    cache/            — LRU cache wrapper
+    fsutil/           — filesystem helpers (atomic writes, walk)
+    glob/             — glob pattern matching
+    pathutil/         — cross-platform path normalization
+    format/           — size/dimension formatting
 ```
+
+The `internal/` boundary enforces the layer order: external projects cannot
+import any business package, so the only public surface is the CLI.
 
 ### 6.3 De-duplication rule
 
@@ -225,10 +232,10 @@ Any function or constant that appears identically in two files must be extracted
 
 | Duplicate | Where | Extract to |
 |-----------|-------|------------|
-| `cloneChunk()`, `cloneFileEntry()`, `cloneSnapshot()` | `storage/filesystem/`, `storage/memory/` | `storage/` |
-| `maxSymRefDepth` | both storage backends | `storage/` |
-| `maxChunkMin/Avg/MaxSize` | both storage backends | `storage/` |
-| `formatSize` / `humanReadableSize` | `cmd/`, `filetype/image/`, `filetype/video/` | `util/format/` |
+| `cloneChunk()`, `cloneFileEntry()`, `cloneSnapshot()` | `internal/storage/backends/filesystem/`, `internal/storage/backends/memory/` | `internal/storage/` |
+| `maxSymRefDepth` | both storage backends | `internal/storage/` |
+| `maxChunkMin/Avg/MaxSize` | both storage backends | `internal/storage/` |
+| `formatSize` / `humanReadableSize` | `cmd/`, `internal/filetype/image/`, `internal/filetype/video/` | `internal/util/format/` |
 | `computeChanges` / `computeVerboseChanges` | `cmd/save.go`, `cmd/log.go` | merge into one, keep in cmd |
 
 ---
@@ -262,11 +269,11 @@ All cobra commands must define `Use`, `Short`, and `Long` fields.
 
 ### 8.1 Path validation
 
-All user-provided paths entering the system must pass through `util/pathutil.RelToWorkDir` before any filesystem operation.
+All user-provided paths entering the system must pass through `internal/util/pathutil.RelToWorkDir` before any filesystem operation.
 
 ### 8.2 Tag and branch names
 
-All reference names must be validated via `storage/refname.Validate()` before storage:
+All reference names must be validated via `internal/storage/refname.Validate()` before storage:
 
 ```go
 if err := refname.Validate("tags/" + name); err != nil {

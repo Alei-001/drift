@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/core"
-	"github.com/your-org/drift/filetype"
-	"github.com/your-org/drift/storage"
-	"github.com/your-org/drift/storage/stream"
-	"github.com/your-org/drift/util/pathutil"
+	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/filetype"
+	"github.com/your-org/drift/internal/porcelain"
+	"github.com/your-org/drift/internal/storage"
+	"github.com/your-org/drift/internal/storage/stream"
+	"github.com/your-org/drift/internal/util/pathutil"
 )
 
 var showOpen bool
@@ -39,7 +40,7 @@ var showCmd = &cobra.Command{
 
 		var idStr, filePath string
 		if len(args) == 1 {
-			headSnap := resolveHeadSnapshot(ctx, store)
+			headSnap := porcelain.ResolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
 				statusFailed("Show", "no snapshot to show from.", "use 'drift save -m \"message\"' to create one first.")
 				return ErrSilent
@@ -298,19 +299,24 @@ func resolveSnapshot(ctx context.Context, store storage.Storer, id string) *core
 		return snap
 	}
 
-	// Short hash prefix (or tag name)
-	snapshots, err := store.ListSnapshots(ctx, &storage.ListOptions{})
+	// Short hash prefix — match via lightweight summaries, then load the
+	// full snapshot so the caller gets file data.
+	summaries, err := store.ListSnapshots(ctx, &storage.ListOptions{})
 	if err != nil {
 		return nil
 	}
-	var matches []*core.Snapshot
-	for _, s := range snapshots {
+	var matches []*core.SnapshotSummary
+	for _, s := range summaries {
 		if strings.HasPrefix(s.ShortID(), id) || strings.HasPrefix(s.FullID(), id) {
 			matches = append(matches, s)
 		}
 	}
 	if len(matches) == 1 {
-		return matches[0]
+		snap, err := store.GetSnapshot(ctx, matches[0].ID)
+		if err != nil {
+			return nil
+		}
+		return snap
 	}
 	if len(matches) > 1 {
 		fmt.Fprintf(os.Stderr, "ambiguous snapshot ID '%s' matches %d snapshots:\n", id, len(matches))

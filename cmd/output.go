@@ -12,10 +12,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/your-org/drift/core"
-	"github.com/your-org/drift/porcelain"
-	"github.com/your-org/drift/storage"
-	"github.com/your-org/drift/util/format"
+	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/porcelain"
+	"github.com/your-org/drift/internal/storage"
+	"github.com/your-org/drift/internal/util/format"
 )
 
 // ErrSilent indicates that an error was already displayed to the user

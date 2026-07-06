@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package core;
+
+option go_package = "github.com/your-org/drift/internal/core";
+
+// FileEntryProto is the protobuf representation of a file entry in a snapshot.
+message FileEntryProto {
+  string path = 1;
+  uint32 mode = 2;
+  int64 size = 3;
+  int64 mod_time = 4;
+  repeated bytes chunk_hashes = 5; // each is 32 bytes BLAKE3 hash
+  optional string mime_type = 6;
+  bytes file_hash = 7; // 32 bytes BLAKE3 hash of the file
+  map<string, string> extra = 8; // optional metadata key-value pairs
+}
+
+// SnapshotProto is the protobuf representation of a snapshot.
+message SnapshotProto {
+  bytes id_hash = 1;            // 32 bytes
+  optional bytes prev_id_hash = 2; // 32 bytes, nil for first commit
+  string message = 3;
+  string author = 4;
+  int64 timestamp = 5;
+  repeated FileEntryProto files = 6;
+  repeated string tags = 7;
+  int64 total_size = 8;
+}
+
+// SnapshotManifest is a lightweight metadata index for a snapshot, stored
+// separately so ListSnapshots can enumerate snapshots without deserializing
+// the full file list. The Go implementation lives in core/manifest.go with
+// hand-written protowire marshaling (no protoc toolchain required).
+message SnapshotManifest {
+  bytes id = 1;            // SnapshotID.Hash (32 bytes)
+  bytes prev_id = 2;       // optional, nil for first commit
+  string message = 3;
+  string author = 4;
+  int64 timestamp = 5;
+  repeated string tags = 6;
+  int64 total_size = 7;
+  int32 files_changed = 8; // file count
+}

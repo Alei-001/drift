@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/core"
-	"github.com/your-org/drift/porcelain"
-	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/porcelain"
+	"github.com/your-org/drift/internal/storage"
 )
 
 var logLimit int
@@ -41,7 +41,7 @@ var logCmd = &cobra.Command{
 			return logVerboseMode(ctx, store, logVerbose)
 		}
 
-		var snapshots []*core.Snapshot
+		var snapshots []*core.SnapshotSummary
 		var branchMap map[string][]string
 
 		if logBranch != "" {
@@ -80,7 +80,7 @@ var logCmd = &cobra.Command{
 		}
 
 		// Filter auto-saves unless --all
-		var filtered []*core.Snapshot
+		var filtered []*core.SnapshotSummary
 		for _, s := range snapshots {
 			if !logAll && strings.HasPrefix(s.Message, "auto -") {
 				continue
@@ -91,7 +91,7 @@ var logCmd = &cobra.Command{
 		// Sort newest-first: by timestamp descending. When timestamps are
 		// equal (common for rapid successive saves), use the PrevID chain —
 		// if snapshot A's PrevID points to snapshot B, then A is newer.
-		sortSnapshotsNewestFirst(filtered)
+		sortSnapshotSummariesNewestFirst(filtered)
 
 		// Apply limit after filtering for branch walk
 		if logBranch != "" && logLimit > 0 && len(filtered) > logLimit {
@@ -185,7 +185,12 @@ func logVerboseMode(ctx context.Context, store storage.Storer, id string) error 
 	return nil
 }
 
-func countSnapshotChanges(ctx context.Context, store storage.Storer, snapshot *core.Snapshot) (added, modified, deleted int) {
+func countSnapshotChanges(ctx context.Context, store storage.Storer, summary *core.SnapshotSummary) (added, modified, deleted int) {
+	snapshot, err := store.GetSnapshot(ctx, summary.ID)
+	if err != nil {
+		slog.Warn("load snapshot for changes", "snapshot", summary.ShortID(), "error", err)
+		return 0, 0, 0
+	}
 	a, m, d, err := computeChanges(ctx, store, snapshot)
 	if err != nil {
 		slog.Warn("compute snapshot changes failed", "snapshot", snapshot.ShortID(), "error", err)
@@ -213,32 +218,25 @@ func formatChangesCompact(added, modified, deleted int) string {
 	return strings.Join(parts, " ")
 }
 
-// sortSnapshotsNewestFirst sorts snapshots newest-first. Primary sort key is
-// timestamp (descending). When timestamps are equal (rapid successive saves),
-// it uses the PrevID chain: if A.PrevID == B.ID, then A is newer than B.
-// This is stable for unrelated snapshots.
-func sortSnapshotsNewestFirst(snaps []*core.Snapshot) {
-	// Build a map for O(1) predecessor lookup. The old code scanned the
-	// full list for each PrevID hop, making it O(N²).
-	snapByID := make(map[core.SnapshotID]*core.Snapshot, len(snaps))
+// sortSnapshotSummariesNewestFirst sorts snapshot summaries newest-first.
+// Primary sort key is timestamp (descending). When timestamps are equal (rapid
+// successive saves), it uses the PrevID chain: if A.PrevID == B.ID then A is
+// newer than B. This is stable for unrelated summaries.
+func sortSnapshotSummariesNewestFirst(snaps []*core.SnapshotSummary) {
+	summaryByID := make(map[core.SnapshotID]*core.SnapshotSummary, len(snaps))
 	for _, s := range snaps {
-		snapByID[s.ID] = s
+		summaryByID[s.ID] = s
 	}
 
-	// Compute depth (distance from the root of the PrevID chain) for each
-	// snapshot. Walk the chain via the map and memoize so every edge is
-	// traversed at most once — O(N) total instead of O(N²).
 	depth := make(map[core.SnapshotID]int, len(snaps))
 	for _, start := range snaps {
 		if _, ok := depth[start.ID]; ok {
 			continue
 		}
-		// Collect un-cached snapshots along the chain.
-		var chain []*core.Snapshot
+		var chain []*core.SnapshotSummary
 		cur := start
 		for cur != nil {
 			if d, ok := depth[cur.ID]; ok {
-				// Hit a cached depth; assign backward for the rest.
 				for i := len(chain) - 1; i >= 0; i-- {
 					d++
 					depth[chain[i].ID] = d
@@ -248,12 +246,11 @@ func sortSnapshotsNewestFirst(snaps []*core.Snapshot) {
 			}
 			chain = append(chain, cur)
 			if cur.PrevID != nil {
-				cur = snapByID[*cur.PrevID]
+				cur = summaryByID[*cur.PrevID]
 			} else {
 				cur = nil
 			}
 		}
-		// Reached root without hitting a cached entry.
 		for i := len(chain) - 1; i >= 0; i-- {
 			depth[chain[i].ID] = len(chain) - 1 - i
 		}
@@ -263,12 +260,11 @@ func sortSnapshotsNewestFirst(snaps []*core.Snapshot) {
 		if snaps[i].Timestamp != snaps[j].Timestamp {
 			return snaps[i].Timestamp > snaps[j].Timestamp
 		}
-		// Higher depth = further from root = newer.
 		return depth[snaps[i].ID] > depth[snaps[j].ID]
 	})
 }
 
-func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.Snapshot, branchMap map[string][]string) error {
+func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.SnapshotSummary, branchMap map[string][]string) error {
 	type jsonEntry struct {
 		ID      string   `json:"id"`
 		Time    string   `json:"time"`

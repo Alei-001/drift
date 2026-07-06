@@ -297,6 +297,8 @@ require (
 ```
 drift/
 ├── cmd/                          # CLI 入口
+│   ├── drift/                    # 主二进制（多二进制布局）
+│   │   └── main.go               # 程序入口
 │   ├── root.go                   # drift 主命令
 │   ├── init.go                   # drift init
 │   ├── save.go                   # drift save
@@ -312,88 +314,124 @@ drift/
 │   ├── check.go                  # drift check
 │   └── gc.go                     # drift gc
 │
-├── porcelain/                    # 业务逻辑层（"瓷器"）
-│   ├── project.go                # 项目初始化/打开/配置
-│   ├── snapshot.go               # 快照创建/读取/列表
-│   ├── branch.go                 # 分支创建/切换
-│   └── restore.go                # 恢复逻辑
-│
-├── filetype/                     # 文件类型适配层（核心差异）
-│   ├── registry.go               # 引擎注册表 + 三轮分层检测（magic/extension/heuristic）
-│   ├── engine.go                 # Engine 接口定义（Detector / ChunkerSelector / Differ / Previewer 子接口）
-│   ├── init.go                   # 引擎注册顺序：text → image → video → binary
-│   ├── text/                     # 文本文件引擎
-│   │   ├── chunker.go            # ChunkerFor 实现（2 档）
-│   │   ├── differ.go             # 文本差异
-│   │   └── preview.go            # 文本缩略（前N行）
-│   ├── image/                    # 通用图片引擎（png/jpg/gif/webp/bmp/tiff）
-│   │   ├── engine.go             # 分层检测（magic + 扩展名）
-│   │   ├── chunker.go            # ChunkerFor 实现（委托 BinaryChunkerFor）
-│   │   ├── differ.go             # 元信息 diff（格式/尺寸/大小）
-│   │   ├── preview.go            # 摘要信息（尺寸 + 格式 + 大小）
-│   │   └── engine_test.go
-│   ├── video/                    # 视频引擎（mp4/mov/avi/mkv/webm）
-│   │   ├── engine.go             # 分层检测（magic + 扩展名）
-│   │   ├── chunker.go            # ChunkerFor 实现（委托 BinaryChunkerFor）
-│   │   ├── differ.go             # 文件大小 diff
-│   │   ├── preview.go            # 视频摘要（含 MP4 tkhd 尺寸解析）
-│   │   └── engine_test.go
-│   └── binary/                   # 通用二进制引擎（fallback）
-│       ├── engine.go
-│       ├── chunker.go
-│       └── preview.go
-│
-├── chunker/                      # 分块算法层
-│   ├── chunker.go                # Chunker 接口（Chunk(r io.Reader)）
-│   ├── strategy.go               # 二进制类共享分块策略（BinaryChunkerFor + 阈值常量）
-│   ├── fastcdc.go                # FastCDC 实现
-│   ├── fixed.go                  # 定长分块（大文件 fallback）
-│   └── chunker_test.go
-│
-├── storage/                      # 存储层
-│   ├── storer.go                 # Storer 接口组合
-│   ├── chunk_store.go            # ChunkStore 接口
-│   ├── ref_store.go              # RefStore 接口
-│   ├── index_store.go            # IndexStore 接口
-│   ├── preview_store.go          # PreviewStore 接口
-│   ├── config_store.go           # ConfigStore 接口
-│   ├── filesystem/               # 磁盘存储实现
-│   │   ├── storage.go            # FS Storage struct
-│   │   ├── chunk.go              # 块读写（.drift/chunks/）
-│   │   ├── ref.go                # 引用读写（.drift/refs/）
-│   │   ├── index.go              # 索引（.drift/index）
-│   │   ├── preview.go            # 预览缓存（.drift/previews/）
-│   │   ├── config.go             # 配置（.drift/config）
-│   │   └── layout.go             # .drift/ 目录布局定义
-│   ├── memory/                   # 内存存储（测试用）
-│   │   └── storage.go
-│
-├── core/                         # 核心数据类型
-│   ├── hash.go                   # BLAKE3 哈希类型
-│   ├── chunk.go                  # Chunk 结构体
-│   ├── snapshot.go               # Snapshot 结构体
-│   ├── ref.go                    # Reference 结构体
-│   ├── file_entry.go             # FileEntry 结构体
-│   ├── file_mode.go              # 文件模式
-│   └── config.go                 # 项目配置
-├── util/                         # 工具层
-│   ├── cache/
-│   │   └── lru.go                # LRU 缓存封装
-│   ├── fsutil/
-│   │   ├── walk.go               # 目录遍历
-│   │   └── atomic.go             # 原子文件操作
-│   ├── glob/                     # glob 匹配引擎（支持 ** 递归通配符，替代 path.Match）
-│   │   └── match.go              # .driftignore 模式匹配（被 fsutil/walk.go 调用）
-│   └── pathutil/
-│       └── pathutil.go           # 路径相对化/规范化（CLI 用户路径处理）
+├── internal/                     # 业务实现（外部不可导入）
+│   ├── porcelain/                # 业务逻辑层（"瓷器"）
+│   │   ├── project.go            # 项目初始化/打开/配置
+│   │   ├── snapshot.go           # 快照创建/读取/列表
+│   │   ├── chunk.go              # chunkFile + computeFileHashFromChunks
+│   │   ├── tag.go                # SaveTag
+│   │   ├── branch.go             # 分支 CRUD
+│   │   ├── switch.go             # SwitchBranch
+│   │   ├── snapshot_branch.go    # ResolveSnapshotBranches + countSnapshotDiff
+│   │   ├── diff.go               # diff 业务逻辑
+│   │   ├── restore.go            # 恢复逻辑
+│   │   ├── workspace.go          # restoreFilesToWorkspace（restore/switch 共用）
+│   │   ├── lock.go               # 工作区锁
+│   │   ├── watch.go              # watch 守护进程
+│   │   ├── gc.go                 # 垃圾回收
+│   │   └── errors.go             # 业务层 sentinel errors
+│   │
+│   ├── filetype/                     # 文件类型适配层（核心差异）
+│   │   ├── registry.go               # 引擎注册表 + 三轮分层检测（magic/extension/heuristic）
+│   │   ├── engine.go                 # Engine 接口（Detector / ChunkerSelector / Differ / Previewer / Metadata）
+│   │   ├── init.go                   # 引擎注册（text → image → video → binary）
+│   │   ├── text/                     # 文本引擎
+│   │   │   ├── engine.go             # UTF-8 检测 + 分层检测
+│   │   │   ├── chunker.go            # ChunkerFor 实现（2 档）
+│   │   │   ├── differ.go             # 统一 diff（myers 算法）
+│   │   │   ├── preview.go            # 前 N 行预览
+│   │   │   └── metadata.go           # Metadata 实现
+│   │   ├── image/                    # 图片引擎（png/jpg/gif/webp）
+│   │   │   ├── engine.go             # 分层检测（magic + 扩展名）
+│   │   │   ├── differ.go             # 元信息 diff（格式/尺寸/大小）
+│   │   │   ├── preview.go            # 摘要信息（尺寸 + 格式 + 大小）
+│   │   │   └── metadata.go           # Metadata 实现
+│   │   ├── video/                    # 视频引擎（mp4/mov/avi/mkv/webm）
+│   │   │   ├── engine.go             # 分层检测（magic + 扩展名）
+│   │   │   ├── differ.go             # 文件大小 diff
+│   │   │   ├── preview.go            # 视频摘要（含 MP4 tkhd 尺寸解析）
+│   │   │   └── metadata.go           # Metadata 实现
+│   │   └── binary/                   # 通用二进制引擎（fallback）
+│   │       ├── engine.go
+│   │       ├── chunker.go            # 委托 DefaultSelector
+│   │       ├── differ.go             # 字节比较
+│   │       ├── preview.go            # 占位符预览
+│   │       └── metadata.go           # Metadata 实现
+│   │
+│   ├── chunker/                      # 分块算法层
+│   │   ├── chunker.go                # Chunker 接口（Chunk(r io.Reader)）
+│   │   ├── strategy.go               # 共享分块策略（DefaultSelector + 阈值常量）
+│   │   ├── fastcdc.go                # FastCDC 实现
+│   │   ├── fixed.go                  # 定长分块（大文件 fallback）
+│   │   └── chunker_test.go
+│   │
+│   ├── storage/                      # 存储层
+│   │   ├── storer.go                 # Storer 接口组合
+│   │   ├── chunk_store.go            # ChunkStore 接口
+│   │   ├── ref_store.go              # RefStore 接口
+│   │   ├── index_store.go            # IndexStore 接口
+│   │   ├── preview_store.go          # PreviewStore 接口
+│   │   ├── config_store.go           # ConfigStore 接口
+│   │   ├── snapshot_store.go         # SnapshotStore 接口
+│   │   ├── clone.go                  # 共享克隆工具
+│   │   ├── errors.go                 # 存储层 sentinel errors
+│   │   ├── constants.go              # 存储常量
+│   │   ├── refname/                  # ref 名校验
+│   │   │   └── refname.go
+│   │   ├── stream/                   # 流式工具（PeekHeader, HashFileContent）
+│   │   │   └── stream.go
+│   │   └── backends/                 # 存储后端实现
+│   │       ├── filesystem/           # 磁盘存储（生产）
+│   │       │   ├── storage.go
+│   │       │   ├── chunk.go
+│   │       │   ├── ref.go
+│   │       │   ├── snapshot.go
+│   │       │   ├── index.go
+│   │       │   ├── preview.go
+│   │       │   ├── config.go
+│   │       │   └── layout.go
+│   │       └── memory/               # 内存存储（测试用，镜像 filesystem 拆分）
+│   │           ├── storage.go
+│   │           ├── chunk.go
+│   │           ├── ref.go
+│   │           ├── snapshot.go
+│   │           ├── index.go
+│   │           ├── preview.go
+│   │           └── config.go
+│   │
+│   ├── core/                         # 核心数据类型
+│   │   ├── hash.go                   # BLAKE3 哈希类型
+│   │   ├── chunk.go                  # Chunk 结构体
+│   │   ├── snapshot.go               # Snapshot 结构体
+│   │   ├── ref.go                    # Reference 结构体
+│   │   ├── file_entry.go             # FileEntry 结构体
+│   │   ├── file_mode.go              # 文件模式
+│   │   └── config.go                 # 项目配置
+│   │
+│   └── util/                         # 工具层
+│       ├── cache/
+│       │   └── lru.go                # LRU 缓存封装
+│       ├── format/
+│       │   └── format.go             # Bytes + ImageDimensions
+│       ├── fsutil/
+│       │   ├── walk.go               # 目录遍历
+│       │   └── atomic.go             # 原子文件操作
+│       ├── glob/                     # glob 匹配引擎（支持 ** 递归通配符）
+│       │   └── match.go              # .driftignore 模式匹配
+│       └── pathutil/
+│           └── pathutil.go           # 路径相对化/规范化
 │
 ├── docs/                         # 文档
+│   ├── prd.md                    # 产品需求文档
 │   ├── cli-design.md             # CLI 命令设计
-│   └── architecture.md           # 本文档
+│   ├── architecture.md           # 本文档
+│   ├── roadmap.md                # 路线图
+│   ├── CODE_STANDARDS.md         # 代码规范
+│   └── engine-plugin.md          # 引擎插件开发指南
 │
 ├── go.mod
 ├── go.sum
-├── main.go                       # 程序入口
+├── AGENTS.md
 ├── .goreleaser.yml               # 发布配置
 └── README.md
 ```
@@ -402,29 +440,36 @@ drift/
 
 | 模块 | 职责 | 依赖 | 被谁依赖 |
 |------|------|------|---------|
-| `cmd/` | CLI 参数解析、输出格式化、命令路由 | porcelain | 无（顶层） |
-| `porcelain/` | 业务逻辑编排、调用下层完成操作 | filetype, chunker, storage, core | cmd |
-| `filetype/` | 文件类型检测、注册 ChunkerSelector/Differ/Previewer | chunker, core | porcelain |
-| `chunker/` | CDC 分块算法实现 | core | filetype, porcelain |
-| `storage/` | 数据持久化接口与实现 | core, util | porcelain |
-| `core/` | 核心数据类型定义 | 无 | 所有模块 |
-| `util/` | 通用工具 | 无 | 所有模块 |
+| `cmd/drift/` | 程序入口（main） | cmd | 无（顶层） |
+| `cmd/` | CLI 参数解析、输出格式化、命令路由 | internal/porcelain | 无（顶层） |
+| `internal/porcelain/` | 业务逻辑编排、调用下层完成操作 | internal/filetype, chunker, storage, core | cmd |
+| `internal/filetype/` | 文件类型检测、注册 ChunkerSelector/Differ/Previewer | internal/chunker, core | porcelain |
+| `internal/chunker/` | CDC 分块算法实现 | internal/core | filetype, porcelain |
+| `internal/storage/` | 数据持久化接口与实现 | internal/core, util | porcelain |
+| `internal/storage/backends/` | 存储后端实现（filesystem/memory） | internal/storage, core | porcelain |
+| `internal/core/` | 核心数据类型定义 | 无 | 所有模块 |
+| `internal/util/` | 通用工具 | 无 | 所有模块 |
 
 > **watch 守护进程**：`drift watch on` 通过 `porcelain.StartDaemon` 启动轮询模式后台子进程，使用 `.drift/watch.pid` 文件管理生命周期（启动/停止/状态查询）。进程管理跨平台实现：Windows 通过 `taskkill /PID` 终止，Unix 通过 `SIGTERM` 终止（见 `watch_proc_windows.go` / `watch_proc_unix.go`）。
 
 ### 3.3 核心接口定义
 
 ```go
-// =================== filetype/engine.go ===================
+// =================== internal/filetype/engine.go ===================
 
 // Engine 文件类型引擎 —— 可插拔的核心抽象
 // 每种文件类型通过注册自己的 Engine 实现来扩展 drift
-// 通过 Go 接口组合嵌入四个能力子接口
+// 通过 Go 接口组合嵌入五个能力子接口
 type Engine interface {
     Detector
     ChunkerSelector
     Differ
     Previewer
+    // Metadata 返回该引擎处理的文件的元数据（如 MIME 类型）。
+    // 返回 nil 表示"无元数据"，调用方必须处理 nil。将此能力下沉到
+    // 引擎自身（而非在 porcelain 层 switch engine.Name()）保证引擎
+    // 自描述：新增引擎无需修改其包外的任何代码。
+    Metadata() *core.FileMetadata
 }
 
 // Detector 分层检测器接口（Phase 3 重构）
@@ -464,18 +509,21 @@ type ChunkerSelector interface {
     ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker
 }
 
-// Differ 计算两个版本文件内容的差异
+// Differ 计算两个版本文件内容的差异（流式，不缓冲整个文件到内存）
 type Differ interface {
-    Diff(oldPath string, oldData []byte, newPath string, newData []byte) (string, error)
+    Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error)
 }
 
 // Previewer 生成文件预览（文本用前N行，图片用尺寸/格式摘要，视频用容器信息）
+// header 是文件头部字节（用于 magic 检测和尺寸解析），size 是文件总大小，
+// reader 允许流式访问内容。仅需 header 的引擎（image/video/binary）不应读取 reader，
+// 以保持大文件下内存恒定。
 type Previewer interface {
-    Preview(data []byte, maxLines int) string
+    Preview(header []byte, size int64, reader io.Reader, maxLines int) (string, error)
 }
 
 
-// =================== filetype/registry.go ===================
+// =================== internal/filetype/registry.go ===================
 
 // Registry.Detect 三轮分层匹配实现：
 //   1. 遍历所有引擎的 DetectByMagic，命中即返回（最强）
@@ -488,7 +536,7 @@ type Previewer interface {
 func (r *Registry) Detect(path string, header []byte) Engine
 
 
-// =================== storage/storer.go ===================
+// =================== internal/storage/storer.go ===================
 
 // Storer 顶层存储接口 —— 接口隔离设计
 type Storer interface {
@@ -515,7 +563,7 @@ type SnapshotStorer interface {
     GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error)
     PutSnapshot(ctx context.Context, snap *core.Snapshot) error
     DeleteSnapshot(ctx context.Context, id core.SnapshotID) error
-    ListSnapshots(ctx context.Context, opts *ListOptions) ([]*core.Snapshot, error)
+    ListSnapshots(ctx context.Context, opts *ListOptions) ([]*core.SnapshotSummary, error)
 }
 
 // ListOptions 控制快照列表的分页
@@ -558,13 +606,13 @@ type ConfigStorer interface {
 ### 4.1 数据模型
 
 ```go
-// =================== core/hash.go ===================
+// =================== internal/core/hash.go ===================
 
 // Hash BLAKE3 哈希值，内容寻址的唯一标识
 type Hash [32]byte
 
 
-// =================== core/chunk.go ===================
+// =================== internal/core/chunk.go ===================
 
 // Chunk 一个内容定义分块
 // 文件被 FastCDC 算法切为多个 Chunk，相同内容的 Chunk 全局去重
@@ -583,7 +631,7 @@ const (
 )
 
 
-// =================== core/file_entry.go ===================
+// =================== internal/core/file_entry.go ===================
 
 // FileEntry 快照中的文件条目
 type FileEntry struct {
@@ -603,7 +651,7 @@ type FileMetadata struct {
 }
 
 
-// =================== core/snapshot.go ===================
+// =================== internal/core/snapshot.go ===================
 
 // Snapshot 一次保存操作创建的快照
 // 等价于 Git 的 commit，但语义是"检查点"而非"提交"
@@ -624,7 +672,7 @@ type SnapshotID struct {
 }
 
 
-// =================== core/ref.go ===================
+// =================== internal/core/ref.go ===================
 
 // Reference 引用 —— 分支或标签
 type Reference struct {
@@ -771,8 +819,8 @@ sequenceDiagram
         Registry-->>Snapshot: Engine(text/image/video/binary)
 
         Note over Snapshot,PS: 3. 生成预览
-        Snapshot->>Engine: Previewer.Generate(content)
-        Engine-->>Snapshot: Preview{data, size}
+        Snapshot->>Engine: Previewer.Preview(header, size, reader, maxLines)
+        Engine-->>Snapshot: Preview{summary}
         Snapshot->>PS: PutPreview(hash, "thumb_128", preview)
 
         Note over Snapshot,CD: 4. CDC 分块
@@ -1157,14 +1205,18 @@ func (e *ClipStudioEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chun
     return chunker.BinaryChunkerFor(fileSize, cfg)
 }
 
-func (e *ClipStudioEngine) Diff(oldPath string, oldData []byte, newPath string, newData []byte) (string, error) {
-    // 图层级 diff（自定义实现）
-    return clipLayerDiff(oldData, newData)
+func (e *ClipStudioEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+    // 图层级 diff（自定义实现，流式读取）
+    return clipLayerDiff(oldReader, newReader)
 }
 
-func (e *ClipStudioEngine) Preview(data []byte, maxLines int) string {
-    // 提取缩略图信息
-    return clipThumbnailInfo(data)
+func (e *ClipStudioEngine) Preview(header []byte, size int64, reader io.Reader, maxLines int) (string, error) {
+    // 提取缩略图信息（仅用 header，不读 reader）
+    return clipThumbnailInfo(header)
+}
+
+func (e *ClipStudioEngine) Metadata() *core.FileMetadata {
+    return &core.FileMetadata{MIMEType: "application/x-clipstudio"}
 }
 
 // 注册（在 init 或 main 中）
@@ -1291,7 +1343,7 @@ drift 不再使用统一的 FastCDC 默认参数，而是由各引擎通过 `Chu
 实现要点：
 
 ```go
-// chunker/strategy.go —— 二进制类引擎（image/video/binary）共享的 3 档策略
+// internal/chunker/strategy.go —— 二进制类引擎（image/video/binary）共享的 3 档策略
 // 放在 chunker 包而非 filetype 包，是为了避免 filetype ↔ 子包循环依赖。
 const (
     binaryLargeThreshold = 50 * 1024 * 1024   // 50MB
@@ -1319,7 +1371,7 @@ func BinaryChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
     }
 }
 
-// filetype/text/chunker.go —— 文本引擎自治 2 档
+// internal/filetype/text/chunker.go —— 文本引擎自治 2 档
 func (e *TextEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
     if fileSize < 64*1024 {
         return nil // 整文件单块，由 chunkFile 直接拼一个 Chunk
@@ -1332,8 +1384,8 @@ func (e *ImageEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.C
     return chunker.BinaryChunkerFor(fileSize, cfg)
 }
 
-// porcelain/snapshot.go —— 调用方：策略选择由引擎自治，snapshot 层零分支
-func chunkFile(r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
+// internal/porcelain/snapshot.go —— 调用方：策略选择由引擎自治，snapshot 层零分支
+func chunkFile(path string, r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
     c := engine.ChunkerFor(fileSize, cfg)
     if c == nil {
         // 整文件单块：读全部内容，构造单个 Chunk{Hash: BLAKE3(content), ...}

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/your-org/drift/core"
+	"github.com/your-org/drift/internal/core"
 )
 
 type mockChunkStore struct {

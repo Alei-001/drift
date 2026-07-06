@@ -6,9 +6,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/core"
-	"github.com/your-org/drift/porcelain"
-	"github.com/your-org/drift/storage"
+	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/porcelain"
+	"github.com/your-org/drift/internal/storage"
 	"github.com/zeebo/blake3"
 )
 
