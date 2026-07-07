@@ -1,4 +1,16 @@
-# drift
+<p align="center">
+  <img src="assets/icon.png" alt="drift logo" width="180">
+</p>
+
+<h1 align="center">drift</h1>
+
+<p align="center">
+  <a href="README.zh-CN.md">中文文档</a> ·
+  <a href="https://github.com/Alei-001/drift">GitHub</a> ·
+  <a href="docs/roadmap.md">Roadmap</a>
+</p>
+
+---
 
 Version control for creators — a content-addressed, chunk-deduplicated version
 control system designed for writers, illustrators, and designers. Unlike Git,
@@ -38,13 +50,13 @@ PSD, video) and stores only what actually changed.
 ## Install
 
 ```powershell
-go install github.com/your-org/drift/cmd/drift@latest
+go install github.com/Alei-001/drift/cmd/drift@latest
 ```
 
 Or build from source:
 
 ```powershell
-git clone <repo-url>
+git clone https://github.com/Alei-001/drift.git
 cd drift
 go build -o drift ./cmd/drift
 ```
@@ -175,4 +187,4 @@ The `--go_opt=paths=source_relative` flag is **required** (see AGENTS.md).
 
 ## License
 
-See the project repository for license information.
+[MIT](LICENSE) — see the [LICENSE](LICENSE) file for details.

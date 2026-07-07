@@ -1,4 +1,16 @@
-# drift
+<p align="center">
+  <img src="assets/icon.png" alt="drift logo" width="180">
+</p>
+
+<h1 align="center">drift</h1>
+
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="https://github.com/Alei-001/drift">GitHub</a> ·
+  <a href="docs/roadmap.md">路线图</a>
+</p>
+
+---
 
 面向创作者的版本控制 —— 基于内容寻址、分块去重的版本控制系统，专为写作、绘画、设计等创意工作设计。与把所有文件当作不透明字节处理的 Git 不同，drift 理解富媒体文件（图片、PSD、视频），只存储真正发生变化的部分。
 
@@ -27,13 +39,13 @@
 ## 安装
 
 ```powershell
-go install github.com/your-org/drift/cmd/drift@latest
+go install github.com/Alei-001/drift/cmd/drift@latest
 ```
 
 或从源码构建：
 
 ```powershell
-git clone <repo-url>
+git clone https://github.com/Alei-001/drift.git
 cd drift
 go build -o drift ./cmd/drift
 ```
@@ -164,4 +176,4 @@ protoc --proto_path=internal/core --go_out=internal/core --go_opt=paths=source_r
 
 ## 许可证
 
-请参阅项目仓库获取许可证信息。
+[MIT](LICENSE) —— 详见 [LICENSE](LICENSE) 文件。
