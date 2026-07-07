@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -150,7 +149,7 @@ file changes of a single snapshot.`,
 			return err
 		}
 		timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
-			add, mod, del := countSnapshotChanges(ctx, store, s)
+			add, mod, del := porcelain.CountSnapshotChanges(ctx, store, s)
 			changes := formatChangesCompact(add, mod, del)
 
 			msg := s.Message
@@ -227,23 +226,6 @@ func logDetailMode(ctx context.Context, store storage.Storer, id string) error {
 	total := len(add) + len(mod) + len(del)
 	summaryLine(total, len(add), len(mod), len(del))
 	return nil
-}
-
-// countSnapshotChanges loads a snapshot and computes its added/modified/deleted
-// file counts against its predecessor. Errors are logged and zero counts are
-// returned so that a single failure does not abort the whole log listing.
-func countSnapshotChanges(ctx context.Context, store storage.Storer, summary *core.SnapshotSummary) (added, modified, deleted int) {
-	snapshot, err := store.GetSnapshot(ctx, summary.ID)
-	if err != nil {
-		slog.Warn("load snapshot for changes", "snapshot", summary.ShortID(), "error", err)
-		return 0, 0, 0
-	}
-	a, m, d, err := porcelain.SnapshotFileDiff(ctx, store, snapshot)
-	if err != nil {
-		slog.Warn("compute snapshot changes failed", "snapshot", snapshot.ShortID(), "error", err)
-		return 0, 0, 0
-	}
-	return len(a), len(m), len(d)
 }
 
 // formatChangesCompact formats change counts as "+A ~M -D", omitting zero parts.

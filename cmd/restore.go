@@ -1,16 +1,11 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/porcelain"
-	"github.com/your-org/drift/internal/util/fsutil"
-	"github.com/your-org/drift/internal/util/pathutil"
 )
 
 var restoreNoBackup bool
@@ -63,7 +58,7 @@ var restoreCmd = &cobra.Command{
 		var add, mod []core.FileEntry
 		var del []string
 		if filePath == "" {
-			add, mod, del, err = computeRestoreChanges(ctx, cwd, &cfg.Core, snapshot)
+			add, mod, del, err = porcelain.ComputeRestoreChanges(ctx, cwd, &cfg.Core, snapshot)
 			if err != nil {
 				return err
 			}
@@ -142,70 +137,6 @@ var restoreCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-// computeRestoreChanges compares the current workspace files against the
-// target snapshot and returns what would change if the snapshot were restored:
-// files in the snapshot but not in the workspace (added), files in both but
-// with different content (modified), and files in the workspace but not in
-// the snapshot (deleted). Modification is detected by comparing content
-// hashes (BLAKE3) rather than modtime, since tools like "cp -p" preserve
-// modtime while changing content.
-func computeRestoreChanges(ctx context.Context, workDir string, cfg *core.CoreConfig, snapshot *core.Snapshot) (added []core.FileEntry, modified []core.FileEntry, deleted []string, err error) {
-	type fileInfo struct {
-		size int64
-		path string
-	}
-	workspaceFiles := make(map[string]fileInfo)
-	walkErr := fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, relErr := pathutil.Rel(workDir, path)
-		if relErr != nil {
-			return nil
-		}
-		workspaceFiles[rel] = fileInfo{size: info.Size(), path: path}
-		return nil
-	})
-	if walkErr != nil {
-		return nil, nil, nil, walkErr
-	}
-
-	snapFiles := make(map[string]bool)
-	for _, f := range snapshot.Files {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, nil, err
-		}
-		snapFiles[f.Path] = true
-		if ws, ok := workspaceFiles[f.Path]; !ok {
-			added = append(added, f)
-		} else if ws.size != f.Size {
-			modified = append(modified, f)
-		} else {
-			// Same size: compare content hash to detect changes that
-			// preserve size (e.g. "cp -p" preserves modtime too).
-			workHash, hashErr := porcelain.ComputeFileHash(ws.path, cfg)
-			if hashErr != nil || workHash != f.Hash {
-				modified = append(modified, f)
-			}
-		}
-	}
-
-	for path := range workspaceFiles {
-		if !snapFiles[path] {
-			deleted = append(deleted, path)
-		}
-	}
-
-	sort.Slice(added, func(i, j int) bool { return added[i].Path < added[j].Path })
-	sort.Slice(modified, func(i, j int) bool { return modified[i].Path < modified[j].Path })
-	sort.Strings(deleted)
-
-	return added, modified, deleted, nil
 }
 
 func init() {

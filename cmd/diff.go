@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/core"
@@ -112,14 +113,24 @@ func runDiffWorkspaceVs(ctx context.Context, store storage.Storer, cwd string, c
 	}
 	if file != "" {
 		fmt.Printf(">>> Diff %s -> workspace %s\n", snapLabel, file)
-		return porcelain.DiffWorkspaceFileVsSnapshot(ctx, store, cwd, snap, file)
+		result, err := porcelain.DiffWorkspaceFileVsSnapshot(ctx, store, cwd, snap, file)
+		if err != nil {
+			return err
+		}
+		printContentDiff(result)
+		return nil
 	}
 	if diffStatOnly {
 		fmt.Printf(">>> Diff %s -> workspace (stat)\n", snapLabel)
 		return diffStatWorkspace(ctx, store, cwd, cfg, snap)
 	}
 	fmt.Printf(">>> Diff %s -> workspace\n", snapLabel)
-	return porcelain.DiffWorkspaceVsSnapshot(store, cwd, snap, cfg)
+	result, err := porcelain.DiffWorkspaceVsSnapshot(ctx, cwd, snap, cfg)
+	if err != nil {
+		return err
+	}
+	printFileDiff(result)
+	return nil
 }
 
 // runDiffSnapshots handles snapshot-vs-snapshot diff.
@@ -139,7 +150,8 @@ func runDiffSnapshots(ctx context.Context, store storage.Storer, cwd string, cfg
 	}
 	if file != "" {
 		fmt.Printf(">>> Diff %s -> %s %s\n", label1, label2, file)
-		porcelain.DiffFileInSnapshots(ctx, store, cwd, snap1, snap2, file)
+		result := porcelain.DiffFileInSnapshots(ctx, store, cwd, snap1, snap2, file)
+		printContentDiff(result)
 		return nil
 	}
 	if diffStatOnly {
@@ -147,8 +159,41 @@ func runDiffSnapshots(ctx context.Context, store storage.Storer, cwd string, cfg
 		return diffStatSnapshots(ctx, store, snap1, snap2)
 	}
 	fmt.Printf(">>> Diff %s -> %s\n", label1, label2)
-	porcelain.DiffSnapshots(store, snap1, snap2)
+	result := porcelain.DiffSnapshots(snap1, snap2)
+	printFileDiff(result)
 	return nil
+}
+
+// printFileDiff prints the file-level diff body: the added/modified/deleted
+// file lists and a summary line. The status line is emitted by the caller.
+func printFileDiff(result porcelain.FileDiffResult) {
+	total := len(result.Added) + len(result.Modified) + len(result.Deleted)
+	if total == 0 {
+		fmt.Println()
+		fmt.Println("  No changes.")
+		return
+	}
+	fmt.Println()
+	for _, p := range result.Added {
+		fmt.Printf("  +  %s\n", p)
+	}
+	for _, p := range result.Modified {
+		fmt.Printf("  ~  %s\n", p)
+	}
+	for _, p := range result.Deleted {
+		fmt.Printf("  -  %s\n", p)
+	}
+	summaryLine(total, len(result.Added), len(result.Modified), len(result.Deleted))
+}
+
+// printContentDiff prints a content-level diff result to stdout/stderr.
+func printContentDiff(result porcelain.ContentDiffResult) {
+	if result.Stderr != "" {
+		fmt.Fprint(os.Stderr, result.Stderr)
+	}
+	if result.Stdout != "" {
+		fmt.Print(result.Stdout)
+	}
 }
 
 func init() {

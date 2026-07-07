@@ -1,14 +1,9 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"os"
 	"strings"
 
@@ -96,16 +91,14 @@ func printFileListSimple(added, modified []core.FileEntry, deleted []string) {
 }
 
 // printFileListWithLineCount prints file list with sizes and line counts (for log -v).
-func printFileListWithLineCount(added, modified []core.FileEntry, deleted []string, store interface {
-	GetChunk(context.Context, core.Hash) (*core.Chunk, error)
-}) {
+func printFileListWithLineCount(added, modified []core.FileEntry, deleted []string, store storage.Storer) {
 	ctx := context.Background()
 	fmt.Println()
 	for _, f := range added {
 		fmt.Printf("  +  %s      %s\n", f.Path, formatSize(f.Size))
 	}
 	for _, f := range modified {
-		lines := countLinesFromChunks(ctx, store, f)
+		lines := porcelain.CountFileLines(ctx, store, f)
 		if lines > 0 {
 			fmt.Printf("  ~  %s      %s  (%d lines)\n", f.Path, formatSize(f.Size), lines)
 		} else {
@@ -115,24 +108,6 @@ func printFileListWithLineCount(added, modified []core.FileEntry, deleted []stri
 	for _, p := range deleted {
 		fmt.Printf("  -  %s\n", p)
 	}
-}
-
-// countLinesFromChunks reads chunk data and counts newlines.
-func countLinesFromChunks(ctx context.Context, store interface {
-	GetChunk(context.Context, core.Hash) (*core.Chunk, error)
-}, entry core.FileEntry) int {
-	count := 0
-	for _, h := range entry.Chunks {
-		if err := ctx.Err(); err != nil {
-			return 0
-		}
-		chunk, err := store.GetChunk(ctx, h)
-		if err != nil {
-			return 0
-		}
-		count += bytes.Count(chunk.Data, []byte{'\n'})
-	}
-	return count
 }
 
 // summaryLine prints "  N files: +A ~M -D", omitting zero-count parts.
@@ -188,14 +163,4 @@ func parseHexByte(s string) (byte, bool) {
 		}
 	}
 	return b, true
-}
-
-// imageDimensions decodes image dimensions from data for common image formats
-// (PNG, JPEG, GIF). Returns empty string for non-image or undecodable data.
-func imageDimensions(data []byte) string {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%dx%d", cfg.Width, cfg.Height)
 }

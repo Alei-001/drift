@@ -15,28 +15,22 @@ import (
 	"github.com/your-org/drift/internal/util/pathutil"
 )
 
-// Note: the functions in this file mix business logic with console output
-// (fmt.Printf). This is an interim state: the logic was moved here from
-// cmd/diff.go to enforce the "cmd has no business logic" rule, but the
-// output formatting has not yet been separated from the diff computation.
-// A future refactor should return structured diff results and let cmd
-// handle all rendering.
-
-// DiffWorkspaceVsSnapshot prints a workspace-vs-snapshot diff: files added,
-// modified, or deleted relative to the snapshot. The workspace is walked
-// once; each file is classified by size (and by content hash on size match).
-// The status line is emitted by the caller; this function prints only the
-// file list and summary line.
-func DiffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *core.Snapshot, cfg *core.CoreConfig) error {
+// DiffWorkspaceVsSnapshot computes a workspace-vs-snapshot diff: files
+// added, modified, or deleted relative to the snapshot. The workspace is
+// walked once; each file is classified by size (and by content hash on
+// size match). It returns the classified file lists without printing; the
+// caller renders the result.
+func DiffWorkspaceVsSnapshot(ctx context.Context, workDir string, snapshot *core.Snapshot, cfg *core.CoreConfig) (FileDiffResult, error) {
 	snapFiles := make(map[string]*core.FileEntry)
 	for i := range snapshot.Files {
 		snapFiles[snapshot.Files[i].Path] = &snapshot.Files[i]
 	}
 
-	var added, modified []string
-	var deleted []string
-
+	var result FileDiffResult
 	err := fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		rel, err := pathutil.Rel(workDir, path)
 		if err != nil {
 			return fmt.Errorf("resolve relative path %s: %w", path, err)
@@ -47,60 +41,42 @@ func DiffWorkspaceVsSnapshot(store storage.Storer, workDir string, snapshot *cor
 
 		snapEntry, exists := snapFiles[rel]
 		if !exists {
-			added = append(added, rel)
+			result.Added = append(result.Added, rel)
 			return nil
 		}
 
 		if info.Size() != snapEntry.Size {
-			modified = append(modified, rel)
+			result.Modified = append(result.Modified, rel)
 		} else {
 			workHash, hashErr := ComputeFileHash(path, cfg)
 			if hashErr != nil || workHash != snapEntry.Hash {
-				modified = append(modified, rel)
+				result.Modified = append(result.Modified, rel)
 			}
 		}
 		delete(snapFiles, rel)
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("walk workspace: %w", err)
+		return FileDiffResult{}, fmt.Errorf("walk workspace: %w", err)
 	}
 
 	for path := range snapFiles {
-		deleted = append(deleted, path)
+		result.Deleted = append(result.Deleted, path)
 	}
-
-	total := len(added) + len(modified) + len(deleted)
-	if total == 0 {
-		fmt.Println()
-		fmt.Println("  No changes.")
-		return nil
-	}
-	fmt.Println()
-	for _, p := range added {
-		fmt.Printf("  +  %s\n", p)
-	}
-	for _, p := range modified {
-		fmt.Printf("  ~  %s\n", p)
-	}
-	for _, p := range deleted {
-		fmt.Printf("  -  %s\n", p)
-	}
-	fmt.Printf("\n  %s\n", formatDiffSummary(total, len(added), len(modified), len(deleted)))
-	return nil
+	return result, nil
 }
 
-// DiffWorkspaceFileVsSnapshot shows content-level diff for a single file:
-// workspace vs snapshot. The workspace file is opened with os.Open and
-// streamed through the engine, and snapshot content is streamed from chunks
-// via a chunkReader, so the file bytes are never buffered whole in memory.
-// The status line is emitted by the caller; this function prints only the
-// diff content.
-func DiffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshot *core.Snapshot, filePath string) error {
+// DiffWorkspaceFileVsSnapshot computes a content-level diff for a single
+// file: workspace vs snapshot. The workspace file is opened with os.Open
+// and streamed through the engine, and snapshot content is streamed from
+// chunks via a chunkReader, so the file bytes are never buffered whole in
+// memory. It returns the diff content (and any hint) without printing;
+// the caller renders the result.
+func DiffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshot *core.Snapshot, filePath string) (ContentDiffResult, error) {
 	// Normalize path and resolve absolute paths
 	filePath, err := pathutil.RelToWorkDir(workDir, filePath)
 	if err != nil {
-		return fmt.Errorf("cannot resolve path: %w", err)
+		return ContentDiffResult{}, fmt.Errorf("cannot resolve path: %w", err)
 	}
 
 	// Find the file in the snapshot
@@ -115,23 +91,28 @@ func DiffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, work
 	fullPath := filepath.Join(workDir, filePath)
 	info, statErr := os.Stat(fullPath)
 	if statErr != nil && !os.IsNotExist(statErr) {
-		return fmt.Errorf("stat %s: %w", fullPath, statErr)
+		return ContentDiffResult{}, fmt.Errorf("stat %s: %w", fullPath, statErr)
 	}
 
 	if snapEntry == nil {
 		// File not in snapshot: added in workspace
 		if os.IsNotExist(statErr) {
-			fmt.Fprintf(os.Stderr, "  hint: '%s' not found in snapshot or workspace.\n", filePath)
-			return nil
+			return ContentDiffResult{Stderr: fmt.Sprintf("  hint: '%s' not found in snapshot or workspace.\n", filePath)}, nil
 		}
-		fmt.Printf("  +  %s  (new file, %s)\n", filePath, format.Bytes(info.Size()))
-		return nil
+		return ContentDiffResult{
+			Stdout:  fmt.Sprintf("  +  %s  (new file, %s)\n", filePath, format.Bytes(info.Size())),
+			Kind:    "added",
+			NewSize: info.Size(),
+		}, nil
 	}
 
 	if os.IsNotExist(statErr) {
 		// File was in snapshot but deleted from workspace
-		fmt.Printf("  -  %s  (deleted, was %s)\n", filePath, format.Bytes(snapEntry.Size))
-		return nil
+		return ContentDiffResult{
+			Stdout:  fmt.Sprintf("  -  %s  (deleted, was %s)\n", filePath, format.Bytes(snapEntry.Size)),
+			Kind:    "deleted",
+			OldSize: snapEntry.Size,
+		}, nil
 	}
 
 	// Both exist. If sizes match, short-circuit on a streaming BLAKE3 hash
@@ -140,28 +121,27 @@ func DiffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, work
 	if info.Size() == snapEntry.Size {
 		workHash, err := stream.HashFileContent(fullPath)
 		if err != nil {
-			return fmt.Errorf("hash %s: %w", fullPath, err)
+			return ContentDiffResult{}, fmt.Errorf("hash %s: %w", fullPath, err)
 		}
 		snapHash, err := stream.HashChunkData(ctx, store, snapEntry.Chunks)
 		if err != nil {
-			return fmt.Errorf("hash snapshot chunks for %s: %w", filePath, err)
+			return ContentDiffResult{}, fmt.Errorf("hash snapshot chunks for %s: %w", filePath, err)
 		}
 		if workHash == snapHash {
-			fmt.Printf("  (no change)\n")
-			return nil
+			return ContentDiffResult{Stdout: "  (no change)\n", Kind: "unchanged"}, nil
 		}
 	}
 
 	// Content differs: open the workspace file and run a streaming engine diff.
 	workFile, err := os.Open(fullPath)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", fullPath, err)
+		return ContentDiffResult{}, fmt.Errorf("open %s: %w", fullPath, err)
 	}
 	defer workFile.Close()
 
 	header, workReader, err := stream.PeekHeader(workFile, core.HeaderPeekSize)
 	if err != nil {
-		return fmt.Errorf("read header %s: %w", fullPath, err)
+		return ContentDiffResult{}, fmt.Errorf("read header %s: %w", fullPath, err)
 	}
 	engine := filetype.DetectEngine(filePath, header)
 
@@ -172,23 +152,30 @@ func DiffWorkspaceFileVsSnapshot(ctx context.Context, store storage.Storer, work
 	if engine != nil && engine.Name() == "text" {
 		diff, diffErr := engine.Diff(ctx, oldLabel, snapReader, newLabel, workReader)
 		if diffErr != nil {
-			return fmt.Errorf("diff %s: %w", filePath, diffErr)
+			return ContentDiffResult{}, fmt.Errorf("diff %s: %w", filePath, diffErr)
 		}
-		fmt.Println(diff)
-	} else {
-		fmt.Printf("  Size:       %s -> %s (%+s)\n",
-			format.Bytes(snapEntry.Size), format.Bytes(info.Size()),
-			format.Bytes(info.Size()-snapEntry.Size))
-		snapHeader, _, err := stream.PeekHeader(snapReader, core.HeaderPeekSize)
-		if err != nil {
-			return fmt.Errorf("read snapshot header %s: %w", filePath, err)
-		}
-		oldDims := format.ImageDimensions(snapHeader)
-		newDims := format.ImageDimensions(header)
-		if oldDims != "" || newDims != "" {
-			fmt.Printf("  Dimensions: %s -> %s\n", oldDims, newDims)
-		}
-		fmt.Println("\n  (binary file — metadata only)")
+		return ContentDiffResult{Stdout: diff + "\n", Kind: "text", Diff: diff}, nil
 	}
-	return nil
+	// Binary file: emit metadata only (size change, optional dimensions).
+	snapHeader, _, err := stream.PeekHeader(snapReader, core.HeaderPeekSize)
+	if err != nil {
+		return ContentDiffResult{}, fmt.Errorf("read snapshot header %s: %w", filePath, err)
+	}
+	out := fmt.Sprintf("  Size:       %s -> %s (%+s)\n",
+		format.Bytes(snapEntry.Size), format.Bytes(info.Size()),
+		format.Bytes(info.Size()-snapEntry.Size))
+	oldDims := format.ImageDimensions(snapHeader)
+	newDims := format.ImageDimensions(header)
+	if oldDims != "" || newDims != "" {
+		out += fmt.Sprintf("  Dimensions: %s -> %s\n", oldDims, newDims)
+	}
+	out += "\n  (binary file — metadata only)\n"
+	return ContentDiffResult{
+		Stdout:        out,
+		Kind:          "binary",
+		OldSize:       snapEntry.Size,
+		NewSize:       info.Size(),
+		OldDimensions: oldDims,
+		NewDimensions: newDims,
+	}, nil
 }

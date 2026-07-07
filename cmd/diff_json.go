@@ -3,14 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"slices"
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/porcelain"
 	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/util/fsutil"
-	"github.com/your-org/drift/internal/util/pathutil"
 )
 
 // diffFilesSummary is the change tally for file-level diff JSON output.
@@ -76,37 +72,10 @@ type diffFileData struct {
 }
 
 // diffSnapshotsJSON emits a file-level diff between two snapshots as a JSON
-// envelope. It mirrors porcelain.DiffSnapshots but returns structured data
-// instead of printing.
+// envelope. Classification is delegated to porcelain.DiffSnapshots; this
+// function only wraps the result in the JSON envelope.
 func diffSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *core.Snapshot, label1, label2 string) error {
-	snap1Files := make(map[string]*core.FileEntry)
-	for i := range snap1.Files {
-		snap1Files[snap1.Files[i].Path] = &snap1.Files[i]
-	}
-
-	added := make([]string, 0)
-	modified := make([]string, 0)
-	deleted := make([]string, 0)
-
-	for i := range snap2.Files {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		e2 := &snap2.Files[i]
-		e1, exists := snap1Files[e2.Path]
-		if !exists {
-			added = append(added, e2.Path)
-			continue
-		}
-		if e1.Size != e2.Size || !slices.Equal(e1.Chunks, e2.Chunks) {
-			modified = append(modified, e2.Path)
-		}
-		delete(snap1Files, e2.Path)
-	}
-	for path := range snap1Files {
-		deleted = append(deleted, path)
-	}
-
+	result := porcelain.DiffSnapshots(snap1, snap2)
 	return outputJSON(JSONEnvelope{
 		Command: "diff",
 		Status:  "ok",
@@ -114,66 +83,27 @@ func diffSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *
 			Base:     label1,
 			Target:   label2,
 			Mode:     "files",
-			Added:    added,
-			Modified: modified,
-			Deleted:  deleted,
+			Added:    result.Added,
+			Modified: result.Modified,
+			Deleted:  result.Deleted,
 			Summary: diffFilesSummary{
-				Total:    len(added) + len(modified) + len(deleted),
-				Added:    len(added),
-				Modified: len(modified),
-				Deleted:  len(deleted),
+				Total:    len(result.Added) + len(result.Modified) + len(result.Deleted),
+				Added:    len(result.Added),
+				Modified: len(result.Modified),
+				Deleted:  len(result.Deleted),
 			},
 		},
 	})
 }
 
 // diffWorkspaceJSON emits a file-level workspace-vs-snapshot diff as a JSON
-// envelope. It walks the workspace via fsutil.Walk and classifies files by
-// size and content hash, mirroring porcelain.DiffWorkspaceVsSnapshot.
+// envelope. Classification is delegated to porcelain.DiffWorkspaceVsSnapshot;
+// this function only wraps the result in the JSON envelope.
 func diffWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
-	snapFiles := make(map[string]*core.FileEntry)
-	for i := range snap.Files {
-		snapFiles[snap.Files[i].Path] = &snap.Files[i]
+	result, err := porcelain.DiffWorkspaceVsSnapshot(ctx, cwd, snap, cfg)
+	if err != nil {
+		return fmt.Errorf("walk workspace: %w", err)
 	}
-
-	added := make([]string, 0)
-	modified := make([]string, 0)
-	deleted := make([]string, 0)
-
-	walkErr := fsutil.Walk(cwd, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, relErr := pathutil.Rel(cwd, path)
-		if relErr != nil {
-			return nil
-		}
-		snapEntry, exists := snapFiles[rel]
-		if !exists {
-			added = append(added, rel)
-			return nil
-		}
-		if info.Size() != snapEntry.Size {
-			modified = append(modified, rel)
-		} else {
-			workHash, hashErr := porcelain.ComputeFileHash(path, cfg)
-			if hashErr != nil || workHash != snapEntry.Hash {
-				modified = append(modified, rel)
-			}
-		}
-		delete(snapFiles, rel)
-		return nil
-	})
-	if walkErr != nil {
-		return fmt.Errorf("walk workspace: %w", walkErr)
-	}
-	for path := range snapFiles {
-		deleted = append(deleted, path)
-	}
-
 	return outputJSON(JSONEnvelope{
 		Command: "diff",
 		Status:  "ok",
@@ -181,22 +111,23 @@ func diffWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cf
 			Base:     snapLabel,
 			Target:   "workspace",
 			Mode:     "files",
-			Added:    added,
-			Modified: modified,
-			Deleted:  deleted,
+			Added:    result.Added,
+			Modified: result.Modified,
+			Deleted:  result.Deleted,
 			Summary: diffFilesSummary{
-				Total:    len(added) + len(modified) + len(deleted),
-				Added:    len(added),
-				Modified: len(modified),
-				Deleted:  len(deleted),
+				Total:    len(result.Added) + len(result.Modified) + len(result.Deleted),
+				Added:    len(result.Added),
+				Modified: len(result.Modified),
+				Deleted:  len(result.Deleted),
 			},
 		},
 	})
 }
 
 // diffStatSnapshotsJSON emits a --stat diff between two snapshots as JSON.
+// The per-file computation is delegated to porcelain.ComputeStatSnapshots.
 func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *core.Snapshot, label1, label2 string) error {
-	stats, err := computeStatSnapshots(ctx, store, snap1, snap2)
+	stats, err := porcelain.ComputeStatSnapshots(ctx, store, snap1, snap2)
 	if err != nil {
 		reportFailed("Diff", "diff", err.Error(), "")
 		return ErrSilent
@@ -205,8 +136,9 @@ func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, sna
 }
 
 // diffStatWorkspaceJSON emits a --stat workspace-vs-snapshot diff as JSON.
+// The per-file computation is delegated to porcelain.ComputeStatWorkspace.
 func diffStatWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
-	stats, err := computeStatWorkspace(ctx, store, cwd, cfg, snap)
+	stats, err := porcelain.ComputeStatWorkspace(ctx, store, cwd, cfg, snap)
 	if err != nil {
 		reportFailed("Diff", "diff", err.Error(), "")
 		return ErrSilent
@@ -214,26 +146,26 @@ func diffStatWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string
 	return outputStatJSON(snapLabel, "workspace", stats)
 }
 
-// outputStatJSON converts fileStat results into a JSON envelope. OldSize and
+// outputStatJSON converts FileStat results into a JSON envelope. OldSize and
 // NewSize are only included for binary files, matching the schema where text
 // files show insertions/deletions and binary files show sizes.
-func outputStatJSON(base, target string, stats []fileStat) error {
+func outputStatJSON(base, target string, stats []porcelain.FileStat) error {
 	files := make([]diffStatFile, 0, len(stats))
 	totalIns, totalDel := 0, 0
 	for _, s := range stats {
 		entry := diffStatFile{
-			Path:       s.path,
-			Insertions: s.insertions,
-			Deletions:  s.deletions,
-			Binary:     s.binary,
+			Path:       s.Path,
+			Insertions: s.Insertions,
+			Deletions:  s.Deletions,
+			Binary:     s.Binary,
 		}
-		if s.binary {
-			entry.OldSize = s.oldSize
-			entry.NewSize = s.newSize
+		if s.Binary {
+			entry.OldSize = s.OldSize
+			entry.NewSize = s.NewSize
 		}
 		files = append(files, entry)
-		totalIns += s.insertions
-		totalDel += s.deletions
+		totalIns += s.Insertions
+		totalDel += s.Deletions
 	}
 	return outputJSON(JSONEnvelope{
 		Command: "diff",

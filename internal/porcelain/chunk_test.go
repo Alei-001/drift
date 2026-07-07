@@ -1,9 +1,11 @@
 package porcelain
 
 import (
+	"context"
 	"testing"
 
 	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/storage/backends/memory"
 	"github.com/zeebo/blake3"
 )
 
@@ -64,5 +66,42 @@ func TestComputeFileHashFromChunks_MatchesConcat(t *testing.T) {
 	copy(want[:], h.Sum(nil))
 	if got != want {
 		t.Errorf("expected %x, got %x", want, got)
+	}
+}
+
+// TestCountFileLines verifies that newlines are counted correctly across
+// multiple chunks without concatenating them. This is a regression test for
+// OOM: the old code appended all chunk data into a single []byte before
+// counting, which would OOM on large files (e.g. 200 MB text).
+func TestCountFileLines(t *testing.T) {
+	hash1 := core.Hash{0x01}
+	hash2 := core.Hash{0x02}
+	hash3 := core.Hash{0x03}
+
+	store := memory.NewMemoryStorage()
+	store.PutChunk(context.Background(), &core.Chunk{Hash: hash1, Data: []byte("line1\nline2\n")})       // 2 newlines
+	store.PutChunk(context.Background(), &core.Chunk{Hash: hash2, Data: []byte("line3\nline4")})         // 1 newline
+	store.PutChunk(context.Background(), &core.Chunk{Hash: hash3, Data: []byte("line5\nline6\nline7\n")}) // 3 newlines
+
+	entry := core.FileEntry{
+		Chunks: []core.Hash{hash1, hash2, hash3},
+	}
+
+	count := CountFileLines(context.Background(), store, entry)
+	if count != 6 {
+		t.Errorf("expected 6 newlines, got %d", count)
+	}
+}
+
+// TestCountFileLines_MissingChunk verifies that a missing chunk causes
+// CountFileLines to return 0 rather than panicking.
+func TestCountFileLines_MissingChunk(t *testing.T) {
+	store := memory.NewMemoryStorage()
+	entry := core.FileEntry{
+		Chunks: []core.Hash{{0x01}},
+	}
+	count := CountFileLines(context.Background(), store, entry)
+	if count != 0 {
+		t.Errorf("expected 0 for missing chunk, got %d", count)
 	}
 }

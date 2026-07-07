@@ -3,6 +3,7 @@ package porcelain
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -185,6 +186,24 @@ func SnapshotFileDiff(ctx context.Context, store storage.Storer, snapshot *core.
 	}
 
 	return added, modified, deleted, nil
+}
+
+// CountSnapshotChanges loads the snapshot referenced by summary and returns
+// the added/modified/deleted file counts relative to its parent. Errors are
+// logged and zero counts are returned so that a single failure does not abort
+// the whole log listing.
+func CountSnapshotChanges(ctx context.Context, store storage.Storer, summary *core.SnapshotSummary) (added, modified, deleted int) {
+	snapshot, err := store.GetSnapshot(ctx, summary.ID)
+	if err != nil {
+		slog.Warn("load snapshot for changes", "snapshot", summary.ShortID(), "error", err)
+		return 0, 0, 0
+	}
+	a, m, d, err := SnapshotFileDiff(ctx, store, snapshot)
+	if err != nil {
+		slog.Warn("compute snapshot changes failed", "snapshot", snapshot.ShortID(), "error", err)
+		return 0, 0, 0
+	}
+	return len(a), len(m), len(d)
 }
 
 // UndoLastSave reverts the last save operation by moving HEAD back to the

@@ -9,8 +9,10 @@ import (
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/filetype"
+	"github.com/your-org/drift/internal/porcelain"
 	"github.com/your-org/drift/internal/storage"
 	"github.com/your-org/drift/internal/storage/stream"
+	"github.com/your-org/drift/internal/util/format"
 	"github.com/your-org/drift/internal/util/pathutil"
 )
 
@@ -58,8 +60,9 @@ type showOpenData struct {
 }
 
 // showFileListJSON emits the file listing of a snapshot as a JSON envelope.
-// It reuses fileTypeLabel to determine the type, splitting the "image (WxH)"
-// format into separate type and dimensions fields for structured output.
+// It reuses porcelain.DetectFileTypeLabel to determine the type, splitting
+// the "image (WxH)" format into separate type and dimensions fields for
+// structured output.
 func showFileListJSON(ctx context.Context, store storage.Storer, snap *core.Snapshot, versionLabel string) error {
 	files := make([]showFileListEntry, 0, len(snap.Files))
 	for i := range snap.Files {
@@ -67,7 +70,7 @@ func showFileListJSON(ctx context.Context, store storage.Storer, snap *core.Snap
 			return err
 		}
 		f := &snap.Files[i]
-		typeLabel := fileTypeLabel(ctx, store, f)
+		typeLabel := porcelain.DetectFileTypeLabel(ctx, store, f)
 		entry := showFileListEntry{Path: f.Path, Size: f.Size}
 		if strings.HasPrefix(typeLabel, "image (") && strings.HasSuffix(typeLabel, ")") {
 			entry.Type = "image"
@@ -157,7 +160,7 @@ func showFileJSON(ctx context.Context, store storage.Storer, cwd string, snapsho
 	}
 	if engine != nil && engine.Name() == "image" {
 		binaryData.Type = "image"
-		if dims := imageDimensions(header); dims != "" {
+		if dims := format.ImageDimensions(header); dims != "" {
 			binaryData.Dimensions = dims
 		}
 	} else {

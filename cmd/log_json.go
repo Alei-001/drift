@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/your-org/drift/internal/core"
+	"github.com/your-org/drift/internal/porcelain"
 	"github.com/your-org/drift/internal/storage"
 )
 
@@ -35,7 +36,7 @@ func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.Sn
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		add, mod, del := countSnapshotChanges(ctx, store, s)
+		add, mod, del := porcelain.CountSnapshotChanges(ctx, store, s)
 		tags := make([]string, 0, len(s.Tags))
 		for _, t := range s.Tags {
 			if t != "" {
@@ -105,7 +106,7 @@ func logDetailJSONMode(ctx context.Context, store storage.Storer, snapshot *core
 	modEntries := make([]logDetailJSONFile, 0, len(modified))
 	for _, f := range modified {
 		entry := logDetailJSONFile{Path: f.Path, Size: f.Size}
-		if lines := countLinesFromChunks(ctx, store, f); lines > 0 {
+		if lines := porcelain.CountFileLines(ctx, store, f); lines > 0 {
 			entry.Lines = lines
 		}
 		modEntries = append(modEntries, entry)

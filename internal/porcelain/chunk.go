@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/filetype"
+	"github.com/your-org/drift/internal/storage"
 	"github.com/zeebo/blake3"
 )
 
@@ -59,6 +61,24 @@ func chunkFile(ctx context.Context, path string, r io.Reader, engine filetype.En
 		return []*core.Chunk{chunk}, nil
 	}
 	return c.Chunk(ctx, r)
+}
+
+// CountFileLines returns the total number of lines in the file represented by
+// entry, by counting newline bytes across all of its chunks. A missing chunk
+// or a cancelled context causes the function to return 0.
+func CountFileLines(ctx context.Context, store storage.Storer, entry core.FileEntry) int {
+	count := 0
+	for _, h := range entry.Chunks {
+		if err := ctx.Err(); err != nil {
+			return 0
+		}
+		chunk, err := store.GetChunk(ctx, h)
+		if err != nil {
+			return 0
+		}
+		count += bytes.Count(chunk.Data, []byte{'\n'})
+	}
+	return count
 }
 
 // computeFileHashFromChunks derives the file-level hash by hashing the

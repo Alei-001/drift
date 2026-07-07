@@ -11,8 +11,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/filetype"
+	"github.com/your-org/drift/internal/porcelain"
 	"github.com/your-org/drift/internal/storage"
 	"github.com/your-org/drift/internal/storage/stream"
+	"github.com/your-org/drift/internal/util/format"
 	"github.com/your-org/drift/internal/util/pathutil"
 )
 
@@ -124,39 +126,13 @@ func showFileList(ctx context.Context, store storage.Storer, snap *core.Snapshot
 			return err
 		}
 		f := &snap.Files[i]
-		typeLabel := fileTypeLabel(ctx, store, f)
+		typeLabel := porcelain.DetectFileTypeLabel(ctx, store, f)
 		fmt.Printf("  %-*s%*s   %s\n", pathWidth, f.Path, sizeColWidth, formatSize(f.Size), typeLabel)
 	}
 
 	fmt.Println()
 	fmt.Printf("  %d %s\n", len(snap.Files), pluralFile(len(snap.Files)))
 	return nil
-}
-
-// fileTypeLabel returns a human-readable type label for a file entry by
-// peeking the chunk header and running engine detection. Image files
-// include parsed dimensions when available.
-func fileTypeLabel(ctx context.Context, store storage.Storer, entry *core.FileEntry) string {
-	chunkR := stream.NewChunkReader(ctx, store, entry.Chunks)
-	header, _, err := stream.PeekHeader(chunkR, core.HeaderPeekSize)
-	if err != nil {
-		return "binary"
-	}
-	engine := filetype.DetectEngine(entry.Path, header)
-	if engine == nil {
-		return "binary"
-	}
-	switch engine.Name() {
-	case "text":
-		return "text"
-	case "image":
-		if dims := imageDimensions(header); dims != "" {
-			return "image (" + dims + ")"
-		}
-		return "image"
-	default:
-		return engine.Name()
-	}
 }
 
 // showFile displays a single file from a snapshot: text content is streamed
@@ -220,7 +196,7 @@ func showFile(ctx context.Context, store storage.Storer, cwd string, snapshot *c
 	fmt.Printf(">>> File %s:%s\n", versionLabel, filePath)
 	fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
 	if engine != nil && engine.Name() == "image" {
-		if dims := imageDimensions(header); dims != "" {
+		if dims := format.ImageDimensions(header); dims != "" {
 			fmt.Printf("  Dimensions: %s\n", dims)
 		}
 	}

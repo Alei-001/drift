@@ -1,12 +1,10 @@
 package porcelain
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/your-org/drift/internal/core"
@@ -75,31 +73,8 @@ func TestResolveHeadSnapshot_Success(t *testing.T) {
 	}
 }
 
-// captureStdout swaps os.Stdout for a pipe, runs fn, and returns whatever was
-// printed. It restores os.Stdout even on failure. Used to test the
-// print-bearing diff helpers in diff.go.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = old }()
-	fn()
-	if err := w.Close(); err != nil {
-		t.Fatalf("close pipe: %v", err)
-	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("io.Copy: %v", err)
-	}
-	return buf.String()
-}
-
 // TestDiffSnapshots_NoChanges verifies that two snapshots with identical file
-// sets and chunk hashes report "No changes." in the output.
+// sets and chunk hashes report an empty diff (no added/modified/deleted).
 func TestDiffSnapshots_NoChanges(t *testing.T) {
 	hashA := core.Hash{0xAA}
 	snap1 := &core.Snapshot{
@@ -110,9 +85,10 @@ func TestDiffSnapshots_NoChanges(t *testing.T) {
 		ID:    core.SnapshotID{Hash: core.Hash{0x02}},
 		Files: []core.FileEntry{{Path: "a", Hash: hashA, Size: 10, Chunks: []core.Hash{hashA}}},
 	}
-	out := captureStdout(t, func() { DiffSnapshots(nil, snap1, snap2) })
-	if !strings.Contains(out, "No changes") {
-		t.Errorf("expected 'No changes' in output, got %q", out)
+	result := DiffSnapshots(snap1, snap2)
+	if len(result.Added) != 0 || len(result.Modified) != 0 || len(result.Deleted) != 0 {
+		t.Errorf("expected no changes, got added=%v modified=%v deleted=%v",
+			result.Added, result.Modified, result.Deleted)
 	}
 }
 
@@ -134,40 +110,42 @@ func TestDiffSnapshots_AddedModifiedDeleted(t *testing.T) {
 	snap2 := &core.Snapshot{
 		ID: core.SnapshotID{Hash: core.Hash{0x02}},
 		Files: []core.FileEntry{
-			{Path: "a", Hash: hashA, Size: 10, Chunks: []core.Hash{hashA}},  // unchanged
-			{Path: "b", Hash: hashB2, Size: 25, Chunks: []core.Hash{hashB2}}, // modified (hash + size)
+			{Path: "a", Hash: hashA, Size: 10, Chunks: []core.Hash{hashA}},           // unchanged
+			{Path: "b", Hash: hashB2, Size: 25, Chunks: []core.Hash{hashB2}},         // modified (hash + size)
 			{Path: "d", Hash: core.Hash{0xDD}, Size: 40, Chunks: []core.Hash{{0xDD}}}, // added
 		},
 	}
-	out := captureStdout(t, func() { DiffSnapshots(nil, snap1, snap2) })
-	if !strings.Contains(out, "+  d") {
-		t.Errorf("expected '+  d' (added) in output, got %q", out)
+	result := DiffSnapshots(snap1, snap2)
+	if !slices.Contains(result.Added, "d") {
+		t.Errorf("expected 'd' in added, got %v", result.Added)
 	}
-	if !strings.Contains(out, "~  b") {
-		t.Errorf("expected '~  b' (modified) in output, got %q", out)
+	if !slices.Contains(result.Modified, "b") {
+		t.Errorf("expected 'b' in modified, got %v", result.Modified)
 	}
-	if !strings.Contains(out, "-  c") {
-		t.Errorf("expected '-  c' (deleted) in output, got %q", out)
+	if !slices.Contains(result.Deleted, "c") {
+		t.Errorf("expected 'c' in deleted, got %v", result.Deleted)
 	}
-	// 'a' is unchanged and should not appear in any +/-/~ line.
-	if strings.Contains(out, "+  a") || strings.Contains(out, "~  a") || strings.Contains(out, "-  a") {
-		t.Errorf("unchanged file 'a' should not appear in diff output: %q", out)
+	// 'a' is unchanged and should not appear in any bucket.
+	if slices.Contains(result.Added, "a") || slices.Contains(result.Modified, "a") || slices.Contains(result.Deleted, "a") {
+		t.Errorf("unchanged file 'a' should not appear in diff: added=%v modified=%v deleted=%v",
+			result.Added, result.Modified, result.Deleted)
 	}
 }
 
 // TestDiffSnapshots_EmptySnapshots verifies that diffing two empty snapshots
-// reports "No changes." rather than panicking.
+// yields an empty diff rather than panicking.
 func TestDiffSnapshots_EmptySnapshots(t *testing.T) {
 	snap1 := &core.Snapshot{ID: core.SnapshotID{Hash: core.Hash{0x01}}}
 	snap2 := &core.Snapshot{ID: core.SnapshotID{Hash: core.Hash{0x02}}}
-	out := captureStdout(t, func() { DiffSnapshots(nil, snap1, snap2) })
-	if !strings.Contains(out, "No changes") {
-		t.Errorf("expected 'No changes' for empty snapshots, got %q", out)
+	result := DiffSnapshots(snap1, snap2)
+	if len(result.Added) != 0 || len(result.Modified) != 0 || len(result.Deleted) != 0 {
+		t.Errorf("expected no changes for empty snapshots, got added=%v modified=%v deleted=%v",
+			result.Added, result.Modified, result.Deleted)
 	}
 }
 
 // TestDiffWorkspaceVsSnapshot_NoChanges verifies that a workspace matching the
-// snapshot content reports "No changes.".
+// snapshot content reports an empty diff.
 func TestDiffWorkspaceVsSnapshot_NoChanges(t *testing.T) {
 	store, dir := setupLockedProject(t)
 	cfg := core.DefaultConfig().Core
@@ -181,11 +159,13 @@ func TestDiffWorkspaceVsSnapshot_NoChanges(t *testing.T) {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
 
-	out := captureStdout(t, func() {
-		_ = DiffWorkspaceVsSnapshot(store, dir, snap, &cfg)
-	})
-	if !strings.Contains(out, "No changes") {
-		t.Errorf("expected 'No changes' for matching workspace, got %q", out)
+	result, err := DiffWorkspaceVsSnapshot(context.Background(), dir, snap, &cfg)
+	if err != nil {
+		t.Fatalf("DiffWorkspaceVsSnapshot: %v", err)
+	}
+	if len(result.Added) != 0 || len(result.Modified) != 0 || len(result.Deleted) != 0 {
+		t.Errorf("expected no changes for matching workspace, got added=%v modified=%v deleted=%v",
+			result.Added, result.Modified, result.Deleted)
 	}
 }
 
@@ -217,16 +197,17 @@ func TestDiffWorkspaceVsSnapshot_AddedModifiedDeleted(t *testing.T) {
 		t.Fatalf("write c.txt: %v", err)
 	}
 
-	out := captureStdout(t, func() {
-		_ = DiffWorkspaceVsSnapshot(store, dir, snap, &cfg)
-	})
-	if !strings.Contains(out, "+  c.txt") {
-		t.Errorf("expected '+  c.txt' (added), got %q", out)
+	result, err := DiffWorkspaceVsSnapshot(context.Background(), dir, snap, &cfg)
+	if err != nil {
+		t.Fatalf("DiffWorkspaceVsSnapshot: %v", err)
 	}
-	if !strings.Contains(out, "~  a.txt") {
-		t.Errorf("expected '~  a.txt' (modified), got %q", out)
+	if !slices.Contains(result.Added, "c.txt") {
+		t.Errorf("expected 'c.txt' in added, got %v", result.Added)
 	}
-	if !strings.Contains(out, "-  b.txt") {
-		t.Errorf("expected '-  b.txt' (deleted), got %q", out)
+	if !slices.Contains(result.Modified, "a.txt") {
+		t.Errorf("expected 'a.txt' in modified, got %v", result.Modified)
+	}
+	if !slices.Contains(result.Deleted, "b.txt") {
+		t.Errorf("expected 'b.txt' in deleted, got %v", result.Deleted)
 	}
 }
