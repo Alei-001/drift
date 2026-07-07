@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
@@ -203,25 +202,8 @@ func UndoLastSave(ctx context.Context, store storage.Storer, workDir string, cfg
 		}
 	}
 
-	prevSnap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: prevHash})
-	if err != nil {
-		return fmt.Errorf("get previous snapshot: %w", err)
-	}
-	newIndex := &core.Index{UpdatedAt: time.Now().Unix()}
-	for _, entry := range prevSnap.Files {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		newIndex.Entries = append(newIndex.Entries, core.IndexEntry{
-			Path:    entry.Path,
-			Size:    entry.Size,
-			ModTime: entry.ModTime,
-			Chunks:  entry.Chunks,
-			Hash:    entry.Hash,
-		})
-	}
-	if err := store.SetIndex(ctx, newIndex); err != nil {
-		return fmt.Errorf("update index: %w", err)
+	if err := RebuildIndexFromSnapshot(ctx, store, core.SnapshotID{Hash: prevHash}); err != nil {
+		return fmt.Errorf("rebuild index: %w", err)
 	}
 
 	return nil

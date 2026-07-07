@@ -77,3 +77,65 @@ func fileEntryToProto(f *FileEntry) *FileEntryProto {
 	}
 	return fp
 }
+
+// SnapshotFromProto rebuilds a Snapshot from its protobuf wire form. This is
+// the inverse of SnapshotToProto and is shared between the storage layer
+// (GetSnapshot) and the remote sync layer (pull), so both decode persisted
+// snapshots identically.
+func SnapshotFromProto(p *SnapshotProto) *Snapshot {
+	if p == nil {
+		return nil
+	}
+	s := &Snapshot{
+		ID:        SnapshotID{Hash: bytesToHash(p.IdHash)},
+		Message:   p.Message,
+		Author:    p.Author,
+		Timestamp: p.Timestamp,
+		Tags:      p.Tags,
+		TotalSize: p.TotalSize,
+	}
+	if len(p.PrevIdHash) > 0 {
+		prevID := SnapshotID{Hash: bytesToHash(p.PrevIdHash)}
+		s.PrevID = &prevID
+	}
+	for _, fe := range p.Files {
+		f := FileEntry{
+			Path:    fe.Path,
+			Mode:    FileMode(fe.Mode),
+			Size:    fe.Size,
+			ModTime: fe.ModTime,
+		}
+		for _, ch := range fe.ChunkHashes {
+			f.Chunks = append(f.Chunks, bytesToHash(ch))
+		}
+		if len(fe.FileHash) == HashSize {
+			copy(f.Hash[:], fe.FileHash)
+		}
+		if fe.MimeType != nil || len(fe.Extra) > 0 {
+			f.Metadata = &FileMetadata{}
+			if fe.MimeType != nil {
+				f.Metadata.MIMEType = *fe.MimeType
+			}
+			if len(fe.Extra) > 0 {
+				f.Metadata.Extra = make(map[string]string, len(fe.Extra))
+				for k, v := range fe.Extra {
+					f.Metadata.Extra[k] = v
+				}
+			}
+		}
+		s.Files = append(s.Files, f)
+	}
+	return s
+}
+
+// BytesToHash copies a byte slice into a Hash. The caller must ensure len(b)
+// <= HashSize; extra bytes are truncated. Used when decoding protobuf
+// IdHash/PrevIdHash/ChunkHashes fields.
+func BytesToHash(b []byte) Hash {
+	var h Hash
+	copy(h[:], b)
+	return h
+}
+
+// bytesToHash is an unexported alias for use within the core package.
+func bytesToHash(b []byte) Hash { return BytesToHash(b) }

@@ -241,3 +241,33 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 
 	return nil
 }
+
+// RebuildIndexFromSnapshot regenerates the staging index from a snapshot's
+// file entries. Used by switch (snapshot_branch.go) and pull (sync.go) after
+// the branch tip changes, so the index reflects the new tip rather than the
+// old workspace state. save.go and restore.go do not use this — save builds
+// the index from freshly chunked fileEntries, and restore filters out failed
+// files via failedSet, so they keep their own inline loops.
+func RebuildIndexFromSnapshot(ctx context.Context, store storage.Storer, snapID core.SnapshotID) error {
+	snap, err := store.GetSnapshot(ctx, snapID)
+	if err != nil {
+		return fmt.Errorf("get snapshot %s: %w", snapID.Hash.String(), err)
+	}
+	newIndex := &core.Index{UpdatedAt: time.Now().Unix()}
+	for _, entry := range snap.Files {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		newIndex.Entries = append(newIndex.Entries, core.IndexEntry{
+			Path:    entry.Path,
+			Size:    entry.Size,
+			ModTime: entry.ModTime,
+			Chunks:  entry.Chunks,
+			Hash:    entry.Hash,
+		})
+	}
+	if err := store.SetIndex(ctx, newIndex); err != nil {
+		return fmt.Errorf("update index: %w", err)
+	}
+	return nil
+}
