@@ -1,4 +1,4 @@
-package cmd
+package fsutil
 
 import (
 	"os"
@@ -11,12 +11,12 @@ func TestAddIgnoreRules(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, ".driftignore")
 
-	n, err := addIgnoreRules(filePath, []string{"*.tmp", "*.psd"})
+	added, err := AddIgnoreRules(filePath, []string{"*.tmp", "*.psd"})
 	if err != nil {
-		t.Fatalf("addIgnoreRules failed: %v", err)
+		t.Fatalf("AddIgnoreRules failed: %v", err)
 	}
-	if n != 2 {
-		t.Errorf("expected 2 rules added, got %d", n)
+	if len(added) != 2 {
+		t.Errorf("expected 2 rules added, got %d", len(added))
 	}
 
 	data, err := os.ReadFile(filePath)
@@ -36,20 +36,20 @@ func TestAddIgnoreRules_Duplicate(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, ".driftignore")
 
-	if _, err := addIgnoreRules(filePath, []string{"*.tmp"}); err != nil {
+	if _, err := AddIgnoreRules(filePath, []string{"*.tmp"}); err != nil {
 		t.Fatalf("first add failed: %v", err)
 	}
-	n, err := addIgnoreRules(filePath, []string{"*.tmp", "*.psd"})
+	added, err := AddIgnoreRules(filePath, []string{"*.tmp", "*.psd"})
 	if err != nil {
 		t.Fatalf("second add failed: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("expected 1 rule added, got %d", n)
+	if len(added) != 1 {
+		t.Errorf("expected 1 rule added, got %d", len(added))
 	}
 
-	rules, err := listIgnoreRules(filePath)
+	rules, err := ListIgnoreRules(filePath)
 	if err != nil {
-		t.Fatalf("listIgnoreRules failed: %v", err)
+		t.Fatalf("ListIgnoreRules failed: %v", err)
 	}
 	if len(rules) != 2 {
 		t.Errorf("expected 2 rules total, got %d", len(rules))
@@ -74,12 +74,12 @@ func TestAddIgnoreRules_PreservesComments(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	n, err := addIgnoreRules(filePath, []string{"*.tmp"})
+	added, err := AddIgnoreRules(filePath, []string{"*.tmp"})
 	if err != nil {
-		t.Fatalf("addIgnoreRules failed: %v", err)
+		t.Fatalf("AddIgnoreRules failed: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("expected 1 rule added, got %d", n)
+	if len(added) != 1 {
+		t.Errorf("expected 1 rule added, got %d", len(added))
 	}
 
 	data, err := os.ReadFile(filePath)
@@ -100,9 +100,9 @@ func TestListIgnoreRules(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	rules, err := listIgnoreRules(filePath)
+	rules, err := ListIgnoreRules(filePath)
 	if err != nil {
-		t.Fatalf("listIgnoreRules failed: %v", err)
+		t.Fatalf("ListIgnoreRules failed: %v", err)
 	}
 
 	expected := []string{"*.tmp", "*.psd", "backup/"}
@@ -120,9 +120,9 @@ func TestListIgnoreRules_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, ".driftignore")
 
-	rules, err := listIgnoreRules(filePath)
+	rules, err := ListIgnoreRules(filePath)
 	if err != nil {
-		t.Fatalf("listIgnoreRules failed: %v", err)
+		t.Fatalf("ListIgnoreRules failed: %v", err)
 	}
 	if rules != nil {
 		t.Errorf("expected nil rules for missing file, got %v", rules)
@@ -137,13 +137,13 @@ func TestRemoveIgnoreRule(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	if err := removeIgnoreRule(filePath, "*.psd"); err != nil {
-		t.Fatalf("removeIgnoreRule failed: %v", err)
+	if err := RemoveIgnoreRule(filePath, "*.psd"); err != nil {
+		t.Fatalf("RemoveIgnoreRule failed: %v", err)
 	}
 
-	rules, err := listIgnoreRules(filePath)
+	rules, err := ListIgnoreRules(filePath)
 	if err != nil {
-		t.Fatalf("listIgnoreRules failed: %v", err)
+		t.Fatalf("ListIgnoreRules failed: %v", err)
 	}
 	if len(rules) != 2 {
 		t.Fatalf("expected 2 rules after removal, got %d", len(rules))
@@ -163,7 +163,7 @@ func TestRemoveIgnoreRule_NotFound(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	err := removeIgnoreRule(filePath, "*.log")
+	err := RemoveIgnoreRule(filePath, "*.log")
 	if err == nil {
 		t.Fatalf("expected error for non-existent rule")
 	}
@@ -176,7 +176,7 @@ func TestRemoveIgnoreRule_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, ".driftignore")
 
-	err := removeIgnoreRule(filePath, "*.tmp")
+	err := RemoveIgnoreRule(filePath, "*.tmp")
 	if err == nil {
 		t.Fatalf("expected error when file does not exist")
 	}

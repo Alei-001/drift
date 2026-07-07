@@ -2,9 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/util/fsutil"
@@ -36,7 +34,7 @@ var ignoreListCmd = &cobra.Command{
 		defer store.Close()
 
 		ignorePath := filepath.Join(cwd, ".driftignore")
-		rules, err := listIgnoreRules(ignorePath)
+		rules, err := fsutil.ListIgnoreRules(ignorePath)
 		if err != nil {
 			return err
 		}
@@ -82,26 +80,7 @@ var ignoreAddCmd = &cobra.Command{
 		defer store.Close()
 
 		ignorePath := filepath.Join(cwd, ".driftignore")
-		existing, err := readIgnoreFile(ignorePath)
-		if err != nil {
-			return err
-		}
-		existingSet := make(map[string]bool)
-		for _, r := range existing {
-			existingSet[r] = true
-		}
-		var newPatterns []string
-		seen := make(map[string]bool)
-		for _, p := range args {
-			p = strings.TrimSpace(p)
-			if p == "" || existingSet[p] || seen[p] {
-				continue
-			}
-			seen[p] = true
-			newPatterns = append(newPatterns, p)
-		}
-
-		n, err := addIgnoreRules(ignorePath, newPatterns)
+		newPatterns, err := fsutil.AddIgnoreRules(ignorePath, args)
 		if err != nil {
 			return err
 		}
@@ -110,7 +89,7 @@ var ignoreAddCmd = &cobra.Command{
 			for _, p := range newPatterns {
 				fmt.Printf("+ %s\n", p)
 			}
-			fmt.Printf("\n  %d rules added.\n", n)
+			fmt.Printf("\n  %d rules added.\n", len(newPatterns))
 		}
 		return nil
 	},
@@ -135,7 +114,7 @@ var ignoreRemoveCmd = &cobra.Command{
 
 		ignorePath := filepath.Join(cwd, ".driftignore")
 		pattern := args[0]
-		if err := removeIgnoreRule(ignorePath, pattern); err != nil {
+		if err := fsutil.RemoveIgnoreRule(ignorePath, pattern); err != nil {
 			reportFailed("Ignore", "ignore", fmt.Sprintf("pattern '%s' not found.", pattern), "use 'drift ignore list' to see current rules.")
 			return ErrSilent
 		}
@@ -146,78 +125,6 @@ var ignoreRemoveCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-// readIgnoreFile reads the patterns from the ignore file at path.
-func readIgnoreFile(path string) ([]string, error) {
-	return fsutil.ReadIgnoreFile(path)
-}
-
-// addIgnoreRules appends patterns to the ignore file at filePath, skipping
-// duplicates. Returns the number of patterns actually added.
-func addIgnoreRules(filePath string, patterns []string) (int, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil && !os.IsNotExist(err) {
-		return 0, err
-	}
-	existing, _ := fsutil.ReadIgnoreFile(filePath)
-	set := make(map[string]bool)
-	for _, r := range existing {
-		set[r] = true
-	}
-	var added []string
-	for _, p := range patterns {
-		p = strings.TrimSpace(p)
-		if p == "" || set[p] {
-			continue
-		}
-		set[p] = true
-		added = append(added, p)
-	}
-	var buf strings.Builder
-	buf.Write(data)
-	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
-		buf.WriteByte('\n')
-	}
-	for _, p := range added {
-		buf.WriteString(p)
-		buf.WriteByte('\n')
-	}
-	if err := fsutil.WriteFileAtomic(filePath, []byte(buf.String()), fsutil.DefaultFilePerm); err != nil {
-		return 0, err
-	}
-	return len(added), nil
-}
-
-// listIgnoreRules reads the patterns from the ignore file at filePath.
-func listIgnoreRules(filePath string) ([]string, error) {
-	return readIgnoreFile(filePath)
-}
-
-// removeIgnoreRule removes the first occurrence of pattern from the ignore
-// file at filePath. Returns an error if the file or pattern is not found.
-func removeIgnoreRule(filePath string, pattern string) error {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("pattern '%s' not found", pattern)
-		}
-		return err
-	}
-	lines := strings.Split(string(data), "\n")
-	found := false
-	var out []string
-	for _, line := range lines {
-		if strings.TrimSpace(line) == pattern {
-			found = true
-			continue
-		}
-		out = append(out, line)
-	}
-	if !found {
-		return fmt.Errorf("pattern '%s' not found", pattern)
-	}
-	return fsutil.WriteFileAtomic(filePath, []byte(strings.Join(out, "\n")), fsutil.DefaultFilePerm)
 }
 
 func init() {

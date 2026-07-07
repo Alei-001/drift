@@ -1,4 +1,4 @@
-package cmd
+package porcelain
 
 import (
 	"sort"
@@ -6,11 +6,14 @@ import (
 	"github.com/your-org/drift/internal/core"
 )
 
-// sortSnapshotSummariesNewestFirst sorts snapshot summaries newest-first.
+// SortSnapshotSummariesNewestFirst sorts snapshot summaries in reverse
+// chronological order (newest first), using the PrevID chain depth as
+// a secondary sort key when timestamps are equal.
+//
 // Primary sort key is timestamp (descending). When timestamps are equal (rapid
 // successive saves), it uses the PrevID chain: if A.PrevID == B.ID then A is
 // newer than B. This is stable for unrelated summaries.
-func sortSnapshotSummariesNewestFirst(snaps []*core.SnapshotSummary) {
+func SortSnapshotSummariesNewestFirst(snaps []*core.SnapshotSummary) {
 	summaryByID := make(map[core.SnapshotID]*core.SnapshotSummary, len(snaps))
 	for _, s := range snaps {
 		summaryByID[s.ID] = s

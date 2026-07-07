@@ -1,21 +1,18 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/filetype"
 	"github.com/your-org/drift/internal/porcelain"
 	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/storage/stream"
-	"github.com/your-org/drift/internal/util/format"
-	"github.com/your-org/drift/internal/util/pathutil"
 )
 
 // Layout constants for showFileList output.
@@ -139,69 +136,52 @@ func showFileList(ctx context.Context, store storage.Storer, snap *core.Snapshot
 // to stdout, binary/image files show metadata. versionLabel is used in the
 // status line so the output matches the user's input reference.
 func showFile(ctx context.Context, store storage.Storer, cwd string, snapshot *core.Snapshot, versionLabel, filePath string) error {
-	normalizedPath, err := pathutil.RelToWorkDir(cwd, filePath)
-	if err != nil {
-		reportFailed("Show", "show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
-			"use a relative path from the project root.")
-		return ErrSilent
-	}
-
-	var targetEntry *core.FileEntry
-	for i := range snapshot.Files {
-		if snapshot.Files[i].Path == normalizedPath {
-			targetEntry = &snapshot.Files[i]
-			break
-		}
-	}
-	if targetEntry == nil {
-		reportFailed("Show", "show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, versionLabel),
-			fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel))
-		return ErrSilent
-	}
-
 	if globalJSON {
 		return showFileJSON(ctx, store, cwd, snapshot, versionLabel, filePath)
 	}
 
-	chunkR := stream.NewChunkReader(ctx, store, targetEntry.Chunks)
-	header, fullReader, err := stream.PeekHeader(chunkR, core.HeaderPeekSize)
+	result, err := porcelain.ReadSnapshotFile(ctx, store, snapshot, cwd, filePath)
 	if err != nil {
+		if errors.Is(err, porcelain.ErrFileNotFound) {
+			reportFailed("Show", "show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, versionLabel),
+				fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel))
+			return ErrSilent
+		}
+		if errors.Is(err, porcelain.ErrInvalidPath) {
+			reportFailed("Show", "show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
+				"use a relative path from the project root.")
+			return ErrSilent
+		}
 		reportFailed("Show", "show", fmt.Sprintf("cannot read '%s' from snapshot: %s.", filePath, err),
 			"the chunk data may be missing or corrupted; use 'drift check' to verify.")
 		return ErrSilent
 	}
-	engine := filetype.DetectEngine(normalizedPath, header)
 
 	if showOpen {
-		return openExternal(versionLabel, filePath, fullReader)
+		return openExternal(versionLabel, filePath, bytes.NewReader(result.Content))
 	}
 
-	// Quiet mode: suppress file content/metadata output (--open still works
-	// because it returns above before this guard).
 	if globalQuiet {
 		return nil
 	}
 
-	if engine != nil && engine.Name() == "text" {
+	if result.Kind == "text" {
 		fmt.Printf(">>> File %s:%s\n", versionLabel, filePath)
 		fmt.Println()
-		if _, err := io.Copy(os.Stdout, fullReader); err != nil {
+		if _, err := os.Stdout.Write(result.Content); err != nil {
 			reportFailed("Show", "show", fmt.Sprintf("failed to stream '%s': %s.", filePath, err), "")
 			return ErrSilent
 		}
 		return nil
 	}
 
-	// Binary or image file: show metadata.
 	fmt.Printf(">>> File %s:%s\n", versionLabel, filePath)
-	fmt.Printf("  Size:       %s\n", formatSize(targetEntry.Size))
-	if engine != nil && engine.Name() == "image" {
-		if dims := format.ImageDimensions(header); dims != "" {
-			fmt.Printf("  Dimensions: %s\n", dims)
-		}
+	fmt.Printf("  Size:       %s\n", formatSize(result.Size))
+	if result.Kind == "image" && result.Dimensions != "" {
+		fmt.Printf("  Dimensions: %s\n", result.Dimensions)
 	}
-	if targetEntry.ModTime > 0 {
-		modTimeStr := time.Unix(0, targetEntry.ModTime).Format("01-02 15:04")
+	if result.ModTime > 0 {
+		modTimeStr := time.Unix(0, result.ModTime).Format("01-02 15:04")
 		fmt.Printf("  Modified:   %s\n", modTimeStr)
 	}
 	fmt.Println()

@@ -1,4 +1,4 @@
-package cmd
+package porcelain
 
 import (
 	"encoding/binary"
@@ -37,7 +37,7 @@ func TestSortSnapshotSummariesNewestFirst_Performance(t *testing.T) {
 	}
 
 	start := time.Now()
-	sortSnapshotSummariesNewestFirst(snaps)
+	SortSnapshotSummariesNewestFirst(snaps)
 	elapsed := time.Since(start)
 
 	if elapsed >= 100*time.Millisecond {

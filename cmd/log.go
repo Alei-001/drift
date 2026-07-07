@@ -109,7 +109,7 @@ file changes of a single snapshot.`,
 		// Sort newest-first: by timestamp descending. When timestamps are
 		// equal (common for rapid successive saves), use the PrevID chain —
 		// if snapshot A's PrevID points to snapshot B, then A is newer.
-		sortSnapshotSummariesNewestFirst(filtered)
+		porcelain.SortSnapshotSummariesNewestFirst(filtered)
 
 		// Apply limit after filtering (both global and branch paths).
 		if logLimit > 0 && len(filtered) > logLimit {
