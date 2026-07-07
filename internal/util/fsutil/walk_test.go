@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/drift/internal/util/glob"
+	"github.com/Alei-001/drift/internal/util/glob"
 )
 
 func TestReadIgnoreFile(t *testing.T) {

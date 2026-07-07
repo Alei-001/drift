@@ -7,9 +7,9 @@ import (
 	"io"
 	"math"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/filetype"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/filetype"
+	"github.com/Alei-001/drift/internal/storage"
 	"github.com/zeebo/blake3"
 )
 

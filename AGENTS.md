@@ -20,7 +20,7 @@ protoc --proto_path=internal/core --go_out=internal/core --go_opt=paths=source_r
 
 Generated files live in `internal/core/*.pb.go`. The `--go_opt=paths=source_relative`
 flag is **required**: without it protoc creates a nested
-`internal/core/github.com/your-org/drift/internal/core/` directory and the
+`internal/core/github.com/Alei-001/drift/internal/core/` directory and the
 generated raw descriptor encodes a stale `go_package`, which panics at init
 time (`slice bounds out of range [-1:]`).
 
@@ -103,7 +103,7 @@ Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify erro
 ## Module path
 
 ```
-module github.com/your-org/drift
+module github.com/Alei-001/drift
 go 1.24
 ```
 

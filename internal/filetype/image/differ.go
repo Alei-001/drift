@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/util/format"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/util/format"
 	"github.com/zeebo/blake3"
 )
 

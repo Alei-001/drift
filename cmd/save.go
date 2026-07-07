@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 var saveMessage string
@@ -90,7 +90,16 @@ var saveCmd = &cobra.Command{
 		var successTags []string
 		for _, t := range tagsToCreate {
 			if err := porcelain.AddTag(ctx, store, cwd, t, snapshot.ID); err != nil {
-				fmt.Fprintf(&tagWarn, "  warning: tag '%s' failed: %v\n", t, err)
+				// AddTag wraps known errors (e.g. ErrTagAlreadyExists) with a
+				// "tag '<name>' already exists: <inner>" prefix that would
+				// duplicate the tag name and the inner message. Unwrap to the
+				// sentinel so the warning reads cleanly:
+				//   warning: tag '<name>' already exists
+				msg := err.Error()
+				if errors.Is(err, porcelain.ErrTagAlreadyExists) {
+					msg = "already exists"
+				}
+				fmt.Fprintf(&tagWarn, "  warning: tag '%s' %s\n", t, msg)
 			} else {
 				successTags = append(successTags, t)
 			}

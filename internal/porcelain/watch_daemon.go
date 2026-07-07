@@ -80,6 +80,25 @@ func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, 
 	return pid, nil
 }
 
+// RemoveStalePidFile removes watch.pid if it contains the given PID.
+// This is used by the _watch_daemon child process to clean up after an
+// init failure (before RunDaemonLoop installs its own cleanup handlers),
+// so that a subsequent `drift watch status` does not see a stale PID
+// pointing at an already-exited process. The PID check avoids clobbering
+// a different daemon that won the start race.
+func RemoveStalePidFile(cwd string, pid int) {
+	pidPath := filepath.Join(cwd, ".drift", "watch.pid")
+	data, err := os.ReadFile(pidPath)
+	if err != nil {
+		return
+	}
+	filePid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || filePid != pid {
+		return
+	}
+	os.Remove(pidPath)
+}
+
 // StopDaemon stops the watch daemon for the project at cwd.
 // Returns the number of auto-saves created and snapshots pruned during the session.
 func StopDaemon(ctx context.Context, cwd string) (int, int, error) {

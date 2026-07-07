@@ -10,12 +10,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/filetype"
-	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/storage/stream"
-	"github.com/your-org/drift/internal/util/fsutil"
-	"github.com/your-org/drift/internal/util/pathutil"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/filetype"
+	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/storage/stream"
+	"github.com/Alei-001/drift/internal/util/fsutil"
+	"github.com/Alei-001/drift/internal/util/pathutil"
 )
 
 // FileStat holds per-file change statistics for --stat output. Path is the

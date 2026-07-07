@@ -2,11 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 var watchInterval int
@@ -36,6 +37,18 @@ var watchOnCmd = &cobra.Command{
 			statusFailed("Watch", "--keep must be zero or a positive number.", "")
 			return ErrSilent
 		}
+		// Pre-validate that cwd is an openable drift project BEFORE spawning
+		// the daemon subprocess. Without this, StartDaemon would spawn a
+		// child that fails during its own openProjectOrReport and exits
+		// silently (no console on Windows), leaving a stale PID file and a
+		// misleading "Daemon started" message. Validating here surfaces the
+		// error synchronously in the parent where the user can see it.
+		store, cfg, err := openProjectOrReport("Watch", "watch", cwd)
+		if err != nil {
+			return err
+		}
+		store.Close()
+		_ = cfg // validated; the daemon reopens the project itself
 		pid, err := porcelain.StartDaemon(ctx, cwd, watchInterval, watchKeep)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "use 'drift watch off' to stop it first.")
@@ -135,6 +148,13 @@ var watchDaemonCmd = &cobra.Command{
 		}
 		store, cfg, err := openProjectOrReport("Watch", "watch", cwd)
 		if err != nil {
+			// Init failed before RunDaemonLoop could install its cleanup
+			// handlers. The parent already wrote watch.pid pointing at this
+			// process; remove it so a subsequent `drift watch status` does
+			// not see a stale PID. Best-effort: only remove if the file
+			// contains OUR pid, to avoid clobbering a different daemon that
+			// won the start race.
+			porcelain.RemoveStalePidFile(cwd, os.Getpid())
 			return err
 		}
 		defer store.Close()

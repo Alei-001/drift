@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // TestCheckWithin_Inside verifies that a path inside baseDir is accepted.

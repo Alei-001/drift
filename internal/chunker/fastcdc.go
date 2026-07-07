@@ -6,7 +6,7 @@ import (
 
 	cdc "github.com/PlakarKorp/go-cdc-chunkers"
 	_ "github.com/PlakarKorp/go-cdc-chunkers/chunkers/fastcdc"
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/core"
 	"github.com/zeebo/blake3"
 )
 

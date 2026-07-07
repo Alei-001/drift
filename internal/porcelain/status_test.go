@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // TestDetectChanges_NoIndexAllAdded verifies that when the index is empty,

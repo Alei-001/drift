@@ -3,8 +3,8 @@ package memory
 import (
 	"google.golang.org/protobuf/proto"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // Compile-time assertion that MemoryStorage implements storage.Storer.

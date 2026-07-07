@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // TestGetIndex_LargeIndex verifies that GetIndex can read a large staging

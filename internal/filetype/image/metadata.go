@@ -1,6 +1,6 @@
 package image
 
-import "github.com/your-org/drift/internal/core"
+import "github.com/Alei-001/drift/internal/core"
 
 // Metadata returns the file metadata for image files. The MIME type is a
 // generic octet-stream placeholder; per-format refinement (image/png, etc.)

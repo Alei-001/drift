@@ -6,9 +6,9 @@ import (
 
 	"github.com/zeebo/blake3"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/util/glob"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/util/glob"
 )
 
 // ChunkStatus describes the verification result of a single chunk.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/your-org/drift/internal/util/fsutil"
+	"github.com/Alei-001/drift/internal/util/fsutil"
 )
 
 // RemoteConfig describes a single configured remote. Password is NOT stored

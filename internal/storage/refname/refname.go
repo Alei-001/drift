@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // headsPrefix and tagsPrefix are the on-disk ref-name prefixes used by both

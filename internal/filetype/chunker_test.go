@@ -3,11 +3,11 @@ package filetype
 import (
 	"testing"
 
-	"github.com/your-org/drift/internal/chunker"
-	"github.com/your-org/drift/internal/filetype/binary"
-	"github.com/your-org/drift/internal/filetype/image"
-	"github.com/your-org/drift/internal/filetype/text"
-	"github.com/your-org/drift/internal/filetype/video"
+	"github.com/Alei-001/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/filetype/binary"
+	"github.com/Alei-001/drift/internal/filetype/image"
+	"github.com/Alei-001/drift/internal/filetype/text"
+	"github.com/Alei-001/drift/internal/filetype/video"
 )
 
 func TestDefaultSelectorSmallFile(t *testing.T) {

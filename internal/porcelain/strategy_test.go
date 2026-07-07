@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/drift/internal/chunker"
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/filetype"
-	"github.com/your-org/drift/internal/filetype/binary"
-	"github.com/your-org/drift/internal/filetype/image"
-	"github.com/your-org/drift/internal/filetype/text"
-	"github.com/your-org/drift/internal/filetype/video"
-	"github.com/your-org/drift/internal/storage/backends/memory"
+	"github.com/Alei-001/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/filetype"
+	"github.com/Alei-001/drift/internal/filetype/binary"
+	"github.com/Alei-001/drift/internal/filetype/image"
+	"github.com/Alei-001/drift/internal/filetype/text"
+	"github.com/Alei-001/drift/internal/filetype/video"
+	"github.com/Alei-001/drift/internal/storage/backends/memory"
 )
 
 func binaryClassEngines() map[string]filetype.Engine {

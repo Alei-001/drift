@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/your-org/drift/internal/util/fsutil"
+	"github.com/Alei-001/drift/internal/util/fsutil"
 )
 
 // credentialFilePerm is the file mode for credentials.json. 0600 ensures

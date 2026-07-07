@@ -49,10 +49,20 @@ func (e *TextEngine) DetectByExtension(path string) bool {
 	return textExtensions[ext] || textBasenames[base]
 }
 
-// DetectByHeuristic is the last-resort content sniffing: a header without
-// null bytes is treated as text. Used for extensionless or unknown-extension
-// files. Before applying the null-byte heuristic, it checks against known
-// image/video magic bytes to avoid misclassifying binary files as text.
+// DetectByHeuristic is the last-resort content sniffing used for
+// extensionless or unknown-extension files. A header is treated as text
+// only when ALL of the following hold:
+//   - it is non-empty,
+//   - it does not start with a known image/video magic signature,
+//   - it contains no NUL bytes (0x00),
+//   - its control-byte ratio is at most 10%.
+//
+// Control bytes are 0x01-0x1F (excluding \t, \n, \r) and 0x7F (DEL).
+// High bytes (0x80-0xFF) are NOT counted as control bytes because valid
+// UTF-8 text legitimately contains them. The 10% threshold catches raw
+// binary data that happens to omit 0x00 (e.g. byte sequences 1..255,
+// which are ~11% control bytes) while allowing text with occasional
+// control characters.
 func (e *TextEngine) DetectByHeuristic(path string, header []byte) bool {
 	if len(header) == 0 {
 		return false
@@ -60,7 +70,19 @@ func (e *TextEngine) DetectByHeuristic(path string, header []byte) bool {
 	if matchesBinaryMagic(header) {
 		return false
 	}
-	return !bytes.Contains(header, []byte{0})
+	if bytes.Contains(header, []byte{0}) {
+		return false
+	}
+	var control int
+	for _, b := range header {
+		if b == '\t' || b == '\n' || b == '\r' {
+			continue
+		}
+		if b < 0x20 || b == 0x7F {
+			control++
+		}
+	}
+	return control*100/len(header) <= 10
 }
 
 // matchesBinaryMagic checks if the header matches known image or video

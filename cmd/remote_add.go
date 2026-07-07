@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/internal/remote"
+	"github.com/Alei-001/drift/internal/remote"
 	"golang.org/x/term"
 )
 
@@ -144,7 +144,8 @@ var remoteAddCmd = &cobra.Command{
 			return err
 		}
 		if _, err := rf.FindRemote(name); err == nil {
-			return fmt.Errorf("remote %q already exists; use 'drift remote set-url' to update", name)
+			reportFailed("Remote add", "remote add", fmt.Sprintf("remote %q already exists", name), "use 'drift remote set-url' to update the URL of an existing remote.")
+			return ErrSilent
 		}
 		rf.AddOrUpdateRemote(cfg)
 		if err := saveRemotes(cwd, rf); err != nil {

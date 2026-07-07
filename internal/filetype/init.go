@@ -1,10 +1,10 @@
 package filetype
 
 import (
-	"github.com/your-org/drift/internal/filetype/binary"
-	"github.com/your-org/drift/internal/filetype/image"
-	"github.com/your-org/drift/internal/filetype/text"
-	"github.com/your-org/drift/internal/filetype/video"
+	"github.com/Alei-001/drift/internal/filetype/binary"
+	"github.com/Alei-001/drift/internal/filetype/image"
+	"github.com/Alei-001/drift/internal/filetype/text"
+	"github.com/Alei-001/drift/internal/filetype/video"
 )
 
 func init() {

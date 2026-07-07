@@ -166,7 +166,7 @@ const file_index_proto_rawDesc = "" +
 	"IndexProto\x12/\n" +
 	"\aentries\x18\x01 \x03(\v2\x15.core.IndexEntryProtoR\aentries\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x02 \x01(\x03R\tupdatedAtB)Z'github.com/your-org/drift/internal/coreb\x06proto3"
+	"updated_at\x18\x02 \x01(\x03R\tupdatedAtB)Z'github.com/Alei-001/drift/internal/coreb\x06proto3"
 
 var (
 	file_index_proto_rawDescOnce sync.Once

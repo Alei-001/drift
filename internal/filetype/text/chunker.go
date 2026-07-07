@@ -1,7 +1,7 @@
 package text
 
 import (
-	"github.com/your-org/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/chunker"
 )
 
 // Whole-file chunking threshold: text files smaller than this are stored as a

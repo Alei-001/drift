@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // setupLockedProject initializes a drift project in a temp directory and opens

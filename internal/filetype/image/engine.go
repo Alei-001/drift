@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/your-org/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/chunker"
 )
 
 // Canonical image format keys returned by detectFormatByMagic.

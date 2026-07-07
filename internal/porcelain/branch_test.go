@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage/backends/memory"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage/backends/memory"
 )
 
 func setupBranchStore() *memory.MemoryStorage {

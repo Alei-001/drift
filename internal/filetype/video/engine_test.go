@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	sizefmt "github.com/your-org/drift/internal/util/format"
+	sizefmt "github.com/Alei-001/drift/internal/util/format"
 )
 
 // buildBox assembles an ISO-BMFF box: 4-byte size + 4-byte type + payload.

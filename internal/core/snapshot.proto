@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package core;
 
-option go_package = "github.com/your-org/drift/internal/core";
+option go_package = "github.com/Alei-001/drift/internal/core";
 
 // FileEntryProto is the protobuf representation of a file entry in a snapshot.
 message FileEntryProto {

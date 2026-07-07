@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/porcelain"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // logJSONEntry is one row of the 'drift log --json' output. The schema

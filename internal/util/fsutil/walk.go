@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/your-org/drift/internal/util/glob"
+	"github.com/Alei-001/drift/internal/util/glob"
 )
 
 // Walk walks the file tree rooted at root, invoking fn for every file not

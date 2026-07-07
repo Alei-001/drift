@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/your-org/drift/internal/util/format"
+	"github.com/Alei-001/drift/internal/util/format"
 )
 
 // Diff compares two video files by size only, streaming both readers to count

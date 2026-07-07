@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	sizefmt "github.com/your-org/drift/internal/util/format"
+	sizefmt "github.com/Alei-001/drift/internal/util/format"
 )
 
 // Preview returns a short, human-readable summary of a video file.

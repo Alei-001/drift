@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/your-org/drift/internal/core"
+import "github.com/Alei-001/drift/internal/core"
 
 func CloneChunk(c *core.Chunk) *core.Chunk {
 	if c == nil {

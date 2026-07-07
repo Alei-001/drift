@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // Chunker splits an io.Reader into content-addressed chunks. The context

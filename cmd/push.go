@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 // pushCmd uploads local objects to a remote.

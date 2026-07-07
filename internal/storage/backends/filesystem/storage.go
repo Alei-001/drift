@@ -7,9 +7,9 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/util/cache"
-	"github.com/your-org/drift/internal/util/fsutil"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/util/cache"
+	"github.com/Alei-001/drift/internal/util/fsutil"
 )
 
 type FSStorage struct {

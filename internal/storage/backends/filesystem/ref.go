@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/storage/refname"
-	"github.com/your-org/drift/internal/util/fsutil"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/storage/refname"
+	"github.com/Alei-001/drift/internal/util/fsutil"
 )
 
 // Compile-time assertion that FSStorage implements storage.Storer.

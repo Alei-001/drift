@@ -368,7 +368,7 @@ const file_snapshot_proto_rawDesc = "" +
 	"\x04tags\x18\x06 \x03(\tR\x04tags\x12\x1d\n" +
 	"\n" +
 	"total_size\x18\a \x01(\x03R\ttotalSize\x12#\n" +
-	"\rfiles_changed\x18\b \x01(\x05R\ffilesChangedB)Z'github.com/your-org/drift/internal/coreb\x06proto3"
+	"\rfiles_changed\x18\b \x01(\x05R\ffilesChangedB)Z'github.com/Alei-001/drift/internal/coreb\x06proto3"
 
 var (
 	file_snapshot_proto_rawDescOnce sync.Once

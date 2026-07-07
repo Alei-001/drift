@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // GetPreview is a noop stub (Phase 1).

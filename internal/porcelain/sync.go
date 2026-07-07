@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/your-org/drift/internal/remote"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/remote"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // PushResult reports the outcome of a push operation.

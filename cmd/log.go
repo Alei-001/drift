@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/porcelain"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // Column widths for the default table view. Messages, branch names, and tags
@@ -132,7 +132,11 @@ changes of a single snapshot.`,
 		}
 
 		// Default table format.
-		label := fmt.Sprintf("History (%d snapshots", len(filtered))
+		noun := "snapshots"
+		if len(filtered) == 1 {
+			noun = "snapshot"
+		}
+		label := fmt.Sprintf("History (%d %s", len(filtered), noun)
 		if labelBranch != "" {
 			label += fmt.Sprintf(" on '%s'", labelBranch)
 		}
@@ -203,7 +207,7 @@ func resolveBranchTipHash(ctx context.Context, store storage.Storer, branchName 
 	}
 	ref, err := store.GetRef(ctx, "heads/"+branchName)
 	if err != nil {
-		reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", branchName), "use 'drift branch' to list existing branches.")
+		reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", branchName), "use 'drift branch list' to list existing branches.")
 		return core.Hash{}, ErrSilent
 	}
 	return ref.Target, nil

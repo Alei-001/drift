@@ -1,7 +1,7 @@
 package binary
 
 import (
-	"github.com/your-org/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/chunker"
 )
 
 // ChunkerFor delegates to the shared binary chunker strategy (FastCDC with

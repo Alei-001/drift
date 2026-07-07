@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/util/fsutil"
-	"github.com/your-org/drift/internal/util/pathutil"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/util/fsutil"
+	"github.com/Alei-001/drift/internal/util/pathutil"
 )
 
 // RestoreSnapshot restores files from snapshotID into workDir. When filePath
@@ -152,7 +152,7 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 		}
 
 		if restoredEntry == nil {
-			return backupID, fmt.Errorf("file %q not found in snapshot %s", filePath, snapshotID.Hash.String())
+			return backupID, fmt.Errorf("%w: %q in snapshot %s", ErrFileNotFound, filePath, snapshotID.Hash.String())
 		}
 
 		if restoredEntry != nil {

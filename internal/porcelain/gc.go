@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 // AutoSavePrefix is the message prefix that identifies auto-saved snapshots

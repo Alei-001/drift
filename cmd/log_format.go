@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 // formatBranchColumn formats the branch-tip list for the log table column.

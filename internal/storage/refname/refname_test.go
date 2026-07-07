@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/your-org/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/storage"
 )
 
 func TestValidate_Valid(t *testing.T) {

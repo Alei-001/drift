@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"path/filepath"
 
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // snapshotIDFromPath extracts the SnapshotID from a snapshot file path.

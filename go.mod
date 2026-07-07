@@ -1,4 +1,4 @@
-module github.com/your-org/drift
+module github.com/Alei-001/drift
 
 go 1.25.0
 

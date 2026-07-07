@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // putTestSnapshot stores a minimal snapshot in the memory backend for tag

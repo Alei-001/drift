@@ -10,7 +10,7 @@ import (
 	_ "image/png"
 	"io"
 
-	sizefmt "github.com/your-org/drift/internal/util/format"
+	sizefmt "github.com/Alei-001/drift/internal/util/format"
 )
 
 // previewFormatName maps canonical format keys to display names.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/your-org/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/chunker"
 )
 
 // --- Name and NewEngine ---

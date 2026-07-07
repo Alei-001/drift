@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/your-org/drift/internal/chunker"
-	"github.com/your-org/drift/internal/core"
+	"github.com/Alei-001/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // Engine bundles the per-filetype capabilities a registered engine must

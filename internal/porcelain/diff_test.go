@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage/backends/memory"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage/backends/memory"
 )
 
 // TestResolveHeadSnapshot_NoHead verifies that a missing HEAD ref yields a

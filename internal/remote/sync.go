@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/storage/backends/filesystem"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/storage/backends/filesystem"
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/protobuf/proto"
 )

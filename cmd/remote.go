@@ -8,7 +8,7 @@ import (
 	"sort"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/internal/remote"
+	"github.com/Alei-001/drift/internal/remote"
 )
 
 // remoteCmd is the parent command for remote management.
@@ -63,7 +63,8 @@ var remoteRemoveCmd = &cobra.Command{
 			return err
 		}
 		if !rf.RemoveRemote(name) {
-			return fmt.Errorf("remote %q not found", name)
+			reportFailed("Remote remove", "remote remove", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.")
+			return ErrSilent
 		}
 		if err := saveRemotes(cwd, rf); err != nil {
 			return err
@@ -91,7 +92,8 @@ var remoteSetURLCmd = &cobra.Command{
 		}
 		cfg, err := rf.FindRemote(name)
 		if err != nil {
-			return fmt.Errorf("remote %q not found", name)
+			reportFailed("Remote set-url", "remote set-url", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.")
+			return ErrSilent
 		}
 		oldHost, _ := remote.HostFromURL(cfg.URL)
 		newHost, _ := remote.HostFromURL(newURL)
@@ -121,11 +123,13 @@ var remoteTestCmd = &cobra.Command{
 		}
 		cfg, err := resolveRemote(cwd, name)
 		if err != nil {
-			return err
+			statusFailed("Remote test", err.Error(), "use 'drift remote list' to see configured remotes, or 'drift remote add' to configure one.")
+			return ErrSilent
 		}
 		rfs, err := remote.NewRemoteFS(cfg)
 		if err != nil {
-			return fmt.Errorf("create remote client: %w", err)
+			statusFailed("Remote test", fmt.Sprintf("create remote client: %v", err), "check the remote URL and protocol type.")
+			return ErrSilent
 		}
 		defer rfs.Close()
 		// Test by listing the root directory.

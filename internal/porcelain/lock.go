@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/your-org/drift/internal/util/fsutil"
+	"github.com/Alei-001/drift/internal/util/fsutil"
 )
 
 // workspaceLockData is the JSON payload stored in the workspace lock file.

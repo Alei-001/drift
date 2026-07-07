@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 // branchCmd is the parent command for branch management. It has no RunE so

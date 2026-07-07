@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/your-org/drift/internal/chunker"
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage/backends/memory"
+	"github.com/Alei-001/drift/internal/chunker"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage/backends/memory"
 )
 
 func TestCreateSnapshot_FirstCommit(t *testing.T) {

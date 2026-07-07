@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/porcelain"
-	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/util/format"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/porcelain"
+	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/util/format"
 )
 
 // diffStatSnapshots prints a --stat summary between two snapshots. The

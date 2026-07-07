@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
-	"github.com/your-org/drift/internal/storage/refname"
+	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/storage/refname"
 )
 
 // CreateBranch creates a new branch pointing at the current HEAD snapshot.
