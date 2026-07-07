@@ -107,13 +107,16 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := pushRef(ctx, rfs, ref); err != nil {
+		updated, err := pushRef(ctx, store, rfs, ref)
+		if err != nil {
 			if errors.Is(err, errRefDiverged) {
 				return nil, fmt.Errorf("ref %q diverged: pull first: %w", ref.Name, err)
 			}
 			return nil, fmt.Errorf("push ref %q: %w", ref.Name, err)
 		}
-		stats.RefsUpdated++
+		if updated {
+			stats.RefsUpdated++
+		}
 	}
 
 	return stats, nil
@@ -283,31 +286,43 @@ func pushChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.H
 
 var errRefDiverged = errors.New("ref diverged")
 
-func pushRef(ctx context.Context, rfs RemoteFS, ref *core.Reference) error {
+func pushRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.Reference) (bool, error) {
 	// Only upload ref if its target snapshot exists on the remote.
 	snapPath := snapshotRemotePath(core.SnapshotID{Hash: ref.Target})
 	if _, err := rfs.Stat(snapPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil // target snapshot not on remote yet, skip
+			return false, nil // target snapshot not on remote yet, skip
 		}
-		return fmt.Errorf("stat remote snapshot for ref: %w", err)
+		return false, fmt.Errorf("stat remote snapshot for ref: %w", err)
 	}
 	refPath := refRemotePath(ref.Name)
 	existing, err := rfs.Read(refPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("read existing remote ref: %w", err)
+			return false, fmt.Errorf("read existing remote ref: %w", err)
 		}
 		// No existing ref, write it.
-		return rfs.Write(refPath, strings.NewReader(ref.Target.FullString()+"\n"))
+		if err := rfs.Write(refPath, strings.NewReader(ref.Target.FullString()+"\n")); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	defer existing.Close()
 	existingBytes, _ := io.ReadAll(existing)
-	existingHash := strings.TrimSpace(string(existingBytes))
-	if existingHash == ref.Target.FullString() {
-		return nil // same, skip
+	existingHashStr := strings.TrimSpace(string(existingBytes))
+	if existingHashStr == ref.Target.FullString() {
+		return false, nil // same, skip
 	}
-	return errRefDiverged
+	// Fast-forward check: if the remote target is an ancestor of the local
+	// target, the local branch is simply ahead — allow the push.
+	existingHash, err := parseHashHex(existingHashStr)
+	if err == nil && isAncestor(ctx, store, ref.Target, existingHash) {
+		if err := rfs.Write(refPath, strings.NewReader(ref.Target.FullString()+"\n")); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, errRefDiverged
 }
 
 // --- pull helpers ---
@@ -389,6 +404,14 @@ func pullRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.
 	if localRef.Target == ref.Target {
 		return false, false, nil // same, skip
 	}
+	// Fast-forward: if local target is zero (fresh branch) or an ancestor of
+	// the remote target, the remote is simply ahead — update the local ref.
+	if localRef.Target.IsZero() || isAncestor(ctx, store, ref.Target, localRef.Target) {
+		if err := store.SetRef(ctx, ref.Name, ref); err != nil {
+			return false, false, fmt.Errorf("fast-forward ref: %w", err)
+		}
+		return true, false, nil
+	}
 	// Diverged: save remote version as <name>.remote.
 	remoteName := ref.Name + ".remote"
 	remoteRef := &core.Reference{
@@ -400,6 +423,42 @@ func pullRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.
 		return false, false, fmt.Errorf("set diverged ref: %w", err)
 	}
 	return false, true, nil
+}
+
+// isAncestor returns true if ancestor is reachable from descendant by walking
+// the snapshot PrevID chain. Both snapshots must be available in the local
+// store (for push, both are local; for pull, the remote chain has already been
+// downloaded). Returns false on any error or cycle.
+func isAncestor(ctx context.Context, store storage.Storer, descendant, ancestor core.Hash) bool {
+	if descendant.IsZero() || ancestor.IsZero() {
+		return false
+	}
+	if descendant == ancestor {
+		return true
+	}
+	cur := core.SnapshotID{Hash: descendant}
+	seen := make(map[core.Hash]bool)
+	for !cur.Hash.IsZero() {
+		if err := ctx.Err(); err != nil {
+			return false
+		}
+		if seen[cur.Hash] {
+			break // cycle guard
+		}
+		seen[cur.Hash] = true
+		if cur.Hash == ancestor {
+			return true
+		}
+		snap, err := store.GetSnapshot(ctx, cur)
+		if err != nil {
+			break
+		}
+		if snap.PrevID == nil {
+			break
+		}
+		cur = *snap.PrevID
+	}
+	return false
 }
 
 // --- scope collection ---

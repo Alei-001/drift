@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,7 +81,10 @@ func resolveRemoteConfig(workDir, remoteName string) (remote.RemoteConfig, error
 	}
 	cfg, err := rf.FindRemote(remoteName)
 	if err != nil {
-		return remote.RemoteConfig{}, fmt.Errorf("remote %q not found: %w", remoteName, err)
+		if errors.Is(err, os.ErrNotExist) {
+			return remote.RemoteConfig{}, fmt.Errorf("remote %q not found", remoteName)
+		}
+		return remote.RemoteConfig{}, fmt.Errorf("find remote %q: %w", remoteName, err)
 	}
 	host, err := remote.HostFromURL(cfg.URL)
 	if err != nil {

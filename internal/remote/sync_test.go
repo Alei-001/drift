@@ -3,6 +3,8 @@ package remote
 import (
 	"bytes"
 	"context"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/your-org/drift/internal/core"
@@ -233,40 +235,120 @@ func TestPull_SkipsExistingObjects(t *testing.T) {
 }
 
 // TestPush_PushRefDiverged verifies push fails when a remote ref points to a
-// different target than the local ref.
+// target that is NOT an ancestor of the local target (true divergence).
 func TestPush_PushRefDiverged(t *testing.T) {
 	srcStore := memory.NewMemoryStorage()
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
-	snapID1, _ := makeTestSnapshot(t, srcStore, "first", nil)
-	setupBranchRef(t, srcStore, "main", snapID1.Hash)
+	// Create a base snapshot, then two divergent children.
+	baseSnapID, _ := makeTestSnapshot(t, srcStore, "base", nil)
+	snapID1, _ := makeTestSnapshot(t, srcStore, "first branch", &baseSnapID)
+	snapID2, _ := makeTestSnapshot(t, srcStore, "second branch", &baseSnapID)
 
-	// First push succeeds.
+	// Push base + snapID1, set remote main = snapID1.
+	setupBranchRef(t, srcStore, "main", snapID1.Hash)
 	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
 		t.Fatalf("first Push: %v", err)
 	}
 
-	// Now create a second snapshot and update local ref.
-	snapID2, _ := makeTestSnapshot(t, srcStore, "second", &snapID1)
-	setupBranchRef(t, srcStore, "main", snapID2.Hash)
-
-	// Manually set remote ref to a different target (simulating divergence).
-	// We'll push snapID2 first (so the snapshot exists on remote), then
-	// manually change the remote ref to snapID1 to simulate divergence.
+	// Push snapID2's snapshot object to remote (so it exists there), but
+	// keep remote ref at snapID1.
 	if err := pushSnapshot(context.Background(), srcStore, rfs, snapID2); err != nil {
 		t.Fatalf("pushSnapshot: %v", err)
 	}
-	// Write the OLD ref target to remote (simulating another client pushed snapID1).
-	refPath := refRemotePath("heads/main")
-	if err := rfs.Write(refPath, bytes.NewReader([]byte(snapID1.Hash.FullString()+"\n"))); err != nil {
-		t.Fatalf("write diverged ref: %v", err)
-	}
 
-	// Now push should fail with ref diverged.
+	// Now switch local main to snapID2 (divergent from remote's snapID1:
+	// neither is an ancestor of the other).
+	setupBranchRef(t, srcStore, "main", snapID2.Hash)
+
+	// Push should fail — snapID2 and snapID1 are siblings, not fast-forward.
 	_, err := Push(context.Background(), srcStore, rfs, "")
 	if err == nil {
 		t.Fatal("expected Push to fail with ref diverged, got nil")
+	}
+}
+
+// TestPush_FastForward verifies push succeeds when the remote ref target is an
+// ancestor of the local target (local is simply ahead).
+func TestPush_FastForward(t *testing.T) {
+	srcStore := memory.NewMemoryStorage()
+	defer srcStore.Close()
+	rfs := NewMockRemoteFS()
+
+	// Create base, push it.
+	baseSnapID, _ := makeTestSnapshot(t, srcStore, "base", nil)
+	setupBranchRef(t, srcStore, "main", baseSnapID.Hash)
+	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+		t.Fatalf("first Push: %v", err)
+	}
+
+	// Create a child snapshot and update local main.
+	childSnapID, _ := makeTestSnapshot(t, srcStore, "child", &baseSnapID)
+	setupBranchRef(t, srcStore, "main", childSnapID.Hash)
+
+	// Push should fast-forward the remote ref (base is ancestor of child).
+	stats, err := Push(context.Background(), srcStore, rfs, "")
+	if err != nil {
+		t.Fatalf("Push fast-forward failed: %v", err)
+	}
+	if stats.RefsUpdated != 1 {
+		t.Errorf("expected 1 ref updated (fast-forward), got %d", stats.RefsUpdated)
+	}
+
+	// Verify remote ref now points to the child.
+	rc, err := rfs.Read(refRemotePath("heads/main"))
+	if err != nil {
+		t.Fatalf("read remote ref: %v", err)
+	}
+	defer rc.Close()
+	data, _ := io.ReadAll(rc)
+	if strings.TrimSpace(string(data)) != childSnapID.Hash.FullString() {
+		t.Errorf("remote ref = %s, want %s (fast-forward)", strings.TrimSpace(string(data)), childSnapID.Hash.FullString())
+	}
+}
+
+// TestPull_FastForward verifies pull fast-forwards the local ref when the
+// remote is ahead (local target is an ancestor of remote target).
+func TestPull_FastForward(t *testing.T) {
+	srcStore := memory.NewMemoryStorage()
+	defer srcStore.Close()
+	rfs := NewMockRemoteFS()
+
+	// Source: base → child (child is ahead).
+	baseSnapID, _ := makeTestSnapshot(t, srcStore, "base", nil)
+	childSnapID, _ := makeTestSnapshot(t, srcStore, "child", &baseSnapID)
+	setupBranchRef(t, srcStore, "main", childSnapID.Hash)
+
+	// Push to remote.
+	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+
+	// Destination: has base, main points to base (behind remote).
+	dstStore := memory.NewMemoryStorage()
+	defer dstStore.Close()
+	makeTestSnapshot(t, dstStore, "base", nil)
+	setupBranchRef(t, dstStore, "main", baseSnapID.Hash)
+
+	stats, err := Pull(context.Background(), dstStore, rfs, "")
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if stats.RefsUpdated != 1 {
+		t.Errorf("expected 1 ref updated (fast-forward), got %d", stats.RefsUpdated)
+	}
+	if stats.RefsDiverged != 0 {
+		t.Errorf("expected 0 diverged, got %d", stats.RefsDiverged)
+	}
+
+	// Verify local ref now points to child.
+	localRef, err := dstStore.GetRef(context.Background(), "heads/main")
+	if err != nil {
+		t.Fatalf("GetRef: %v", err)
+	}
+	if localRef.Target != childSnapID.Hash {
+		t.Errorf("local ref = %s, want %s (fast-forward)", localRef.Target.FullString(), childSnapID.Hash.FullString())
 	}
 }
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/porcelain"
@@ -53,9 +54,11 @@ files — if the branch tip advanced, run 'drift restore' to update them.`,
 		fmt.Printf("  chunks:     %d downloaded, %d already present\n", stats.ChunksUploaded, stats.ChunksSkipped)
 		fmt.Printf("  refs:       %d updated, %d diverged (saved as .remote)\n", stats.RefsUpdated, stats.RefsDiverged)
 		if stats.IndexRebuilt {
-			fmt.Printf("  index:      rebuilt (branch '%s' tip advanced)\n", stats.BranchTipChanged)
-			fmt.Printf("  hint: branch '%s' tip advanced. Working directory is out of sync.\n", stats.BranchTipChanged)
-			fmt.Printf("        run 'drift restore' to update your files.\n")
+			// Strip "heads/" prefix for display; BranchTipChanged stores the full ref name.
+			displayName := strings.TrimPrefix(stats.BranchTipChanged, "heads/")
+			fmt.Printf("  index:      rebuilt (branch '%s' tip advanced)\n", displayName)
+			fmt.Printf("  hint: branch '%s' tip advanced. Working directory is out of sync.\n", displayName)
+			fmt.Printf("        run 'drift restore @head' to update your files.\n")
 		}
 		return nil
 	},

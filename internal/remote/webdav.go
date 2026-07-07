@@ -1,7 +1,6 @@
 package remote
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -165,7 +164,3 @@ func (w *WebDAVFS) Close() error { return nil }
 
 // Ensure WebDAVFS satisfies RemoteFS at compile time.
 var _ RemoteFS = (*WebDAVFS)(nil)
-
-// errWebDAVUnused suppresses unused import errors if a build flag removes
-// the webdav dependency in the future.
-var _ = errors.Is
