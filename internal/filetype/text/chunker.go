@@ -2,7 +2,6 @@ package text
 
 import (
 	"github.com/your-org/drift/internal/chunker"
-	"github.com/your-org/drift/internal/core"
 )
 
 // Whole-file chunking threshold: text files smaller than this are stored as a
@@ -20,22 +19,10 @@ const (
 // ChunkerFor selects the chunking strategy for a text file. Files smaller than
 // textWholeFileThreshold return nil, signalling the caller to store the whole
 // file as a single chunk. Larger files use FastCDC with the text-tiered
-// defaults, overridden by cfg when non-zero values are provided.
-func (e *TextEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
+// defaults (4/8/16 KB — tuned for source code and structured text).
+func (e *TextEngine) ChunkerFor(fileSize int64) chunker.Chunker {
 	if fileSize < textWholeFileThreshold {
 		return nil
 	}
-	minSize, avgSize, maxSize := textChunkMinSize, textChunkAvgSize, textChunkMaxSize
-	if cfg != nil {
-		if cfg.ChunkMinSize > 0 {
-			minSize = cfg.ChunkMinSize
-		}
-		if cfg.ChunkAvgSize > 0 {
-			avgSize = cfg.ChunkAvgSize
-		}
-		if cfg.ChunkMaxSize > 0 {
-			maxSize = cfg.ChunkMaxSize
-		}
-	}
-	return chunker.NewFastCDCChunkerWithParams(minSize, avgSize, maxSize)
+	return chunker.NewFastCDCChunkerWithParams(textChunkMinSize, textChunkAvgSize, textChunkMaxSize)
 }

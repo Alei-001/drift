@@ -289,7 +289,7 @@ func TestName(t *testing.T) {
 func TestChunkerFor(t *testing.T) {
 	engine := NewEngine()
 	// 200KB — below 50MB, expects a non-nil default FastCDC chunker.
-	c := engine.ChunkerFor(200 * 1024, nil)
+	c := engine.ChunkerFor(200 * 1024)
 	if c == nil {
 		t.Fatal("expected non-nil chunker for 200KB image, got nil")
 	}

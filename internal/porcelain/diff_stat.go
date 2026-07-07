@@ -104,7 +104,7 @@ func ComputeStatWorkspace(ctx context.Context, store storage.Storer, workDir str
 		} else {
 			// Same size: compare BLAKE3 hash to catch content changes that
 			// preserve size (e.g. "cp -p" preserves size and modtime).
-			workHash, hashErr := ComputeFileHash(path, cfg)
+			workHash, hashErr := ComputeFileHash(path)
 			if hashErr != nil || workHash != e1.Hash {
 				ins, del, bin := computeWorkFileStat(ctx, store, path, e1)
 				stats = append(stats, FileStat{Path: rel, Insertions: ins, Deletions: del, Binary: bin, OldSize: e1.Size, NewSize: info.Size()})

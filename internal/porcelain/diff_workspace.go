@@ -48,7 +48,7 @@ func DiffWorkspaceVsSnapshot(ctx context.Context, workDir string, snapshot *core
 		if info.Size() != snapEntry.Size {
 			result.Modified = append(result.Modified, rel)
 		} else {
-			workHash, hashErr := ComputeFileHash(path, cfg)
+			workHash, hashErr := ComputeFileHash(path)
 			if hashErr != nil || workHash != snapEntry.Hash {
 				result.Modified = append(result.Modified, rel)
 			}

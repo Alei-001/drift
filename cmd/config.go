@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -17,15 +16,13 @@ type configField struct {
 }
 
 // configFields lists every key 'drift config' recognizes, in display order.
-// Only these keys are accepted by 'get' and 'set'; unknown keys are rejected
-// so users get a clear error rather than silently writing a no-op field.
+// Only user-facing keys are exposed here; algorithm tuning parameters (chunk
+// sizes, compression) are intentionally omitted — they are hardcoded in
+// core.DefaultConfig and should not be tuned by end users. Unknown keys are
+// rejected so users get a clear error rather than silently writing a no-op.
 var configFields = []configField{
 	{key: "user.name", typ: "string"},
-	{key: "compression.enabled", typ: "bool"},
-	{key: "compression.level", typ: "int"},
-	{key: "chunk.min_size", typ: "int"},
-	{key: "chunk.avg_size", typ: "int"},
-	{key: "chunk.max_size", typ: "int"},
+	{key: "user.email", typ: "string"},
 }
 
 // configFieldMap indexes configFields by key for O(1) lookup.
@@ -199,16 +196,8 @@ func configGetValue(cfg *core.Config, key string) (string, bool) {
 	switch key {
 	case "user.name":
 		return cfg.User.Name, true
-	case "compression.enabled":
-		return strconv.FormatBool(cfg.Core.Compression), true
-	case "compression.level":
-		return strconv.Itoa(cfg.Core.CompressionLevel), true
-	case "chunk.min_size":
-		return strconv.Itoa(cfg.Core.ChunkMinSize), true
-	case "chunk.avg_size":
-		return strconv.Itoa(cfg.Core.ChunkAvgSize), true
-	case "chunk.max_size":
-		return strconv.Itoa(cfg.Core.ChunkMaxSize), true
+	case "user.email":
+		return cfg.User.Email, true
 	default:
 		return "", false
 	}

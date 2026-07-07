@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/your-org/drift/internal/chunker"
-	"github.com/your-org/drift/internal/core"
 )
 
 // --- Name and NewEngine ---
@@ -89,7 +88,7 @@ func TestDetect_ByHeuristic(t *testing.T) {
 // selects FastCDC for this size range.
 func TestChunkerFor_SmallFile(t *testing.T) {
 	engine := NewEngine()
-	c := engine.ChunkerFor(10*1024*1024, nil)
+	c := engine.ChunkerFor(10 * 1024 * 1024)
 	if c == nil {
 		t.Fatal("expected non-nil chunker for 10MB binary file")
 	}
@@ -102,47 +101,12 @@ func TestChunkerFor_SmallFile(t *testing.T) {
 // Large files use fixed-size chunking to keep chunk count bounded.
 func TestChunkerFor_LargeFile(t *testing.T) {
 	engine := NewEngine()
-	c := engine.ChunkerFor(600*1024*1024, nil)
+	c := engine.ChunkerFor(600 * 1024 * 1024)
 	if c == nil {
 		t.Fatal("expected non-nil chunker for 600MB binary file")
 	}
 	if _, ok := c.(*chunker.FixedChunker); !ok {
 		t.Errorf("expected *FixedChunker for 600MB, got %T", c)
-	}
-}
-
-// TestChunkerFor_AppliesConfig verifies that a non-nil cfg is honored: the
-// chunker strategy uses cfg.ChunkMinSize/AvgSize/MaxSize instead of defaults.
-func TestChunkerFor_AppliesConfig(t *testing.T) {
-	engine := NewEngine()
-	cfg := &core.CoreConfig{
-		ChunkMinSize: 64 * 1024,
-		ChunkAvgSize: 128 * 1024,
-		ChunkMaxSize: 256 * 1024,
-	}
-	c := engine.ChunkerFor(10*1024*1024, cfg)
-	if c == nil {
-		t.Fatal("expected non-nil chunker with custom cfg")
-	}
-	// Smoke-test: actually chunk some data and verify it produces chunks
-	// with size <= MaxSize.
-	data := bytes.Repeat([]byte{0xAB}, 1024*1024) // 1 MB
-	chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("Chunk failed: %v", err)
-	}
-	if len(chunks) == 0 {
-		t.Fatal("expected at least one chunk")
-	}
-	var total uint32
-	for _, ch := range chunks {
-		if int(ch.Size) > cfg.ChunkMaxSize {
-			t.Errorf("chunk size %d > cfg.ChunkMaxSize %d", ch.Size, cfg.ChunkMaxSize)
-		}
-		total += ch.Size
-	}
-	if int(total) != len(data) {
-		t.Errorf("total chunk size %d != input %d", total, len(data))
 	}
 }
 

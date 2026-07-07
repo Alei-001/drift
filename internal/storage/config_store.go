@@ -21,21 +21,10 @@ type ConfigStorer interface {
 
 // NormalizeConfig applies shared invariants to a loaded config so both
 // backends observe identical field semantics. It runs the core-level
-// Normalize (negative→0, empty/zero fields→defaults) and then applies
-// storage-layer upper-bound clamps on chunk sizes to prevent OOM on a
-// malicious or mistaken config. Both the filesystem and memory backends
-// call this from GetConfig so the logic lives in one place rather than
-// being duplicated per backend.
+// Normalize (empty/zero fields→defaults). Both the filesystem and memory
+// backends call this from GetConfig so the logic lives in one place rather
+// than being duplicated per backend.
 func NormalizeConfig(cfg *core.Config) {
 	cfg.Core.Normalize()
-	if cfg.Core.ChunkMinSize > MaxChunkMinSize {
-		cfg.Core.ChunkMinSize = MaxChunkMinSize
-	}
-	if cfg.Core.ChunkAvgSize > MaxChunkAvgSize {
-		cfg.Core.ChunkAvgSize = MaxChunkAvgSize
-	}
-	if cfg.Core.ChunkMaxSize > MaxChunkMaxSize {
-		cfg.Core.ChunkMaxSize = MaxChunkMaxSize
-	}
 }
 

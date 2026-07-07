@@ -28,7 +28,7 @@ type Engine interface {
 | `Detector` | `DetectByMagic(header []byte) bool` | **Layer 1** — magic bytes (strongest signal) |
 | `Detector` | `DetectByExtension(path string) bool` | **Layer 2** — file extension |
 | `Detector` | `DetectByHeuristic(path string, header []byte) bool` | **Layer 3** — content sniffing (weakest, fallback) |
-| `ChunkerSelector` | `ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker` | Returns a chunker for this file size |
+| `ChunkerSelector` | `ChunkerFor(fileSize int64) chunker.Chunker` | Returns a chunker for this file size |
 | `Differ` | `Diff(oldPath, oldReader, newPath, newReader) (string, error)` | Streaming content diff |
 | `Previewer` | `Preview(header, size, reader, maxLines) (string, error)` | Short human-readable preview |
 | `Engine` | `Metadata() *core.FileMetadata` | Self-describing MIME type and metadata |
@@ -97,8 +97,8 @@ formats, delegate to the shared size-tiered FastCDC selector:
 
 ```go
 // chunker.go
-func (e *FooEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
-    return chunker.DefaultSelector{}.ChunkerFor(fileSize, cfg)
+func (e *FooEngine) ChunkerFor(fileSize int64) chunker.Chunker {
+    return chunker.DefaultSelector{}.ChunkerFor(fileSize)
 }
 ```
 
@@ -177,8 +177,9 @@ Create `engine_test.go` covering:
    files.
 
 3. **Chunker autonomy**: each engine decides its own chunking strategy via
-   `ChunkerFor(fileSize, cfg)`. The binary selector is size-tiered (5
-   bands); text has its own 2-band scheme.
+   `ChunkerFor(fileSize)`. The binary selector is size-tiered (5
+   bands); text has its own 2-band scheme. Chunk sizes are tuned per
+   engine and are not user-configurable.
 
 4. **Detection layering**: magic bytes > extension > heuristic. Stronger
    signals are queried first so registration order does not affect

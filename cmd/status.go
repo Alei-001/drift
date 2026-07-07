@@ -25,6 +25,11 @@ var statusCmd = &cobra.Command{
 		}
 		defer store.Close()
 
+		// Resolve the current branch name once; empty means detached HEAD.
+		// Surface it in human and JSON output so users always know where they
+		// stand without running 'drift branch list'.
+		currentBranch := porcelain.ResolveCurrentBranchName(ctx, store)
+
 		changes, err := porcelain.DetectChanges(ctx, store, cwd, &cfg.Core)
 		if err != nil {
 			reportFailed("Status", "status", err.Error(), "")
@@ -45,6 +50,7 @@ var statusCmd = &cobra.Command{
 				deleted = []string{}
 			}
 			data := statusJSONData{
+				Branch:   currentBranch,
 				Added:    added,
 				Modified: modified,
 				Deleted:  deleted,
@@ -67,6 +73,7 @@ var statusCmd = &cobra.Command{
 
 		if total == 0 {
 			statusOK("Status")
+			printBranchLine(currentBranch)
 			fmt.Println("Nothing changed since last save.")
 			return nil
 		}
@@ -85,6 +92,7 @@ var statusCmd = &cobra.Command{
 		} else {
 			header := fmt.Sprintf("Status (%d %s changed since last save)", total, pluralFile(total))
 			fmt.Printf(">>> %s\n", header)
+			printBranchLine(currentBranch)
 			fmt.Println()
 			for _, p := range changes.Added {
 				fmt.Printf("  +  %s\n", p)
@@ -101,6 +109,18 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+// printBranchLine renders the current-branch context line shown in the human
+// status output. A non-empty branch name yields "On branch: <name>"; a detached
+// HEAD yields "HEAD detached". The line is omitted only when --short is used,
+// because that format is paths-only for scripting.
+func printBranchLine(branch string) {
+	if branch == "" {
+		fmt.Println("HEAD detached")
+		return
+	}
+	fmt.Printf("On branch: %s\n", branch)
+}
+
 func init() {
 	statusCmd.Flags().BoolVarP(&statusShort, "short", "s", false, "short format, paths only")
 	rootCmd.AddCommand(statusCmd)
@@ -115,7 +135,10 @@ type statusJSONSummary struct {
 }
 
 // statusJSONData is the data payload of the 'drift status --json' envelope.
+// Branch is the current branch name (without "heads/" prefix), or empty if
+// HEAD is detached.
 type statusJSONData struct {
+	Branch   string            `json:"branch"`
 	Added    []string          `json:"added"`
 	Modified []string          `json:"modified"`
 	Deleted  []string          `json:"deleted"`

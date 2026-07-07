@@ -132,7 +132,7 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 			return nil, fmt.Errorf("seek %s: %w", f.path, err)
 		}
 
-		chunks, err := chunkFile(ctx, f.path, file, engine, f.info.Size(), cfg)
+		chunks, err := chunkFile(ctx, f.path, file, engine, f.info.Size())
 		file.Close()
 		if err != nil {
 			return nil, fmt.Errorf("chunk file %s: %w", f.path, err)
@@ -250,10 +250,9 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 
 // ComputeFileHash returns the BLAKE3 file hash for filePath by chunking it
 // with the detected engine and hashing the concatenation of chunk hashes.
-// cfg may be nil (core.DefaultConfig is used). The hash is independent of
-// chunk data layout and matches the hash CreateSnapshot would produce for
-// the same file.
-func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
+// The hash is independent of chunk data layout and matches the hash
+// CreateSnapshot would produce for the same file.
+func ComputeFileHash(filePath string) (core.Hash, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return core.Hash{}, fmt.Errorf("open file %s: %w", filePath, err)
@@ -278,11 +277,7 @@ func ComputeFileHash(filePath string, cfg *core.CoreConfig) (core.Hash, error) {
 		return core.Hash{}, fmt.Errorf("seek %s: %w", filePath, err)
 	}
 
-	if cfg == nil {
-		cfg = &core.DefaultConfig().Core
-	}
-
-	chunks, err := chunkFile(context.Background(), filePath, file, engine, info.Size(), cfg)
+	chunks, err := chunkFile(context.Background(), filePath, file, engine, info.Size())
 	if err != nil {
 		return core.Hash{}, fmt.Errorf("chunk file %s: %w", filePath, err)
 	}

@@ -138,7 +138,7 @@ All non-trivial literals must be named constants. Existing examples:
 
 - `core.HeaderPeekSize = 512` (header peek buffer size)
 - `storage.MaxSymRefDepth = 8` (maximum symbolic reference chain depth)
-- `storage.MaxChunkMinSize` / `MaxChunkAvgSize` / `MaxChunkMaxSize` (chunk size bounds)
+- `core.DefaultChunkMinSize` / `DefaultChunkAvgSize` / `DefaultChunkMaxSize` (binary-class default chunk sizes, 128/256/512 KB)
 
 ---
 

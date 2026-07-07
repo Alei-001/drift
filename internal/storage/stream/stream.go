@@ -74,12 +74,12 @@ func PeekHeader(r io.Reader, n int) (header []byte, rest io.Reader, err error) {
 func HashFileContent(path string) (core.Hash, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return core.Hash{}, err
+		return core.Hash{}, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
 	h := blake3.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return core.Hash{}, err
+		return core.Hash{}, fmt.Errorf("hash file content %s: %w", path, err)
 	}
 	var out core.Hash
 	copy(out[:], h.Sum(nil))

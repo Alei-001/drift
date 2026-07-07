@@ -236,7 +236,7 @@ func ComputeRestoreChanges(ctx context.Context, workDir string, cfg *core.CoreCo
 		} else {
 			// Same size: compare content hash to detect changes that
 			// preserve size (e.g. "cp -p" preserves modtime too).
-			workHash, hashErr := ComputeFileHash(ws.path, cfg)
+			workHash, hashErr := ComputeFileHash(ws.path)
 			if hashErr != nil || workHash != f.Hash {
 				modified = append(modified, f)
 			}

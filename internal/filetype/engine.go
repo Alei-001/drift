@@ -37,11 +37,11 @@ type Detector interface {
 	DetectByHeuristic(path string, header []byte) bool
 }
 
-// ChunkerSelector chooses the chunking strategy for a file of the given size,
-// honouring caller-supplied config when present. Returning nil signals that
-// the caller should store the whole file as a single chunk.
+// ChunkerSelector chooses the chunking strategy for a file of the given size.
+// Each engine uses its own tuned chunk sizes (engine autonomy). Returning nil
+// signals that the caller should store the whole file as a single chunk.
 type ChunkerSelector interface {
-	ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker
+	ChunkerFor(fileSize int64) chunker.Chunker
 }
 
 // Differ compares two files and returns a unified diff or summary.

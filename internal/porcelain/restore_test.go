@@ -127,13 +127,14 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 			headRef.Target.String(), snap2.ID.Hash.String())
 	}
 
-	// Verify index contains all file entries (file1, file2, file3, .driftignore)
+	// Verify index contains all file entries (file1, file2, file3).
+	// .driftignore is no longer auto-created by InitProject.
 	idx, err := store.GetIndex(context.Background())
 	if err != nil {
 		t.Fatalf("GetIndex failed: %v", err)
 	}
-	if len(idx.Entries) != 4 {
-		t.Errorf("expected 4 index entries (3 files + .driftignore), got %d", len(idx.Entries))
+	if len(idx.Entries) != 3 {
+		t.Errorf("expected 3 index entries (3 files), got %d", len(idx.Entries))
 	}
 
 	// Verify file2.txt content was restored to v1
@@ -509,7 +510,7 @@ func TestComputeRestoreChanges_HashDetectsSameSizeChange(t *testing.T) {
 	cfg.IgnoreFile = ""
 
 	// Compute the hash the way CreateSnapshot would.
-	origHash, err := ComputeFileHash(filePath, &cfg)
+	origHash, err := ComputeFileHash(filePath)
 	if err != nil {
 		t.Fatalf("ComputeFileHash orig: %v", err)
 	}
@@ -558,7 +559,7 @@ func TestComputeRestoreChanges_IdenticalFileNotModified(t *testing.T) {
 	cfg := core.DefaultConfig().Core
 	cfg.IgnoreFile = ""
 
-	origHash, err := ComputeFileHash(filePath, &cfg)
+	origHash, err := ComputeFileHash(filePath)
 	if err != nil {
 		t.Fatalf("ComputeFileHash: %v", err)
 	}
@@ -595,7 +596,7 @@ func TestComputeRestoreChanges_DifferentSizeModified(t *testing.T) {
 	cfg := core.DefaultConfig().Core
 	cfg.IgnoreFile = ""
 
-	origHash, err := ComputeFileHash(filePath, &cfg)
+	origHash, err := ComputeFileHash(filePath)
 	if err != nil {
 		t.Fatalf("ComputeFileHash: %v", err)
 	}

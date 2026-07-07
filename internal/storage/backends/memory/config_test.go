@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/your-org/drift/internal/core"
-	"github.com/your-org/drift/internal/storage"
 )
 
 func TestGetConfig_DefaultWhenUnset(t *testing.T) {
@@ -20,9 +19,6 @@ func TestGetConfig_DefaultWhenUnset(t *testing.T) {
 	if cfg.Core.IgnoreFile != core.DefaultIgnoreFile {
 		t.Errorf("IgnoreFile: got %q, want %q", cfg.Core.IgnoreFile, core.DefaultIgnoreFile)
 	}
-	if cfg.Core.ChunkMinSize != core.DefaultChunkMinSize {
-		t.Errorf("ChunkMinSize: got %d, want %d", cfg.Core.ChunkMinSize, core.DefaultChunkMinSize)
-	}
 }
 
 func TestSetConfig_RoundTrip(t *testing.T) {
@@ -31,9 +27,6 @@ func TestSetConfig_RoundTrip(t *testing.T) {
 	cfg := &core.Config{
 		User: core.UserConfig{Name: "tester", Email: "t@example.com"},
 		Core: core.CoreConfig{
-			ChunkMinSize:     64 * 1024,
-			ChunkAvgSize:     128 * 1024,
-			ChunkMaxSize:     256 * 1024,
 			Compression:      true,
 			CompressionLevel: 5,
 			IgnoreFile:       ".customignore",
@@ -53,9 +46,6 @@ func TestSetConfig_RoundTrip(t *testing.T) {
 	}
 	if got.Core.IgnoreFile != ".customignore" {
 		t.Errorf("Core.IgnoreFile: got %q, want %q", got.Core.IgnoreFile, ".customignore")
-	}
-	if got.Core.ChunkMinSize != 64*1024 {
-		t.Errorf("ChunkMinSize: got %d, want %d", got.Core.ChunkMinSize, 64*1024)
 	}
 	if got.Core.CompressionLevel != 5 {
 		t.Errorf("CompressionLevel: got %d, want 5", got.Core.CompressionLevel)
@@ -104,26 +94,5 @@ func TestGetConfig_AppliesNormalization(t *testing.T) {
 	if got.Core.IgnoreFile != core.DefaultIgnoreFile {
 		t.Errorf("IgnoreFile after normalize: got %q, want %q",
 			got.Core.IgnoreFile, core.DefaultIgnoreFile)
-	}
-}
-
-func TestGetConfig_ClampsChunkSizes(t *testing.T) {
-	store := NewMemoryStorage()
-	ctx := context.Background()
-	// Set chunk sizes above the maximum; GetConfig should clamp them.
-	store.SetConfig(ctx, &core.Config{Core: core.CoreConfig{
-		ChunkMinSize: storage.MaxChunkMinSize + 1,
-		ChunkAvgSize: storage.MaxChunkAvgSize + 1,
-		ChunkMaxSize: storage.MaxChunkMaxSize + 1,
-	}})
-	got, _ := store.GetConfig(ctx)
-	if got.Core.ChunkMinSize != storage.MaxChunkMinSize {
-		t.Errorf("ChunkMinSize: got %d, want %d (clamped)", got.Core.ChunkMinSize, storage.MaxChunkMinSize)
-	}
-	if got.Core.ChunkAvgSize != storage.MaxChunkAvgSize {
-		t.Errorf("ChunkAvgSize: got %d, want %d (clamped)", got.Core.ChunkAvgSize, storage.MaxChunkAvgSize)
-	}
-	if got.Core.ChunkMaxSize != storage.MaxChunkMaxSize {
-		t.Errorf("ChunkMaxSize: got %d, want %d (clamped)", got.Core.ChunkMaxSize, storage.MaxChunkMaxSize)
 	}
 }

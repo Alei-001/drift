@@ -90,7 +90,7 @@ Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify erro
 6. **Comma-ok type assertions**: always use `if x, ok := v.(T); ok` — never bare.
 7. **Defer immediately** after resource acquisition.
 8. **Named constants**: no magic numbers. `core.HeaderPeekSize = 512`,
-   `storage.MaxSymRefDepth = 8`, `storage.MaxChunkMinSize` etc.
+   `storage.MaxSymRefDepth = 8`, `core.DefaultChunkMinSize` etc.
 9. **File size ≤ 300 lines.** (Generated `*.pb.go` files are exempt.)
 10. **Dedup rule**: identical code in ≥2 files → extract to nearest shared ancestor.
 11. **ctx.Err()** in every long-running loop.

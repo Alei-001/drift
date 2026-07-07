@@ -505,8 +505,9 @@ type Detector interface {
 // 返回 nil 表示"整文件单块"：调用方读取整个文件并构造单个 Chunk，其 Hash 为 BLAKE3(content)。
 // 每个引擎根据文件大小自治决定分块策略，使策略与理解该类型的引擎共置一处；
 // 未来引擎（如 PSD）可返回结构感知的 chunker，而无需改动 snapshot 层。
+// 分块大小由各引擎私有常量决定，不通过 CoreConfig 暴露给用户配置。
 type ChunkerSelector interface {
-    ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker
+    ChunkerFor(fileSize int64) chunker.Chunker
 }
 
 // Differ 计算两个版本文件内容的差异（流式，不缓冲整个文件到内存）
@@ -722,9 +723,6 @@ type UserConfig struct {
 }
 
 type CoreConfig struct {
-    ChunkMinSize     int    `json:"chunk_min_size"`     // 最小块大小（字节，默认 128KB）
-    ChunkAvgSize     int    `json:"chunk_avg_size"`     // 平均块大小（字节，默认 256KB）
-    ChunkMaxSize     int    `json:"chunk_max_size"`     // 最大块大小（字节，默认 512KB）
     Compression      bool   `json:"compression"`        // 是否启用压缩（默认 true）
     CompressionLevel int    `json:"compression_level"`  // zstd 压缩级别（1-19，默认 3）
     IgnoreFile       string `json:"ignore_file"`        // 忽略规则文件名（默认 .driftignore）
@@ -1201,8 +1199,8 @@ func (e *ClipStudioEngine) DetectByHeuristic(path string, header []byte) bool {
     return false // 无需启发式兜底
 }
 
-func (e *ClipStudioEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
-    return chunker.BinaryChunkerFor(fileSize, cfg)
+func (e *ClipStudioEngine) ChunkerFor(fileSize int64) chunker.Chunker {
+    return chunker.BinaryChunkerFor(fileSize)
 }
 
 func (e *ClipStudioEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
@@ -1330,7 +1328,9 @@ storage 接口使用语义化版本：
 
 ### 10.4 分块策略（各引擎 ChunkerFor 自治 + 文件大小 5 档自适应）
 
-drift 不再使用统一的 FastCDC 默认参数，而是由各引擎通过 `ChunkerFor(fileSize, cfg)` 自治决定分块策略。`porcelain/snapshot.go` 的 `chunkFile(r, engine, fileSize, cfg)` 调用 `engine.ChunkerFor(fileSize, cfg)` 获取 chunker：返回 nil 走整文件单块路径，否则 `c.Chunk(r)`。text 引擎实现 2 档（<64KB 整文件 / 否则 FastCDC 4K-8K-16K）；image/video/binary 引擎共用 `chunker.BinaryChunkerFor(fileSize, cfg)` 的 3 档策略。合计仍是下表 5 档效果。`CreateSnapshot` 与 `ComputeFileHash` 共用 `chunkFile`，保证两路计算得到完全相同的分块布局与文件哈希。
+drift 不再使用统一的 FastCDC 默认参数，而是由各引擎通过 `ChunkerFor(fileSize)` 自治决定分块策略。`porcelain/snapshot.go` 的 `chunkFile(ctx, path, r, engine, fileSize)` 调用 `engine.ChunkerFor(fileSize)` 获取 chunker：返回 nil 走整文件单块路径，否则 `c.Chunk(ctx, r)`。text 引擎实现 2 档（<64KB 整文件 / 否则 FastCDC 4K-8K-16K）；image/video/binary 引擎共用 `chunker.BinaryChunkerFor(fileSize)` 的 3 档策略。合计仍是下表 5 档效果。`CreateSnapshot` 与 `ComputeFileHash` 共用 `chunkFile`，保证两路计算得到完全相同的分块布局与文件哈希。
+
+> **引擎自治架构（重要）**：分块参数不暴露给用户配置——这些是算法调优参数，创作者不应调，由 filetype 引擎按文件类型自治。`CoreConfig` 中**不再包含** `ChunkMinSize/AvgSize/MaxSize` 字段；各引擎使用自己的私有常量：text 引擎用 4/8/16 KB（源码友好）；binary/image/video 引擎用 `chunker.fastCDCDefault*`（= `core.DefaultChunk*Size` = 128/256/512 KB，大文件友好）。`drift config` 仅暴露 `user.name`、`user.email`（以及未来的 `remote.*`）。
 
 | 文件特征 | 分块策略 | 理由 |
 |----------|---------|------|
@@ -1350,20 +1350,15 @@ const (
     binaryHugeThreshold  = 500 * 1024 * 1024  // 500MB
 )
 
-func BinaryChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
+func BinaryChunkerFor(fileSize int64) Chunker {
     // 默认值复用 core.DefaultChunk*Size（经 fastCDCDefault*Size 别名引入）。
-    // cfg 中 > 0 的字段覆盖默认值；0 表示"用引擎默认"，方便部分 JSON 配置。
+    // 分块大小由引擎私有常量决定，不通过 CoreConfig 暴露给用户配置。
     minSize, avgSize, maxSize := fastCDCDefaultMinSize, fastCDCDefaultAvgSize, fastCDCDefaultMaxSize
-    if cfg != nil {
-        if cfg.ChunkMinSize > 0 { minSize = cfg.ChunkMinSize }
-        if cfg.ChunkAvgSize > 0 { avgSize = cfg.ChunkAvgSize }
-        if cfg.ChunkMaxSize > 0 { maxSize = cfg.ChunkMaxSize }
-    }
     switch {
     case fileSize < binaryLargeThreshold:
-        return NewFastCDCChunkerWithParams(minSize, avgSize, maxSize)  // 使用配置参数
+        return NewFastCDCChunkerWithParams(minSize, avgSize, maxSize)
     case fileSize < binaryHugeThreshold:
-        // 按比例放大，保持用户的 min/avg/max 比例，生成更少更大的块
+        // 按比例放大，保持 min/avg/max 比例，生成更少更大的块
         return NewFastCDCChunkerWithParams(minSize*4, avgSize*4, maxSize*4)
     default:
         // 超大文件用固定分块，基于 avg 放大以减少块数
@@ -1372,7 +1367,7 @@ func BinaryChunkerFor(fileSize int64, cfg *core.CoreConfig) Chunker {
 }
 
 // internal/filetype/text/chunker.go —— 文本引擎自治 2 档
-func (e *TextEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
+func (e *TextEngine) ChunkerFor(fileSize int64) chunker.Chunker {
     if fileSize < 64*1024 {
         return nil // 整文件单块，由 chunkFile 直接拼一个 Chunk
     }
@@ -1380,18 +1375,18 @@ func (e *TextEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Ch
 }
 
 // filetype/image|video|binary/chunker.go —— 复用共享策略
-func (e *ImageEngine) ChunkerFor(fileSize int64, cfg *core.CoreConfig) chunker.Chunker {
-    return chunker.BinaryChunkerFor(fileSize, cfg)
+func (e *ImageEngine) ChunkerFor(fileSize int64) chunker.Chunker {
+    return chunker.BinaryChunkerFor(fileSize)
 }
 
 // internal/porcelain/snapshot.go —— 调用方：策略选择由引擎自治，snapshot 层零分支
-func chunkFile(path string, r io.Reader, engine filetype.Engine, fileSize int64, cfg *core.CoreConfig) ([]*core.Chunk, error) {
-    c := engine.ChunkerFor(fileSize, cfg)
+func chunkFile(ctx context.Context, path string, r io.Reader, engine filetype.Engine, fileSize int64) ([]*core.Chunk, error) {
+    c := engine.ChunkerFor(fileSize)
     if c == nil {
         // 整文件单块：读全部内容，构造单个 Chunk{Hash: BLAKE3(content), ...}
         // ...
     }
-    return c.Chunk(r)
+    return c.Chunk(ctx, r)
 }
 ```
 

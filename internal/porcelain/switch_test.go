@@ -39,7 +39,7 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
-	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestSwitchBranch_NoChanges(t *testing.T) {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
 
-	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
@@ -232,7 +232,7 @@ func TestSwitchBranch_NoAutosave_CleanWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
-	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 
@@ -274,7 +274,7 @@ func TestSwitchBranch_NoAutosave_DirtyWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
-	if err := CreateBranch(context.Background(), store, "", "feature"); err != nil {
+	if err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
 		t.Fatalf("CreateBranch: %v", err)
 	}
 

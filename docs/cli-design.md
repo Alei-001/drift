@@ -188,7 +188,7 @@ Error: already a drift repository.
 ```
 
 - 创建 `.drift/` 目录
-- 自动添加 `.driftignore` 默认模板（排除 .DS_Store / Thumbs.db / 系统临时文件）
+- `.driftignore` **不会**自动创建（与 git 一致）；用户通过 `drift ignore add <pattern>` 按需添加规则，文件在首次 add 时创建
 
 ---
 
@@ -321,13 +321,14 @@ Error: uncommitted changes would be lost.
 ```
 drift log [--limit <n>] [--detail <id>] [--all] [--branch <name>] [--json]
 
-浏览历史快照。默认只显示用户手动创建的快照，[auto] 快照隐藏。
+浏览历史快照。默认只显示当前分支的可达历史（沿 PrevID 链回溯，包含从
+父分支继承的提交）。自动保存 (`drift watch`) 的 [auto] 快照默认隐藏。
 
 选项：
   -l, --limit      显示最近 N 条记录（默认 30）
   --detail <id>    查看某个快照的文件变更明细（替代旧的 -v）
-  --all            包括自动保存 (drift watch) 的快照
-  --branch <name>  只显示某分支的快照
+  --all            显示所有分支的全部快照（含自动保存）
+  --branch <name>  显示指定分支的可达历史（默认：当前分支）
   --json           JSON 格式输出
 
 示例：
@@ -339,37 +340,58 @@ drift log [--limit <n>] [--detail <id>] [--all] [--branch <name>] [--json]
   drift log --json
 ```
 
-Output — 默认：
+Output — 默认（当前分支）：
 
 ```
->>> History (3 snapshots)
-12ab  2026-06-28 16:30  main          Chapter 3 draft complete                     +2 ~1
-a3c2  2026-06-27 22:15  main          Update cover color scheme                     ~1
-9f1e  2026-06-27 10:00  dev           Submit to client                [submission]  +1 ~1
+>>> History (4 snapshots on 'dev')
+fc83  2026-07-07 20:34  dev          commit 4 on dev                            ~1
+d536  2026-07-07 20:34               commit 3 on dev                            ~1
+aa89  2026-07-07 20:34  main         commit 2 on main                           ~1
+37f4  2026-07-07 20:34               commit 1 on main                           +1
 ```
 
-> 第三列为分支名（仅显示指向该快照的分支头，类似 git --decorate）。
+> 第三列为分支名，**仅在该快照是某分支头（tip）时才显示**（类似 git
+> `--decorate=short`）。继承自父分支的提交该列为空，用户一眼就能看出分支
+> 在哪里切出——上例中 `main` 标在 `aa89`，说明 dev 是从 main 的 `aa89`
+> 处切出的；之后两条是 dev 独有。
+
+多个分支头指向同一快照时用逗号分隔，超长截断为 `name1,name2,+N`：
+
+```
+b4e1  2026-07-07 22:15  main,dev     Shared edit                                ~1
+```
 
 消息或标签过长时自动截断，末尾加 `...`：
 
 ```
->>> History (3 snapshots)
-12ab  2026-06-28 16:30  main          Chapter 3 draft complete, revised by editor...  +2 ~1
-b4e1  2026-06-27 22:15  dev           Fix typo                        [typo-fix-...]  ~1
+>>> History (3 snapshots on 'main')
+12ab  2026-07-07 16:30  main         Chapter 3 draft complete, revised by editor...  +2 ~1
+b4e1  2026-07-07 22:15  dev          Fix typo                        [typo-fix-...]  ~1
 ```
 
 > 被截断的完整内容可通过 `drift log --detail @id:<id>` 查看。
 
-Output — `--all`：
+Output — `--branch main`（指定分支）：
 
 ```
->>> History (5 snapshots, including auto-saves)
-12ab  2026-06-28 16:30  main          Chapter 3 draft complete                     +2 ~1
-f3e2  2026-06-28 16:25                [auto] 2026-06-28 16:25                     ~1    · dimmed
-a3c2  2026-06-27 22:15  main          Update cover color scheme                     ~1
-f1a0  2026-06-27 22:10                [auto] 2026-06-27 22:10                     +1    · dimmed
-9f1e  2026-06-27 10:00  dev           Submit to client                [submission]  +1 ~1
+>>> History (2 snapshots on 'main')
+aa89  2026-07-07 20:34  main          commit 2 on main                           ~1
+37f4  2026-07-07 20:34               commit 1 on main                           +1
 ```
+
+> 只显示 main 分支可达的提交，dev 独有提交不会出现。
+
+Output — `--all`（全部分支）：
+
+```
+>>> History (4 snapshots, all branches)
+fc83  2026-07-07 20:34  dev           commit 4 on dev                            ~1
+d536  2026-07-07 20:34               commit 3 on dev                            ~1
+aa89  2026-07-07 20:34  main          commit 2 on main                           ~1
+37f4  2026-07-07 20:34               commit 1 on main                           +1
+```
+
+> 显示所有快照（含 auto-saves），分支列同样只标注 tip。
 
 Output — `--detail @id:<id>`：
 
@@ -520,6 +542,7 @@ Output：
 
 ```
 >>> Status (3 files changed since last save)
+On branch: main
 
   +  chapter4.md
   +  assets/sketch.png
@@ -528,7 +551,7 @@ Output：
   3 files: +2 ~1
 ```
 
-Output — `--short`：
+Output — `--short`（仅文件路径，供脚本解析）：
 
 ```
 >>> Status (3 files)
@@ -541,8 +564,20 @@ Output — 无变更：
 
 ```
 >>> Status [ok]
+On branch: main
 Nothing changed since last save.
 ```
+
+Output — 分离头指针（detached HEAD）：
+
+```
+>>> Status [ok]
+HEAD detached
+Nothing changed since last save.
+```
+
+- 默认输出第二行始终展示当前分支（`On branch: <name>`）或分离头状态（`HEAD detached`），方便用户随时确认所在分支。
+- `--short` 模式保持纯路径输出，不显示分支行；分支信息可通过 `--json` 的 `branch` 字段获取。
 
 Error：
 
@@ -722,13 +757,7 @@ Error: --no-backup is only allowed for single-file restore.
   hint: full restore always creates a backup for safety.
 ```
 
-Error — 工作区有未保存变更：
-
-```
->>> Restore [failed]
-Error: uncommitted changes would be overwritten.
-  hint: use 'drift save' first, or restore a single file.
-```
+> **未保存变更的处理**：当工作区有未提交修改时，整快照恢复**不会拒绝执行**，而是**先强制创建备份快照**再执行恢复。这样既不阻断用户工作流，又保证了"恢复永远可撤销"的核心承诺——若恢复错了，用 `drift restore @id:<backup>` 即可撤销回去。
 
 - 整快照恢复**强制备份**，`--no-backup` 仅对单文件恢复有效（影响范围小，可接受跳过）
 - 这保证了"恢复永远可撤销"的核心承诺不被破坏
@@ -1271,38 +1300,35 @@ drift config list                              列出所有配置
 drift config get <key>                         查看某项配置
 drift config set <key> <value>                 修改配置
 
-配置项示例：
+配置项：
   user.name              作者名（用于 snapshot.author）
-  compression.enabled    是否启用 zstd 压缩（true/false）
-  compression.level      zstd 压缩级别（1-19，默认 3）
-  chunk.min_size         分块最小尺寸
-  chunk.avg_size         分块平均尺寸
-  chunk.max_size         分块最大尺寸
+  user.email             作者邮箱（可选，用于身份标识）
+
+> 算法调优参数（chunk 分块尺寸、compression 压缩级别等）**不暴露给用户**，
+> 它们硬编码在 `core.DefaultConfig` 中，面向创作者场景做了优化（128K/256K/512K
+> 分块、zstd level 3）。用户只需配置身份信息；远程仓库参数（remote.*）将在
+> 协作功能落地后加入。
 
 示例：
   drift config list
   drift config get user.name
   drift config set user.name "张三"
-  drift config set compression.level 5
+  drift config set user.email "zhangsan@example.com"
 ```
 
 Output — 列表：
 
 ```
 >>> Config
-  user.name             = drift
-  compression.enabled   = true
-  compression.level     = 3
-  chunk.min_size        = 4096
-  chunk.avg_size        = 8192
-  chunk.max_size        = 16384
+  user.name  = 张三
+  user.email = zhangsan@example.com
 ```
 
 Output — 获取：
 
 ```
 >>> Config: user.name
-drift
+张三
 ```
 
 Output — 设置：
@@ -1312,11 +1338,11 @@ Output — 设置：
   user.name = "张三"
 ```
 
-Error — 未知配置项：
+Error — 未知配置项（含已移除的算法参数）：
 
 ```
 >>> Config [failed]
-Error: unknown config key 'user.email'.
+Error: unknown config key 'chunk.min_size'.
   hint: use 'drift config list' to see available keys.
 ```
 

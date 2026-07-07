@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/storage"
 	"github.com/your-org/drift/internal/storage/backends/filesystem"
-	"github.com/your-org/drift/internal/util/fsutil"
 )
 
 // StoreFactory builds a storage.Storer rooted at the given .drift path.
@@ -82,27 +80,11 @@ func InitProjectWithFactory(path string, factory StoreFactory) error {
 		return fmt.Errorf("set index: %w", err)
 	}
 
-	driftignorePath := filepath.Join(path, core.DefaultIgnoreFile)
-	if _, err := os.Stat(driftignorePath); os.IsNotExist(err) {
-		driftignoreContent := []byte(`# macOS
-.DS_Store
-
-# Windows
-Thumbs.db
-desktop.ini
-
-# Office temp files
-~$*
-
-# Editor temp files
-*.tmp
-*.swp
-*~
-`)
-		if err := os.WriteFile(driftignorePath, driftignoreContent, fsutil.DefaultFilePerm); err != nil {
-			return fmt.Errorf("write .driftignore: %w", err)
-		}
-	}
+	// Note: .driftignore is NOT auto-created. Users add ignore rules
+	// on demand via 'drift ignore add <pattern>', which creates the
+	// file when it does not yet exist. This mirrors git's .gitignore
+	// behavior and avoids polluting the first snapshot with an empty
+	// ignore file. See cli-design.md and AddIgnoreRules in fsutil.
 
 	return nil
 }
@@ -156,45 +138,17 @@ func applyStorageConfig(store storage.Storer, cfg *core.CoreConfig) error {
 	return nil
 }
 
-// SetConfigValue parses value according to the key's type, validates ranges
-// (compression.level 1-19, chunk sizes >= 0), writes it into cfg, and
-// persists the updated config to storage. It returns an error if the key
-// is unknown or the value is invalid.
+// SetConfigValue writes a user-configurable key into cfg and persists the
+// updated config to storage. Only user-facing keys (user.name, user.email)
+// are accepted; algorithm tuning parameters (chunk sizes, compression) are
+// intentionally not exposed — they are hardcoded in core.DefaultConfig and
+// should not be tuned by end users. Returns an error if the key is unknown.
 func SetConfigValue(ctx context.Context, store storage.Storer, cfg *core.Config, key, value string) error {
 	switch key {
 	case "user.name":
 		cfg.User.Name = value
-	case "compression.enabled":
-		b, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("invalid boolean value '%s' for %s", value, key)
-		}
-		cfg.Core.Compression = b
-	case "compression.level":
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("invalid integer value '%s' for %s", value, key)
-		}
-		if n < core.MinZstdLevel || n > core.MaxZstdLevel {
-			return fmt.Errorf("compression.level must be between %d and %d", core.MinZstdLevel, core.MaxZstdLevel)
-		}
-		cfg.Core.CompressionLevel = n
-	case "chunk.min_size", "chunk.avg_size", "chunk.max_size":
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("invalid integer value '%s' for %s", value, key)
-		}
-		if n < 0 {
-			return fmt.Errorf("%s must be non-negative", key)
-		}
-		switch key {
-		case "chunk.min_size":
-			cfg.Core.ChunkMinSize = n
-		case "chunk.avg_size":
-			cfg.Core.ChunkAvgSize = n
-		case "chunk.max_size":
-			cfg.Core.ChunkMaxSize = n
-		}
+	case "user.email":
+		cfg.User.Email = value
 	default:
 		return fmt.Errorf("unknown config key '%s'", key)
 	}

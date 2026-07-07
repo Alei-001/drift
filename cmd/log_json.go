@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/your-org/drift/internal/core"
@@ -11,7 +12,9 @@ import (
 )
 
 // logJSONEntry is one row of the 'drift log --json' output. The schema
-// matches docs/cli-design.md: tags is an array, branch is a single string.
+// matches docs/cli-design.md: tags is an array, branch is a comma-separated
+// string of branch names whose tips point at this snapshot (empty for
+// inherited commits).
 type logJSONEntry struct {
 	ID      string   `json:"id"`
 	Time    string   `json:"time"`
@@ -51,7 +54,7 @@ func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.Sn
 			Changes: fmt.Sprintf("+%d ~%d -%d", add, mod, del),
 		}
 		if branches, ok := branchMap[s.ID.Hash.String()]; ok && len(branches) > 0 {
-			entry.Branch = branches[0]
+			entry.Branch = strings.Join(branches, ",")
 		}
 		entries = append(entries, entry)
 	}

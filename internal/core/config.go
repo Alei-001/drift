@@ -29,9 +29,6 @@ type UserConfig struct {
 }
 
 type CoreConfig struct {
-	ChunkMinSize     int    `json:"chunk_min_size"`
-	ChunkAvgSize     int    `json:"chunk_avg_size"`
-	ChunkMaxSize     int    `json:"chunk_max_size"`
 	Compression      bool   `json:"compression"`
 	CompressionLevel int    `json:"compression_level"`
 	IgnoreFile       string `json:"ignore_file"`
@@ -47,9 +44,6 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Core: CoreConfig{
-			ChunkMinSize:     DefaultChunkMinSize,
-			ChunkAvgSize:     DefaultChunkAvgSize,
-			ChunkMaxSize:     DefaultChunkMaxSize,
 			Compression:      true,
 			CompressionLevel: DefaultZstdLevel,
 			IgnoreFile:       DefaultIgnoreFile,
@@ -63,23 +57,9 @@ func DefaultConfig() *Config {
 // safe to call on any CoreConfig, including zero-value structs and configs
 // loaded from JSON that may have partial/missing fields.
 //
-// Chunk sizes: negative values are clamped to 0 (meaning "use the filetype
-// engine's own default" — downstream chunkers handle 0 via a > 0 check).
-// Zero is preserved on purpose so users can opt into engine-specific defaults
-// by setting chunk_min_size: 0 in their config JSON.
-//
 // This logic lives in the core package so both filesystem and memory storage
 // backends apply the same normalization, avoiding backend-specific drift.
 func (c *CoreConfig) Normalize() {
-	if c.ChunkMinSize < 0 {
-		c.ChunkMinSize = 0
-	}
-	if c.ChunkAvgSize < 0 {
-		c.ChunkAvgSize = 0
-	}
-	if c.ChunkMaxSize < 0 {
-		c.ChunkMaxSize = 0
-	}
 	if c.IgnoreFile == "" {
 		c.IgnoreFile = DefaultIgnoreFile
 	}

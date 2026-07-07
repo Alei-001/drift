@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/your-org/drift/internal/core"
@@ -43,69 +42,6 @@ func countSnapshotDiff(from, to *core.Snapshot) int {
 		}
 	}
 	return count
-}
-
-// ResolveSnapshotBranches assigns each snapshot to the branch whose tip is
-// the nearest descendant (fewest PrevID hops). A snapshot unreachable from
-// any branch tip gets no entry. Ties at equal distance are broken by branch
-// name for determinism.
-func ResolveSnapshotBranches(ctx context.Context, store storage.Storer) (map[string][]string, error) {
-	branches, _, err := ListBranches(ctx, store)
-	if err != nil {
-		return nil, err
-	}
-
-	type branchWalk struct {
-		name string
-		dist map[string]int
-	}
-	var walks []branchWalk
-	for _, b := range branches {
-		if b.Target.IsZero() {
-			continue
-		}
-		name := strings.TrimPrefix(b.Name, "heads/")
-		bw := branchWalk{name: name, dist: make(map[string]int)}
-		currHash := b.Target
-		hops := 0
-		for !currHash.IsZero() {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			hashStr := currHash.String()
-			if _, seen := bw.dist[hashStr]; seen {
-				break
-			}
-			bw.dist[hashStr] = hops
-			snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: currHash})
-			if err != nil {
-				break
-			}
-			if snap.PrevID == nil {
-				break
-			}
-			currHash = snap.PrevID.Hash
-			hops++
-		}
-		walks = append(walks, bw)
-	}
-
-	bestDist := make(map[string]int)
-	bestName := make(map[string]string)
-	for _, bw := range walks {
-		for hashStr, d := range bw.dist {
-			cur, ok := bestDist[hashStr]
-			if !ok || d < cur || (d == cur && bw.name < bestName[hashStr]) {
-				bestDist[hashStr] = d
-				bestName[hashStr] = bw.name
-			}
-		}
-	}
-	result := make(map[string][]string)
-	for hashStr, name := range bestName {
-		result[hashStr] = []string{name}
-	}
-	return result, nil
 }
 
 // ResolveHeadSnapshot returns the HEAD snapshot, or nil if none exists.

@@ -265,11 +265,11 @@ func TestComputeFileHash_EmptyFile(t *testing.T) {
 		t.Fatalf("write empty.bin: %v", err)
 	}
 
-	txtHash, err := ComputeFileHash(txtPath, nil)
+	txtHash, err := ComputeFileHash(txtPath)
 	if err != nil {
 		t.Fatalf("ComputeFileHash empty.txt: %v", err)
 	}
-	binHash, err := ComputeFileHash(binPath, nil)
+	binHash, err := ComputeFileHash(binPath)
 	if err != nil {
 		t.Fatalf("ComputeFileHash empty.bin: %v", err)
 	}
@@ -387,7 +387,7 @@ func (nilChunkerEngine) Name() string                                           
 func (nilChunkerEngine) DetectByMagic([]byte) bool                                    { return false }
 func (nilChunkerEngine) DetectByExtension(string) bool                                { return false }
 func (nilChunkerEngine) DetectByHeuristic(string, []byte) bool                        { return false }
-func (nilChunkerEngine) ChunkerFor(int64, *core.CoreConfig) chunker.Chunker           { return nil }
+func (nilChunkerEngine) ChunkerFor(int64) chunker.Chunker           { return nil }
 func (nilChunkerEngine) Diff(context.Context, string, io.Reader, string, io.Reader) (string, error) { return "", nil }
 func (nilChunkerEngine) Preview([]byte, int64, io.Reader, int) (string, error)        { return "", nil }
 func (nilChunkerEngine) Metadata() *core.FileMetadata                                 { return nil }
@@ -398,7 +398,7 @@ func (nilChunkerEngine) Metadata() *core.FileMetadata                           
 // memory. Before the fix, a 500 MB video would be fully buffered.
 func TestChunkFile_NilChunkerLargeFile(t *testing.T) {
 	largeSize := int64(128 * 1024) // 128 KB, above the 64 KB threshold
-	_, err := chunkFile(context.Background(), "bigfile.bin", bytes.NewReader([]byte("x")), nilChunkerEngine{}, largeSize, nil)
+	_, err := chunkFile(context.Background(), "bigfile.bin", bytes.NewReader([]byte("x")), nilChunkerEngine{}, largeSize)
 	if err == nil {
 		t.Fatal("expected error for large file with nil chunker, got nil")
 	}
@@ -411,7 +411,7 @@ func TestChunkFile_NilChunkerLargeFile(t *testing.T) {
 // still work through the nil-chunker whole-file path.
 func TestChunkFile_NilChunkerSmallFile(t *testing.T) {
 	data := []byte("hello\nworld\n")
-	chunks, err := chunkFile(context.Background(), "small.txt", bytes.NewReader(data), nilChunkerEngine{}, int64(len(data)), nil)
+	chunks, err := chunkFile(context.Background(), "small.txt", bytes.NewReader(data), nilChunkerEngine{}, int64(len(data)))
 	if err != nil {
 		t.Fatalf("unexpected error for small file: %v", err)
 	}

@@ -57,22 +57,8 @@ func TestSentinelErrors_Messages(t *testing.T) {
 }
 
 func TestConstants_Values(t *testing.T) {
-	// Constants are used by storage backends for clamping and recursion limits.
+	// MaxSymRefDepth is used by storage backends for symlink recursion limits.
 	if MaxSymRefDepth <= 0 {
 		t.Errorf("MaxSymRefDepth = %d, want > 0", MaxSymRefDepth)
-	}
-	if MaxChunkMinSize <= 0 {
-		t.Errorf("MaxChunkMinSize = %d, want > 0", MaxChunkMinSize)
-	}
-	if MaxChunkAvgSize <= 0 {
-		t.Errorf("MaxChunkAvgSize = %d, want > 0", MaxChunkAvgSize)
-	}
-	if MaxChunkMaxSize <= 0 {
-		t.Errorf("MaxChunkMaxSize = %d, want > 0", MaxChunkMaxSize)
-	}
-	// Ordering: MaxChunkMinSize < MaxChunkAvgSize < MaxChunkMaxSize.
-	if !(MaxChunkMinSize < MaxChunkAvgSize && MaxChunkAvgSize < MaxChunkMaxSize) {
-		t.Errorf("expected MaxChunkMinSize < MaxChunkAvgSize < MaxChunkMaxSize, got %d %d %d",
-			MaxChunkMinSize, MaxChunkAvgSize, MaxChunkMaxSize)
 	}
 }

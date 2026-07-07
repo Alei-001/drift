@@ -28,7 +28,7 @@ func binaryClassEngines() map[string]filetype.Engine {
 
 func TestChunkerFor_TextSmall(t *testing.T) {
 	eng := text.NewEngine()
-	c := eng.ChunkerFor(10*1024, nil)
+	c := eng.ChunkerFor(10 * 1024)
 	if c != nil {
 		t.Errorf("expected nil (whole-file) for 10KB text, got %T", c)
 	}
@@ -36,7 +36,7 @@ func TestChunkerFor_TextSmall(t *testing.T) {
 
 func TestChunkerFor_TextMedium(t *testing.T) {
 	eng := text.NewEngine()
-	c := eng.ChunkerFor(1*1024*1024, nil)
+	c := eng.ChunkerFor(1 * 1024 * 1024)
 	if c == nil {
 		t.Fatal("expected non-nil chunker for 1MB text, got nil")
 	}
@@ -51,7 +51,7 @@ func TestChunkerFor_TextMedium(t *testing.T) {
 
 func TestChunkerFor_BinarySmall(t *testing.T) {
 	for name, eng := range binaryClassEngines() {
-		c := eng.ChunkerFor(10*1024*1024, nil)
+		c := eng.ChunkerFor(10 * 1024 * 1024)
 		if _, ok := c.(*chunker.FastCDCChunker); !ok {
 			t.Errorf("%s 10MB: expected *FastCDCChunker, got %T", name, c)
 		}
@@ -60,7 +60,7 @@ func TestChunkerFor_BinarySmall(t *testing.T) {
 
 func TestChunkerFor_BinaryLarge(t *testing.T) {
 	for name, eng := range binaryClassEngines() {
-		c := eng.ChunkerFor(100*1024*1024, nil)
+		c := eng.ChunkerFor(100 * 1024 * 1024)
 		if _, ok := c.(*chunker.FastCDCChunker); !ok {
 			t.Errorf("%s 100MB: expected *FastCDCChunker, got %T", name, c)
 		}
@@ -69,7 +69,7 @@ func TestChunkerFor_BinaryLarge(t *testing.T) {
 
 func TestChunkerFor_BinaryHuge(t *testing.T) {
 	for name, eng := range binaryClassEngines() {
-		c := eng.ChunkerFor(600*1024*1024, nil)
+		c := eng.ChunkerFor(600 * 1024 * 1024)
 		if _, ok := c.(*chunker.FixedChunker); !ok {
 			t.Errorf("%s 600MB: expected *FixedChunker, got %T", name, c)
 		}
@@ -80,30 +80,30 @@ func TestChunkerFor_BoundaryValues(t *testing.T) {
 	textEng := text.NewEngine()
 	binEng := binary.NewEngine()
 
-	if c := textEng.ChunkerFor(64*1024, nil); c == nil {
+	if c := textEng.ChunkerFor(64 * 1024); c == nil {
 		t.Error("64KB text: expected non-nil FastCDC, got nil")
 	}
 
-	c := binEng.ChunkerFor(50*1024*1024, nil)
+	c := binEng.ChunkerFor(50 * 1024 * 1024)
 	if _, ok := c.(*chunker.FastCDCChunker); !ok {
 		t.Errorf("50MB binary: expected *FastCDCChunker, got %T", c)
 	}
 
-	c = binEng.ChunkerFor(500*1024*1024, nil)
+	c = binEng.ChunkerFor(500 * 1024 * 1024)
 	if _, ok := c.(*chunker.FixedChunker); !ok {
 		t.Errorf("500MB binary: expected *FixedChunker, got %T", c)
 	}
 
-	if c := textEng.ChunkerFor(64*1024-1, nil); c != nil {
+	if c := textEng.ChunkerFor(64*1024 - 1); c != nil {
 		t.Errorf("64KB-1 text: expected nil, got %T", c)
 	}
 
-	c = binEng.ChunkerFor(50*1024*1024-1, nil)
+	c = binEng.ChunkerFor(50*1024*1024 - 1)
 	if _, ok := c.(*chunker.FastCDCChunker); !ok {
 		t.Errorf("50MB-1 binary: expected *FastCDCChunker, got %T", c)
 	}
 
-	c = binEng.ChunkerFor(500*1024*1024-1, nil)
+	c = binEng.ChunkerFor(500*1024*1024 - 1)
 	if _, ok := c.(*chunker.FastCDCChunker); !ok {
 		t.Errorf("500MB-1 binary: expected *FastCDCChunker, got %T", c)
 	}
@@ -186,7 +186,7 @@ func TestComputeFileHash_ConsistencyWithCreateSnapshot(t *testing.T) {
 				t.Fatalf("file %s not found in snapshot entries", tc.filename)
 			}
 
-			computedHash, err := ComputeFileHash(fullPath, nil)
+			computedHash, err := ComputeFileHash(fullPath)
 			if err != nil {
 				t.Fatalf("ComputeFileHash failed: %v", err)
 			}

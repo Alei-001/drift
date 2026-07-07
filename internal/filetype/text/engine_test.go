@@ -519,7 +519,7 @@ func TestName(t *testing.T) {
 func TestChunkerFor_SmallFile(t *testing.T) {
 	engine := NewEngine()
 	// < 64KB should return nil (whole-file single chunk)
-	c := engine.ChunkerFor(10 * 1024, nil)
+	c := engine.ChunkerFor(10 * 1024)
 	if c != nil {
 		t.Errorf("expected nil chunker for small text file (whole-file), got %v", c)
 	}
@@ -528,7 +528,7 @@ func TestChunkerFor_SmallFile(t *testing.T) {
 func TestChunkerFor_MediumFile(t *testing.T) {
 	engine := NewEngine()
 	// 64K-50MB should use FastCDC
-	c := engine.ChunkerFor(200 * 1024, nil)
+	c := engine.ChunkerFor(200 * 1024)
 	if c == nil {
 		t.Fatal("expected non-nil chunker for 200KB text file, got nil")
 	}

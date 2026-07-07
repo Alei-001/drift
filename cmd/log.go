@@ -37,10 +37,11 @@ var logCmd = &cobra.Command{
 	Short: "Show snapshot history",
 	Long: `Browse snapshot history.
 
-By default only manually created snapshots are shown; auto-saves created by
-'drift watch' are hidden unless --all is given. Use --branch to filter by
-branch, --limit to cap the number of entries, and --detail to inspect the
-file changes of a single snapshot.`,
+By default only the current branch's history is shown (including commits
+inherited from parent branches). Auto-saves created by 'drift watch' are
+hidden unless --all is given. Use --branch to walk another branch's chain,
+--limit to cap the number of entries, and --detail to inspect the file
+changes of a single snapshot.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		cwd, err := getCwd(cmd)
@@ -57,41 +58,38 @@ file changes of a single snapshot.`,
 			return logDetailMode(ctx, store, logDetail)
 		}
 
-		var snapshots []*core.SnapshotSummary
-		var branchMap map[string][]string
+		// branchMap (snapshot hash -> branch names whose tip points at it) is
+		// used to decorate the branch column. Only snapshots that ARE a branch
+		// tip get a label — inherited commits remain blank so the user can
+		// see where branches diverge (git --decorate semantics).
+		branchMap, err := porcelain.ResolveBranchTips(ctx, store)
+		if err != nil {
+			return err
+		}
 
-		if logBranch != "" {
-			// Branch-filtered: list ALL snapshots, then keep only those whose
-			// nearest-tip attribution is this branch. This shows the branch's
-			// own commits, excluding commits inherited from parent branches
-			// (which are attributed to the parent by the nearest-tip rule).
-			if _, refErr := store.GetRef(ctx, "heads/"+logBranch); refErr != nil {
-				reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", logBranch), "use 'drift branch' to list existing branches.")
-				return ErrSilent
-			}
-			allSnaps, err := store.ListSnapshots(ctx, &storage.ListOptions{})
-			if err != nil {
-				return err
-			}
-			branchMap, err = porcelain.ResolveSnapshotBranches(ctx, store)
-			if err != nil {
-				return err
-			}
-			for _, s := range allSnaps {
-				if names, ok := branchMap[s.ID.Hash.String()]; ok && len(names) > 0 && names[0] == logBranch {
-					snapshots = append(snapshots, s)
-				}
-			}
-		} else {
-			// Global: list ALL snapshots, then filter auto-saves and apply the
-			// limit afterwards. Applying the limit at the storage layer would
-			// surface only the N most recent entries — which may be dominated
-			// by auto-saves — hiding older manual snapshots from the user.
+		var snapshots []*core.SnapshotSummary
+		var labelBranch string
+
+		if logAll {
+			// --all: list every snapshot in the store, regardless of branch.
 			snapshots, err = store.ListSnapshots(ctx, &storage.ListOptions{})
 			if err != nil {
 				return err
 			}
-			branchMap, err = porcelain.ResolveSnapshotBranches(ctx, store)
+		} else {
+			// Default or --branch: walk the PrevID chain from the branch tip.
+			labelBranch = logBranch
+			if labelBranch == "" {
+				labelBranch = porcelain.ResolveCurrentBranchName(ctx, store)
+			}
+			startHash, err := resolveBranchTipHash(ctx, store, logBranch)
+			if err != nil {
+				return err
+			}
+			if startHash.IsZero() {
+				return reportNoSnapshots(ctx, logBranch, logAll)
+			}
+			snapshots, err = porcelain.WalkSnapshotChain(ctx, store, startHash)
 			if err != nil {
 				return err
 			}
@@ -117,12 +115,7 @@ file changes of a single snapshot.`,
 		}
 
 		if len(filtered) == 0 {
-			hint := "use 'drift save -m \"message\"' to create your first snapshot."
-			if logBranch != "" {
-				hint = fmt.Sprintf("branch '%s' has no snapshots yet.", logBranch)
-			}
-			reportFailed("Log", "log", "no snapshots yet.", hint)
-			return ErrSilent
+			return reportNoSnapshots(ctx, logBranch, logAll)
 		}
 
 		if globalJSON {
@@ -136,19 +129,22 @@ file changes of a single snapshot.`,
 
 		// Default table format.
 		label := fmt.Sprintf("History (%d snapshots", len(filtered))
-		if logBranch != "" {
-			label += fmt.Sprintf(" on '%s'", logBranch)
+		if labelBranch != "" {
+			label += fmt.Sprintf(" on '%s'", labelBranch)
 		}
 		if logAll {
+			label += ", all branches"
+		}
+		if logAll && includesAutoSaves(filtered) {
 			label += ", including auto-saves"
 		}
 		label += ")"
 		fmt.Printf(">>> %s\n", label)
 		for _, s := range filtered {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
 			add, mod, del := porcelain.CountSnapshotChanges(ctx, store, s)
 			changes := formatChangesCompact(add, mod, del)
 
@@ -157,14 +153,8 @@ file changes of a single snapshot.`,
 				msg = string([]rune(msg)[:msgColWidth-1]) + "..."
 			}
 
-			// Branch column.
-			branchCol := ""
-			if branches, ok := branchMap[s.ID.Hash.String()]; ok && len(branches) > 0 {
-				branchCol = strings.Join(branches, ",")
-			}
-			if len([]rune(branchCol)) > branchColWidth {
-				branchCol = string([]rune(branchCol)[:branchColWidth-1]) + "..."
-			}
+			// Branch column: only branch tips get labeled; others stay blank.
+			branchCol := formatBranchColumn(branchMap[s.ID.Hash.String()])
 
 			tag := ""
 			for _, t := range s.Tags {
@@ -193,6 +183,92 @@ file changes of a single snapshot.`,
 		}
 		return nil
 	},
+}
+
+// resolveBranchTipHash returns the snapshot hash that the given branch points
+// at. If branchName is empty, it resolves HEAD (following symref to the
+// current branch). Returns a zero hash if no tip is set. Reports an error and
+// returns ErrSilent if a named branch does not exist.
+func resolveBranchTipHash(ctx context.Context, store storage.Storer, branchName string) (core.Hash, error) {
+	if branchName == "" {
+		headRef, err := store.GetRef(ctx, "HEAD")
+		if err != nil {
+			return core.Hash{}, nil
+		}
+		target := headRef.Target
+		if headRef.SymRef != "" {
+			bRef, err := store.GetRef(ctx, headRef.SymRef)
+			if err != nil {
+				return core.Hash{}, nil
+			}
+			target = bRef.Target
+		}
+		return target, nil
+	}
+	ref, err := store.GetRef(ctx, "heads/"+branchName)
+	if err != nil {
+		reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", branchName), "use 'drift branch' to list existing branches.")
+		return core.Hash{}, ErrSilent
+	}
+	return ref.Target, nil
+}
+
+// formatBranchColumn formats the branch-tip list for the log table column.
+// Multiple tips are joined with ","; overflows are truncated as
+// "name1,name2,+N" so the user knows how many were hidden. Returns "" when the
+// slice is empty (inherited commits show no branch).
+func formatBranchColumn(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	// Try to fit all names.
+	joined := strings.Join(names, ",")
+	if len([]rune(joined)) <= branchColWidth {
+		return joined
+	}
+	// Truncate progressively: keep as many leading names as fit, then append
+	// ",+N" to indicate how many were dropped.
+	runes := []rune(joined)
+	if len(runes) <= branchColWidth {
+		return string(runes)
+	}
+	// Reserve room for the "+N" suffix.
+	for keep := len(names) - 1; keep >= 1; keep-- {
+		prefix := strings.Join(names[:keep], ",")
+		suffix := fmt.Sprintf(",+%d", len(names)-keep)
+		if len([]rune(prefix))+len([]rune(suffix)) <= branchColWidth {
+			return prefix + suffix
+		}
+	}
+	// Even one name + "+N" doesn't fit: hard-truncate the first name.
+	if len(runes) > branchColWidth {
+		return string(runes[:branchColWidth-1]) + "..."
+	}
+	return joined
+}
+
+// includesAutoSaves reports whether any entry in the list has the auto-save
+// message prefix. Used to decide whether the label should mention auto-saves.
+func includesAutoSaves(snaps []*core.SnapshotSummary) bool {
+	for _, s := range snaps {
+		if strings.HasPrefix(s.Message, autoSavePrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// reportNoSnapshots emits the "no snapshots" failure and returns ErrSilent.
+// The hint adapts to the active mode (branch-filtered, all, or default).
+func reportNoSnapshots(ctx context.Context, branchName string, all bool) error {
+	hint := "use 'drift save -m \"message\"' to create your first snapshot."
+	if branchName != "" {
+		hint = fmt.Sprintf("branch '%s' has no snapshots yet.", branchName)
+	} else if all {
+		hint = "use 'drift save -m \"message\"' to create your first snapshot."
+	}
+	reportFailed("Log", "log", "no snapshots yet.", hint)
+	return ErrSilent
 }
 
 // logDetailMode prints the file-change detail for a single snapshot. In JSON
@@ -250,7 +326,7 @@ func formatChangesCompact(added, modified, deleted int) string {
 func init() {
 	logCmd.Flags().IntVarP(&logLimit, "limit", "l", 30, "limit number of entries")
 	logCmd.Flags().StringVar(&logDetail, "detail", "", "show file change details for a snapshot (e.g. @id:12ab)")
-	logCmd.Flags().StringVar(&logBranch, "branch", "", "filter history by branch")
-	logCmd.Flags().BoolVar(&logAll, "all", false, "include auto-saved snapshots")
+	logCmd.Flags().StringVar(&logBranch, "branch", "", "show history of a specific branch (default: current branch)")
+	logCmd.Flags().BoolVar(&logAll, "all", false, "show snapshots from all branches (including auto-saves)")
 	rootCmd.AddCommand(logCmd)
 }
