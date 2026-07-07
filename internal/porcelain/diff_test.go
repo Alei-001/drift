@@ -154,7 +154,7 @@ func TestDiffWorkspaceVsSnapshot_NoChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	snap, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil, nil)
+	snap, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestDiffWorkspaceVsSnapshot_AddedModifiedDeleted(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("bbb"), 0644); err != nil {
 		t.Fatalf("write b.txt: %v", err)
 	}
-	snap, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil, nil)
+	snap, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}

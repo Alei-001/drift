@@ -4,123 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/your-org/drift/internal/core"
 )
-
-// TestSaveTag_Success verifies the happy path: a new tag is created with the
-// correct type, name, and target, and can be read back from the store.
-func TestSaveTag_Success(t *testing.T) {
-	store := setupTestStore(t)
-	dir := t.TempDir()
-
-	var snapHash core.Hash
-	snapHash[0] = 0xBB
-
-	if err := SaveTag(context.Background(), store, dir, "v1.0", snapHash); err != nil {
-		t.Fatalf("SaveTag failed: %v", err)
-	}
-
-	ref, err := store.GetRef(context.Background(), "tags/v1.0")
-	if err != nil {
-		t.Fatalf("GetRef tags/v1.0: %v", err)
-	}
-	if ref.Type != core.RefTypeTag {
-		t.Errorf("expected RefTypeTag, got %v", ref.Type)
-	}
-	if ref.Name != "tags/v1.0" {
-		t.Errorf("expected name 'tags/v1.0', got %q", ref.Name)
-	}
-	if ref.Target != snapHash {
-		t.Errorf("expected target %x, got %x", snapHash, ref.Target)
-	}
-}
-
-// TestSaveTag_ZeroHashRejected verifies that creating a tag pointing at the
-// zero hash is rejected. The zero hash represents "no snapshot", so allowing
-// it would create a dangling tag.
-func TestSaveTag_ZeroHashRejected(t *testing.T) {
-	store := setupTestStore(t)
-	dir := t.TempDir()
-
-	err := SaveTag(context.Background(), store, dir, "v1.0", core.Hash{})
-	if err == nil {
-		t.Fatal("expected error for zero hash, got nil")
-	}
-	if !strings.Contains(err.Error(), "zero hash") {
-		t.Errorf("expected 'zero hash' in error, got %q", err.Error())
-	}
-
-	// No ref should have been written.
-	if _, err := store.GetRef(context.Background(), "tags/v1.0"); err == nil {
-		t.Error("expected tags/v1.0 to not exist after failed SaveTag")
-	}
-}
-
-// TestSaveTag_EmptyNameRejected verifies that an empty tag name is rejected
-// before any storage mutation.
-func TestSaveTag_EmptyNameRejected(t *testing.T) {
-	store := setupTestStore(t)
-	dir := t.TempDir()
-
-	var snapHash core.Hash
-	snapHash[0] = 0xBB
-
-	err := SaveTag(context.Background(), store, dir, "", snapHash)
-	if err == nil {
-		t.Fatal("expected error for empty name, got nil")
-	}
-	if !strings.Contains(err.Error(), "tag name is required") {
-		t.Errorf("expected 'tag name is required' in error, got %q", err.Error())
-	}
-}
-
-// TestSaveTag_InvalidNameRejected verifies that names failing refname.Validate
-// are rejected. The validation runs on "tags/" + name, so the rules apply to
-// the full "tags/<name>" string: "..", ":", spaces, control chars, and
-// Windows-reserved basenames are all rejected.
-func TestSaveTag_InvalidNameRejected(t *testing.T) {
-	store := setupTestStore(t)
-	dir := t.TempDir()
-
-	var snapHash core.Hash
-	snapHash[0] = 0xBB
-
-	invalid := []string{
-		"v1..2",        // contains '..'
-		"with:colon",   // contains ':'
-		"with space",   // contains space
-		"CON",          // windows-reserved basename (tags/CON -> base "con")
-	}
-	for _, name := range invalid {
-		t.Run(name, func(t *testing.T) {
-			err := SaveTag(context.Background(), store, dir, name, snapHash)
-			if err == nil {
-				t.Errorf("expected error for invalid name %q, got nil", name)
-			}
-		})
-	}
-}
-
-// TestSaveTag_DoesNotMutateStoreOnFailure verifies that a failed SaveTag
-// (zero hash or invalid name) does not leave a half-written tag ref behind.
-func TestSaveTag_DoesNotMutateStoreOnFailure(t *testing.T) {
-	store := setupTestStore(t)
-	dir := t.TempDir()
-
-	// Both should fail and leave no trace.
-	_ = SaveTag(context.Background(), store, dir, "v1.0", core.Hash{})
-	_ = SaveTag(context.Background(), store, dir, "v1..bad", core.Hash{0x01})
-
-	refs, err := store.ListRefs(context.Background(), "tags/")
-	if err != nil {
-		t.Fatalf("ListRefs tags/: %v", err)
-	}
-	if len(refs) != 0 {
-		t.Errorf("expected no tags after failed SaveTag calls, got %d: %v", len(refs), refs)
-	}
-}
 
 // putTestSnapshot stores a minimal snapshot in the memory backend for tag
 // tests that need a valid snapshot ID to point at.
@@ -335,5 +223,165 @@ func TestRenameTag_TargetExists(t *testing.T) {
 	err := RenameTag(context.Background(), store, dir, "v1", "v2")
 	if !errors.Is(err, ErrTagAlreadyExists) {
 		t.Fatalf("expected ErrTagAlreadyExists, got %v", err)
+	}
+}
+
+// TestAddTag_ZeroHashRejected verifies that creating a tag pointing at the
+// zero hash is rejected. The zero hash represents "no snapshot", so allowing
+// it would create a dangling tag.
+func TestAddTag_ZeroHashRejected(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+
+	err := AddTag(context.Background(), store, dir, "v1.0", core.SnapshotID{})
+	if err == nil {
+		t.Fatal("expected error for zero hash, got nil")
+	}
+	if !strings.Contains(err.Error(), "zero hash") {
+		t.Errorf("expected 'zero hash' in error, got %q", err.Error())
+	}
+
+	// No ref should have been written.
+	if _, err := store.GetRef(context.Background(), "tags/v1.0"); err == nil {
+		t.Error("expected tags/v1.0 to not exist after failed AddTag")
+	}
+}
+
+// TestAddTag_EmptyNameRejected verifies that an empty tag name is rejected
+// before any storage mutation.
+func TestAddTag_EmptyNameRejected(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+	snapID := putTestSnapshot(t, store)
+
+	err := AddTag(context.Background(), store, dir, "", snapID)
+	if err == nil {
+		t.Fatal("expected error for empty name, got nil")
+	}
+	if !strings.Contains(err.Error(), "tag name is required") {
+		t.Errorf("expected 'tag name is required' in error, got %q", err.Error())
+	}
+}
+
+// TestAddTag_InvalidNameRejected verifies that names failing refname.Validate
+// are rejected. The validation runs on "tags/" + name, so the rules apply to
+// the full "tags/<name>" string: "..", ":", spaces, control chars, and
+// Windows-reserved basenames are all rejected.
+func TestAddTag_InvalidNameRejected(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+	snapID := putTestSnapshot(t, store)
+
+	invalid := []string{
+		"v1..2",      // contains '..'
+		"with:colon", // contains ':'
+		"with space", // contains space
+		"CON",        // windows-reserved basename (tags/CON -> base "con")
+	}
+	for _, name := range invalid {
+		t.Run(name, func(t *testing.T) {
+			err := AddTag(context.Background(), store, dir, name, snapID)
+			if err == nil {
+				t.Errorf("expected error for invalid name %q, got nil", name)
+			}
+		})
+	}
+}
+
+// TestAddTag_DoesNotMutateStoreOnFailure verifies that a failed AddTag
+// (zero hash or invalid name) does not leave a half-written tag ref behind.
+func TestAddTag_DoesNotMutateStoreOnFailure(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+
+	// Both should fail and leave no trace. The invalid name uses a non-zero
+	// hash so it reaches the name-validation path (not the zero-hash short
+	// circuit) but still fails before writing.
+	_ = AddTag(context.Background(), store, dir, "v1.0", core.SnapshotID{})
+	_ = AddTag(context.Background(), store, dir, "v1..bad", core.SnapshotID{Hash: core.Hash{0x01}})
+
+	refs, err := store.ListRefs(context.Background(), "tags/")
+	if err != nil {
+		t.Fatalf("ListRefs tags/: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Errorf("expected no tags after failed AddTag calls, got %d: %v", len(refs), refs)
+	}
+}
+
+// TestAddTag_ConcurrentSameName is a regression test for the TOCTOU race in
+// AddTag: two goroutines creating the same tag name simultaneously must not
+// both succeed. Before the workspace lock was added, both could pass the
+// existence check and the second would silently overwrite the first. With the
+// lock, the calls serialize: exactly one succeeds, and the loser returns an
+// error (ErrTagAlreadyExists if it ran after the winner released the lock, or
+// ErrLocked if it contended on the lock while the winner held it). Either way
+// no double-create / overwrite occurs.
+func TestAddTag_ConcurrentSameName(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+
+	snap1 := putTestSnapshot(t, store)
+	snap2 := &core.Snapshot{
+		ID:        core.SnapshotID{Hash: core.Hash{0x22}},
+		Message:   "second snapshot",
+		Timestamp: 1700000001,
+	}
+	if err := store.PutSnapshot(context.Background(), snap2); err != nil {
+		t.Fatalf("PutSnapshot snap2: %v", err)
+	}
+	snap2ID := snap2.ID
+
+	var (
+		wg    sync.WaitGroup
+		start = make(chan struct{})
+		err1  error
+		err2  error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		err1 = AddTag(context.Background(), store, dir, "v1", snap1)
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		err2 = AddTag(context.Background(), store, dir, "v1", snap2ID)
+	}()
+	close(start)
+	wg.Wait()
+
+	// Exactly one must succeed; both succeeding is the TOCTOU bug.
+	successCount := 0
+	if err1 == nil {
+		successCount++
+	}
+	if err2 == nil {
+		successCount++
+	}
+	if successCount != 1 {
+		t.Fatalf("expected exactly one success, got %d (err1=%v, err2=%v)", successCount, err1, err2)
+	}
+
+	// The loser must return an error that signals the tag is taken or the
+	// workspace is locked — never a silent overwrite.
+	var loserErr error
+	if err1 != nil {
+		loserErr = err1
+	} else {
+		loserErr = err2
+	}
+	if !errors.Is(loserErr, ErrTagAlreadyExists) && !errors.Is(loserErr, ErrLocked) {
+		t.Fatalf("expected loser error to be ErrTagAlreadyExists or ErrLocked, got %v", loserErr)
+	}
+
+	// The stored tag must point at the winner's snapshot, not be clobbered.
+	ref, err := store.GetRef(context.Background(), "tags/v1")
+	if err != nil {
+		t.Fatalf("GetRef tags/v1: %v", err)
+	}
+	if ref.Target != snap1.Hash && ref.Target != snap2ID.Hash {
+		t.Errorf("tag target %x does not match either snapshot hash", ref.Target)
 	}
 }

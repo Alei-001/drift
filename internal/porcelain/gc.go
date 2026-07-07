@@ -11,10 +11,11 @@ import (
 	"github.com/your-org/drift/internal/storage"
 )
 
-// autoSavePrefix is the message prefix that identifies auto-saved snapshots
-// (created by 'drift watch'). --keep-auto uses it to distinguish auto-saves
-// from manual saves when deciding which unreachable snapshots to preserve.
-const autoSavePrefix = "auto -"
+// AutoSavePrefix is the message prefix that identifies auto-saved snapshots
+// (created by 'drift watch'). Commands that filter or label auto-saves (e.g.
+// 'log' hiding them by default, 'gc --keep-auto' preserving them) share this
+// constant so the prefix has a single source of truth.
+const AutoSavePrefix = "auto -"
 
 // GCReport describes the outcome of a garbage collection pass.
 type GCReport struct {
@@ -240,7 +241,7 @@ func selectKeptAutoSnapshots(unreachable []*core.SnapshotSummary, keepAuto int) 
 	}
 	var autoSnaps []*core.SnapshotSummary
 	for _, s := range unreachable {
-		if strings.HasPrefix(s.Message, autoSavePrefix) {
+		if strings.HasPrefix(s.Message, AutoSavePrefix) {
 			autoSnaps = append(autoSnaps, s)
 		}
 	}

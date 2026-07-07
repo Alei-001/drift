@@ -55,7 +55,7 @@ func TestDetectChanges_NoChangesAfterSnapshot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	if _, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil, nil); err != nil {
+	if _, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil); err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestDetectChanges_AddedModifiedDeleted(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("bbb"), 0644); err != nil {
 		t.Fatalf("write b.txt: %v", err)
 	}
-	if _, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil, nil); err != nil {
+	if _, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil); err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
 

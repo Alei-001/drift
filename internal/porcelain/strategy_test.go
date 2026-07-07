@@ -168,7 +168,7 @@ func TestComputeFileHash_ConsistencyWithCreateSnapshot(t *testing.T) {
 				t.Fatalf("write file: %v", err)
 			}
 
-			snap, err := CreateSnapshot(context.Background(), store, dir, "test "+tc.name, "test", nil, nil)
+			snap, err := CreateSnapshot(context.Background(), store, dir, "test "+tc.name, "test", nil)
 			if err != nil {
 				t.Fatalf("CreateSnapshot failed: %v", err)
 			}

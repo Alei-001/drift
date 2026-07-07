@@ -21,17 +21,25 @@ import (
 // and writes a new snapshot on the current branch (HEAD's symbolic target,
 // defaulting to heads/main). The workspace lock is acquired for the duration
 // of the save. message must be non-empty; author defaults to "drift" when
-// empty; tags may be nil or empty; cfg may be nil (core.DefaultConfig is
-// used). Returns ErrNothingToSave when the workspace matches the index.
-func CreateSnapshot(ctx context.Context, store storage.Storer, workDir string, message string, author string, tags []string, cfg *core.CoreConfig) (*core.Snapshot, error) {
+// empty; cfg may be nil (core.DefaultConfig is used). Returns ErrNothingToSave
+// when the workspace matches the index.
+//
+// Tags are NOT written into the snapshot. Tags live exclusively as
+// tags/<name> refs (created by cmd/save.go via AddTag after the snapshot
+// exists), which keeps them mutable — 'tag delete' and 'tag rename' actually
+// take effect on the log view, instead of being frozen into the immutable
+// snapshot. Old snapshots with embedded Tags fields are still readable;
+// ResolveTagTips + mergeTags in the log layer merges both sources so
+// historical data is preserved.
+func CreateSnapshot(ctx context.Context, store storage.Storer, workDir string, message string, author string, cfg *core.CoreConfig) (*core.Snapshot, error) {
 	if err := AcquireWorkspaceLock(workDir); err != nil {
 		return nil, fmt.Errorf("acquire workspace lock: %w", err)
 	}
 	defer ReleaseWorkspaceLock(workDir)
-	return createSnapshotInLock(ctx, store, workDir, message, author, tags, cfg)
+	return createSnapshotInLock(ctx, store, workDir, message, author, cfg)
 }
 
-func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir string, message string, author string, tags []string, cfg *core.CoreConfig) (*core.Snapshot, error) {
+func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir string, message string, author string, cfg *core.CoreConfig) (*core.Snapshot, error) {
 	if message == "" {
 		return nil, fmt.Errorf("message is required")
 	}
@@ -200,7 +208,6 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		Timestamp: time.Now().Unix(),
 		Files:     fileEntries,
 		TotalSize: totalSize,
-		Tags:      tags,
 	}
 
 	snapProto := core.SnapshotToProto(snap, false)

@@ -73,7 +73,11 @@ var statusCmd = &cobra.Command{
 
 		if total == 0 {
 			statusOK("Status")
-			printBranchLine(currentBranch)
+			// --short is paths-only; skip the branch context line so
+			// scripts don't have to filter prose.
+			if !statusShort {
+				printBranchLine(currentBranch)
+			}
 			fmt.Println("Nothing changed since last save.")
 			return nil
 		}

@@ -669,3 +669,122 @@ func TestResolveCurrentBranchName_SymRef(t *testing.T) {
 		t.Errorf("expected 'main', got %q", name)
 	}
 }
+
+func TestResolveTagTips_SingleTag(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+
+	// One snapshot with one tag pointing at it.
+	snap := &core.Snapshot{
+		ID:        core.SnapshotID{Hash: core.Hash{0xaa}},
+		Message:   "tagged",
+		Timestamp: 100,
+	}
+	store.PutSnapshot(ctx, snap)
+	store.SetRef(ctx, "tags/v1.0", &core.Reference{
+		Name:   "tags/v1.0",
+		Type:   core.RefTypeTag,
+		Target: core.Hash{0xaa},
+	})
+
+	result, err := ResolveTagTips(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveTagTips: %v", err)
+	}
+	names := result[core.Hash{0xaa}.String()]
+	if len(names) != 1 || names[0] != "v1.0" {
+		t.Errorf("got %v, want [v1.0]", names)
+	}
+}
+
+func TestResolveTagTips_MultipleTagsOnSameSnapshot(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+
+	snap := &core.Snapshot{
+		ID:        core.SnapshotID{Hash: core.Hash{0xbb}},
+		Message:   "release",
+		Timestamp: 100,
+	}
+	store.PutSnapshot(ctx, snap)
+	// Tags added out of order to verify alphabetical sorting.
+	store.SetRef(ctx, "tags/v2.0", &core.Reference{Name: "tags/v2.0", Type: core.RefTypeTag, Target: core.Hash{0xbb}})
+	store.SetRef(ctx, "tags/v1.0", &core.Reference{Name: "tags/v1.0", Type: core.RefTypeTag, Target: core.Hash{0xbb}})
+	store.SetRef(ctx, "tags/release-candidate", &core.Reference{Name: "tags/release-candidate", Type: core.RefTypeTag, Target: core.Hash{0xbb}})
+
+	result, err := ResolveTagTips(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveTagTips: %v", err)
+	}
+	names := result[core.Hash{0xbb}.String()]
+	want := []string{"release-candidate", "v1.0", "v2.0"}
+	if len(names) != len(want) {
+		t.Fatalf("got %v, want %v", names, want)
+	}
+	for i, w := range want {
+		if names[i] != w {
+			t.Errorf("names[%d]: got %q, want %q", i, names[i], w)
+		}
+	}
+}
+
+func TestResolveTagTips_DistinctSnapshots(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+
+	s1 := &core.Snapshot{ID: core.SnapshotID{Hash: core.Hash{1}}, Message: "first", Timestamp: 100}
+	s2 := &core.Snapshot{ID: core.SnapshotID{Hash: core.Hash{2}}, Message: "second", Timestamp: 200}
+	store.PutSnapshot(ctx, s1)
+	store.PutSnapshot(ctx, s2)
+
+	store.SetRef(ctx, "tags/alpha", &core.Reference{Name: "tags/alpha", Type: core.RefTypeTag, Target: core.Hash{1}})
+	store.SetRef(ctx, "tags/beta", &core.Reference{Name: "tags/beta", Type: core.RefTypeTag, Target: core.Hash{2}})
+
+	result, err := ResolveTagTips(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveTagTips: %v", err)
+	}
+	if names := result[core.Hash{1}.String()]; len(names) != 1 || names[0] != "alpha" {
+		t.Errorf("s1: got %v, want [alpha]", names)
+	}
+	if names := result[core.Hash{2}.String()]; len(names) != 1 || names[0] != "beta" {
+		t.Errorf("s2: got %v, want [beta]", names)
+	}
+	// Untagged snapshots must not appear in the map.
+	if _, ok := result[core.Hash{9}.String()]; ok {
+		t.Errorf("untagged snapshot should have no entry")
+	}
+}
+
+func TestResolveTagTips_NoTags(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+	// No tag refs set; result must be a non-nil empty map (callers index it
+	// directly, so a nil map would panic on read in Go).
+	result, err := ResolveTagTips(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveTagTips: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty map, got %v", result)
+	}
+}
+
+func TestResolveTagTips_ZeroTargetSkipped(t *testing.T) {
+	ctx := context.Background()
+	store := setupBranchStore()
+	// A tag ref with a zero target (shouldn't normally happen, but the
+	// function must not panic or surface it as a real entry).
+	store.SetRef(ctx, "tags/ghost", &core.Reference{
+		Name:   "tags/ghost",
+		Type:   core.RefTypeTag,
+		Target: core.Hash{},
+	})
+	result, err := ResolveTagTips(ctx, store)
+	if err != nil {
+		t.Fatalf("ResolveTagTips: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("zero-target tag should be skipped, got %v", result)
+	}
+}

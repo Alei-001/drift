@@ -84,4 +84,29 @@ func TestNormalize(t *testing.T) {
 			t.Errorf("Normalize() should be idempotent on already-default config: before=%+v after=%+v", before, after)
 		}
 	})
+
+	t.Run("CompressionLevel clamped into legal range", func(t *testing.T) {
+		// Zero value → default level (not minimum).
+		cfg := CoreConfig{}
+		cfg.Normalize()
+		if cfg.CompressionLevel != DefaultZstdLevel {
+			t.Errorf("zero CompressionLevel = %d, want %d (default)", cfg.CompressionLevel, DefaultZstdLevel)
+		}
+		// Above maximum → clamped to maximum.
+		cfg = CoreConfig{CompressionLevel: 100}
+		cfg.Normalize()
+		if cfg.CompressionLevel != MaxZstdLevel {
+			t.Errorf("over-max CompressionLevel = %d, want %d (max)", cfg.CompressionLevel, MaxZstdLevel)
+		}
+		// In-range value preserved.
+		cfg = CoreConfig{CompressionLevel: 5}
+		cfg.Normalize()
+		if cfg.CompressionLevel != 5 {
+			t.Errorf("in-range CompressionLevel = %d, want 5", cfg.CompressionLevel)
+		}
+		// After Normalize, ZstdLevel() must match the field directly.
+		if got := cfg.ZstdLevel(); got != cfg.CompressionLevel {
+			t.Errorf("ZstdLevel() = %d after Normalize, want %d (matches field)", got, cfg.CompressionLevel)
+		}
+	})
 }

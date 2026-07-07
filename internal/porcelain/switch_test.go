@@ -34,7 +34,7 @@ func TestSwitchBranch_AutoSaveAndRestore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSwitchBranch_CreateNew(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestSwitchBranch_NoChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content"), 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestSwitchBranch_NoAutosave_CleanWorkspace(t *testing.T) {
 	store := setupSwitchStore()
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644)
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestSwitchBranch_NoAutosave_DirtyWorkspace(t *testing.T) {
 	store := setupSwitchStore()
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644)
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}

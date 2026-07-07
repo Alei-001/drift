@@ -371,6 +371,19 @@ b4e1  2026-07-07 22:15  dev          Fix typo                        [typo-fix-.
 
 > 被截断的完整内容可通过 `drift log --detail @id:<id>` 查看。
 
+**Tag 列来源**：tag 列只反映 `tags/<name>` 引用——`drift save --tag` 在保存后创建
+对应 ref，`drift tag add` 事后追加 ref，二者写入同一处。`tag delete` / `tag rename`
+直接修改 ref，因此对 log 视图立即生效。多个 tag 同指一个快照时，列宽足够显示
+`[v1.0,v2.0]`，超长截断为 `[v1.0,+N]`；`--json` 输出始终返回完整 tag 数组。
+
+```
+7cd8  2026-07-07 20:45  main         release                                [release,+2]  +1
+```
+
+> 兼容性：早期版本会把 tag 写进快照内嵌字段，导致 `tag delete`/`rename` 无法改写
+> 历史。新版本不再写入内嵌字段，tag 仅以 ref 形式存在；log 层通过 `mergeTags`
+> 合并旧快照内嵌字段与当前 refs，保证历史数据仍可读。
+
 Output — `--branch main`（指定分支）：
 
 ```

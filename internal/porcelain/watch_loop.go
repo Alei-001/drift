@@ -120,8 +120,8 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 				writeStateMergingPause(statePath, state)
 				continue
 			}
-			msg := autoSavePrefix + " " + time.Now().Format("2006-01-02 15:04")
-			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", nil, cfg)
+			msg := AutoSavePrefix + " " + time.Now().Format("2006-01-02 15:04")
+			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", cfg)
 			if err != nil {
 				state.LastError = "save: " + err.Error()
 				ReleaseWorkspaceLock(cwd)
@@ -165,7 +165,7 @@ func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (in
 
 	var autoSnaps []*core.SnapshotSummary
 	for _, s := range snapshots {
-		if strings.HasPrefix(s.Message, autoSavePrefix) {
+		if strings.HasPrefix(s.Message, AutoSavePrefix) {
 			autoSnaps = append(autoSnaps, s)
 		}
 	}

@@ -12,11 +12,6 @@ import (
 	"github.com/your-org/drift/internal/storage"
 )
 
-// autoSavePrefix is the message prefix that identifies auto-saved snapshots
-// (created by 'drift watch'). The log command hides these by default unless
-// --all is given. Mirrors the unexported porcelain.autoSavePrefix.
-const autoSavePrefix = "auto -"
-
 // Column widths for the default table view. Messages, branch names, and tags
 // longer than these widths are truncated with "..." (width-1 runes plus the
 // ellipsis).
@@ -67,6 +62,15 @@ changes of a single snapshot.`,
 			return err
 		}
 
+		// tagMap (snapshot hash -> tag names whose ref Target points at it)
+		// reflects the authoritative tag state. Tags added after the save via
+		// 'drift tag add' only exist as refs (the snapshot is immutable), so
+		// reading s.Tags alone would miss them. We merge both sources below.
+		tagMap, err := porcelain.ResolveTagTips(ctx, store)
+		if err != nil {
+			return err
+		}
+
 		var snapshots []*core.SnapshotSummary
 		var labelBranch string
 
@@ -98,7 +102,7 @@ changes of a single snapshot.`,
 		// Filter auto-saves unless --all.
 		var filtered []*core.SnapshotSummary
 		for _, s := range snapshots {
-			if !logAll && strings.HasPrefix(s.Message, autoSavePrefix) {
+			if !logAll && strings.HasPrefix(s.Message, porcelain.AutoSavePrefix) {
 				continue
 			}
 			filtered = append(filtered, s)
@@ -119,7 +123,7 @@ changes of a single snapshot.`,
 		}
 
 		if globalJSON {
-			return logJSONMode(ctx, store, filtered, branchMap)
+			return logJSONMode(ctx, store, filtered, branchMap, tagMap)
 		}
 
 		// Quiet mode: success produces no output (exit code is authoritative).
@@ -156,29 +160,21 @@ changes of a single snapshot.`,
 			// Branch column: only branch tips get labeled; others stay blank.
 			branchCol := formatBranchColumn(branchMap[s.ID.Hash.String()])
 
-			tag := ""
-			for _, t := range s.Tags {
-				if t != "" {
-					tag = t
-					break
-				}
-			}
-			if tag != "" {
-				if len([]rune(tag)) > tagMaxLen {
-					tag = string([]rune(tag)[:tagMaxLen-1]) + "..."
-				}
-				tag = "[" + tag + "]"
-			}
+			// Tag column: merge embedded snapshot tags with tag refs (which
+			// may have been added after the save via 'drift tag add'). The
+			// merged list is wrapped in brackets, e.g. "[v1.0]" or
+			// "[v1.0,v2.0]"; overflow truncates to "[v1.0,+N]".
+			tagCol := formatTagColumn(s.Tags, tagMap[s.ID.Hash.String()])
 
 			suffix := ""
-			if strings.HasPrefix(s.Message, autoSavePrefix) {
+			if strings.HasPrefix(s.Message, porcelain.AutoSavePrefix) {
 				suffix = "    · dimmed"
 			}
 			fmt.Printf("%s  %s  %-*s  %-*s  %-*s  %s%s\n",
 				s.ShortID(), timeStr,
 				branchColWidth, branchCol,
 				msgColWidth, msg,
-				tagColWidth, tag,
+				tagColWidth, tagCol,
 				changes, suffix)
 		}
 		return nil
@@ -211,51 +207,6 @@ func resolveBranchTipHash(ctx context.Context, store storage.Storer, branchName 
 		return core.Hash{}, ErrSilent
 	}
 	return ref.Target, nil
-}
-
-// formatBranchColumn formats the branch-tip list for the log table column.
-// Multiple tips are joined with ","; overflows are truncated as
-// "name1,name2,+N" so the user knows how many were hidden. Returns "" when the
-// slice is empty (inherited commits show no branch).
-func formatBranchColumn(names []string) string {
-	if len(names) == 0 {
-		return ""
-	}
-	// Try to fit all names.
-	joined := strings.Join(names, ",")
-	if len([]rune(joined)) <= branchColWidth {
-		return joined
-	}
-	// Truncate progressively: keep as many leading names as fit, then append
-	// ",+N" to indicate how many were dropped.
-	runes := []rune(joined)
-	if len(runes) <= branchColWidth {
-		return string(runes)
-	}
-	// Reserve room for the "+N" suffix.
-	for keep := len(names) - 1; keep >= 1; keep-- {
-		prefix := strings.Join(names[:keep], ",")
-		suffix := fmt.Sprintf(",+%d", len(names)-keep)
-		if len([]rune(prefix))+len([]rune(suffix)) <= branchColWidth {
-			return prefix + suffix
-		}
-	}
-	// Even one name + "+N" doesn't fit: hard-truncate the first name.
-	if len(runes) > branchColWidth {
-		return string(runes[:branchColWidth-1]) + "..."
-	}
-	return joined
-}
-
-// includesAutoSaves reports whether any entry in the list has the auto-save
-// message prefix. Used to decide whether the label should mention auto-saves.
-func includesAutoSaves(snaps []*core.SnapshotSummary) bool {
-	for _, s := range snaps {
-		if strings.HasPrefix(s.Message, autoSavePrefix) {
-			return true
-		}
-	}
-	return false
 }
 
 // reportNoSnapshots emits the "no snapshots" failure and returns ErrSilent.

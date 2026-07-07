@@ -119,7 +119,7 @@ func TestCreateSnapshot_ConcurrentWithSwitch(t *testing.T) {
 	// Initialize main with a first snapshot so SwitchBranch has a source
 	// branch to switch away from.
 	writeFile(dir, "init.txt", "initial content")
-	if _, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil, nil); err != nil {
+	if _, err := CreateSnapshot(context.Background(), store, dir, "init", "test", nil); err != nil {
 		t.Fatalf("initial CreateSnapshot: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestCreateSnapshot_ConcurrentWithSwitch(t *testing.T) {
 		defer wg.Done()
 		// Write a unique file so there is something new to snapshot.
 		writeFile(dir, "snap.txt", "snap content")
-		_, snapErr = CreateSnapshot(context.Background(), store, dir, "concurrent snapshot", "test", nil, nil)
+		_, snapErr = CreateSnapshot(context.Background(), store, dir, "concurrent snapshot", "test", nil)
 	}()
 
 	go func() {
@@ -159,7 +159,7 @@ func TestCollectGarbage_ConcurrentWithSave(t *testing.T) {
 
 	// Seed a snapshot so GC has a reachability graph to traverse.
 	writeFile(dir, "seed.txt", "seed content")
-	if _, err := CreateSnapshot(context.Background(), store, dir, "seed", "test", nil, nil); err != nil {
+	if _, err := CreateSnapshot(context.Background(), store, dir, "seed", "test", nil); err != nil {
 		t.Fatalf("seed CreateSnapshot: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestCollectGarbage_ConcurrentWithSave(t *testing.T) {
 		defer wg.Done()
 		// Write a new file so the concurrent save has something to capture.
 		writeFile(dir, "more.txt", "more content")
-		_, snapErr = CreateSnapshot(context.Background(), store, dir, "concurrent save", "test", nil, nil)
+		_, snapErr = CreateSnapshot(context.Background(), store, dir, "concurrent save", "test", nil)
 	}()
 
 	go func() {

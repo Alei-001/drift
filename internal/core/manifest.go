@@ -1,9 +1,5 @@
 package core
 
-import (
-	"google.golang.org/protobuf/proto"
-)
-
 func SnapshotToManifest(s *Snapshot) *SnapshotManifest {
 	if s == nil {
 		return nil
@@ -49,32 +45,4 @@ func ManifestToSummary(m *SnapshotManifest) *SnapshotSummary {
 	return ss
 }
 
-func ManifestToSnapshot(m *SnapshotManifest) *Snapshot {
-	if m == nil {
-		return nil
-	}
-	var id SnapshotID
-	copy(id.Hash[:], m.Id)
-	s := &Snapshot{
-		ID:        id,
-		Message:   m.Message,
-		Author:    m.Author,
-		Timestamp: m.Timestamp,
-		Tags:      m.Tags,
-		TotalSize: m.TotalSize,
-	}
-	if m.PrevId != nil {
-		prev := &SnapshotID{}
-		copy(prev.Hash[:], m.PrevId)
-		s.PrevID = prev
-	}
-	return s
-}
 
-func MarshalManifest(m *SnapshotManifest) ([]byte, error) {
-	return proto.Marshal(m)
-}
-
-func UnmarshalManifest(data []byte, m *SnapshotManifest) error {
-	return proto.Unmarshal(data, m)
-}

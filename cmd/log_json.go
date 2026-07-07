@@ -30,22 +30,18 @@ type logJSONData struct {
 }
 
 // logJSONMode emits the snapshot history as a JSON envelope. The schema
-// matches docs/cli-design.md: each entry has id, time, message, tags (array),
-// branch (string), and changes formatted as "+A ~M -D". No status line is
-// printed to stdout — only the JSON envelope is emitted.
-func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.SnapshotSummary, branchMap map[string][]string) error {
+// matches docs/cli-design.md: each entry has id, time, message, tags (array
+// merging embedded snapshot tags with tag refs added later via 'tag add'),
+// branch (string of comma-separated branch tips), and changes formatted as
+// "+A ~M -D". No status line is printed to stdout — only the JSON envelope.
+func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.SnapshotSummary, branchMap, tagMap map[string][]string) error {
 	entries := make([]logJSONEntry, 0, len(snapshots))
 	for _, s := range snapshots {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		add, mod, del := porcelain.CountSnapshotChanges(ctx, store, s)
-		tags := make([]string, 0, len(s.Tags))
-		for _, t := range s.Tags {
-			if t != "" {
-				tags = append(tags, t)
-			}
-		}
+		tags := mergeTags(s.Tags, tagMap[s.ID.Hash.String()])
 		entry := logJSONEntry{
 			ID:      s.ShortID(),
 			Time:    time.Unix(s.Timestamp, 0).Format("2006-01-02T15:04:05"),

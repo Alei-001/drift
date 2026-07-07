@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/your-org/drift/internal/core"
 	"github.com/your-org/drift/internal/porcelain"
-	"github.com/your-org/drift/internal/storage"
 )
 
 var saveMessage string
@@ -49,30 +48,20 @@ var saveCmd = &cobra.Command{
 			author = "drift"
 		}
 
-		// Pre-check tag existence so that Snapshot.Tags metadata only
-		// contains tags that will actually get refs. Tags that already
-		// exist are reported as warnings and excluded from the snapshot,
-		// keeping metadata consistent with the created references.
-		var tagsForSnapshot []string
+		// Collect tag names, skipping empties. Existence is re-checked
+		// after the save (within AddTag's own lock), so a pre-check here
+		// would only save an AddTag round-trip; we keep the save path
+		// simple and let AddTag report duplicates as warnings.
+		var tagsToCreate []string
 		var tagWarn strings.Builder
 		for _, t := range saveTags {
 			if t == "" {
 				continue
 			}
-			existing, gErr := store.GetRef(ctx, "tags/"+t)
-			if gErr == nil && existing != nil {
-				tagErr := fmt.Errorf("tag '%s' already exists: %w", t, porcelain.ErrTagAlreadyExists)
-				fmt.Fprintf(&tagWarn, "  warning: tag '%s' failed: %v\n", t, tagErr)
-				continue
-			}
-			if gErr != nil && !errors.Is(gErr, storage.ErrNotFound) {
-				fmt.Fprintf(&tagWarn, "  warning: tag '%s' failed: %v\n", t, gErr)
-				continue
-			}
-			tagsForSnapshot = append(tagsForSnapshot, t)
+			tagsToCreate = append(tagsToCreate, t)
 		}
 
-		snapshot, err := porcelain.CreateSnapshot(ctx, store, cwd, message, author, tagsForSnapshot, &cfg.Core)
+		snapshot, err := porcelain.CreateSnapshot(ctx, store, cwd, message, author, &cfg.Core)
 		if err != nil {
 			if errors.Is(err, porcelain.ErrNothingToSave) {
 				reportFailed("Save", "save", "nothing to save.", "modify some files first to create a meaningful checkpoint.")
@@ -93,12 +82,14 @@ var saveCmd = &cobra.Command{
 			changesOK = false
 		}
 
-		// Create tag refs for each tag that passed the pre-check. A tag
-		// failure does not undo the snapshot; it is reported as a warning
-		// and the command exits 1 so scripts can detect the partial failure.
+		// Create tag refs for each non-empty tag name. AddTag validates
+		// the name, checks snapshot existence, and writes the ref under
+		// the workspace lock. A tag failure does not undo the snapshot;
+		// it is reported as a warning and the command exits 1 so scripts
+		// can detect the partial failure.
 		var successTags []string
-		for _, t := range tagsForSnapshot {
-			if err := porcelain.SaveTag(ctx, store, cwd, t, snapshot.ID.Hash); err != nil {
+		for _, t := range tagsToCreate {
+			if err := porcelain.AddTag(ctx, store, cwd, t, snapshot.ID); err != nil {
 				fmt.Fprintf(&tagWarn, "  warning: tag '%s' failed: %v\n", t, err)
 			} else {
 				successTags = append(successTags, t)

@@ -2,6 +2,7 @@ package porcelain
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -13,8 +14,6 @@ import (
 // names whose tip (Target) points directly at that snapshot. A snapshot that
 // is not the tip of any branch gets no entry.
 //
-// Unlike ResolveSnapshotBranches (which attributes every reachable snapshot to
-// its nearest branch tip), this only marks snapshots that ARE branch tips.
 // This mirrors git's --decorate=short behavior: the branch column in 'log'
 // shows where each branch head sits, leaving the rest of the chain unlabeled
 // so the user can see at a glance where branches diverge.
@@ -100,4 +99,38 @@ func ResolveCurrentBranchName(ctx context.Context, store storage.Storer) string 
 		return ""
 	}
 	return strings.TrimPrefix(headRef.SymRef, "heads/")
+}
+
+// ResolveTagTips returns a map from snapshot hash to the list of tag names
+// whose Target points directly at that snapshot. A snapshot with no tags
+// gets no entry.
+//
+// Tags live exclusively as `tags/<name>` refs: `drift save --tag` creates
+// refs after the snapshot is written, `drift tag add` creates a ref pointing
+// at an existing snapshot, and `tag delete`/`tag rename` mutate refs. New
+// snapshots no longer embed a Tags field, so refs are the authoritative
+// source — this function reads them so the log view reflects the current
+// tag state regardless of when tags were attached. Old snapshots with
+// embedded Tags fields are merged in by the log layer's mergeTags for
+// backward compatibility.
+//
+// The returned tag names are sorted alphabetically for stable display.
+func ResolveTagTips(ctx context.Context, store storage.Storer) (map[string][]string, error) {
+	refs, err := store.ListRefs(ctx, "tags/")
+	if err != nil {
+		return nil, fmt.Errorf("list tag refs: %w", err)
+	}
+	result := make(map[string][]string)
+	for _, r := range refs {
+		if r.Target.IsZero() {
+			continue
+		}
+		name := strings.TrimPrefix(r.Name, "tags/")
+		hashStr := r.Target.String()
+		result[hashStr] = append(result[hashStr], name)
+	}
+	for hashStr := range result {
+		sort.Strings(result[hashStr])
+	}
+	return result, nil
 }

@@ -28,7 +28,7 @@ func TestRestore_FullRestoreDeletesExtraFiles(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 		t.Fatalf("write file3: %v", err)
 	}
 
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestRestore_SingleFilePreservesIndex(t *testing.T) {
 		t.Fatalf("modify file2: %v", err)
 	}
 
-	snap2, err := CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil, nil)
+	snap2, err := CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot failed: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestRestore_RejectsSymlinkTraversal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "evil", "x"), []byte("evil-x-content"), 0644); err != nil {
 		t.Fatalf("write evil/x: %v", err)
 	}
-	snap, err := CreateSnapshot(ctx, store, dir, "with evil/x", "test", nil, nil)
+	snap, err := CreateSnapshot(ctx, store, dir, "with evil/x", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestRestore_PartialFailureSkipsCleanup(t *testing.T) {
 		t.Fatalf("write file2: %v", err)
 	}
 
-	snap, err := CreateSnapshot(ctx, store, dir, "initial", "test", nil, nil)
+	snap, err := CreateSnapshot(ctx, store, dir, "initial", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestRestore_PartialFailureReturnsBackupID(t *testing.T) {
 		t.Fatalf("write file2: %v", err)
 	}
 
-	snap, err := CreateSnapshot(ctx, store, dir, "initial", "test", nil, nil)
+	snap, err := CreateSnapshot(ctx, store, dir, "initial", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestRestore_FullRestoreMovesHEADToTarget(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644); err != nil {
 		t.Fatalf("write file1: %v", err)
 	}
-	snap1, err := CreateSnapshot(ctx, store, dir, "first commit", "test", nil, nil)
+	snap1, err := CreateSnapshot(ctx, store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestRestore_FullRestoreMovesHEADToTarget(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v2 modified"), 0644); err != nil {
 		t.Fatalf("modify file1: %v", err)
 	}
-	snap2, err := CreateSnapshot(ctx, store, dir, "second commit", "test", nil, nil)
+	snap2, err := CreateSnapshot(ctx, store, dir, "second commit", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot failed: %v", err)
 	}

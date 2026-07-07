@@ -322,7 +322,7 @@ drift/
 │   │   ├── tag.go                # SaveTag
 │   │   ├── branch.go             # 分支 CRUD
 │   │   ├── switch.go             # SwitchBranch
-│   │   ├── snapshot_branch.go    # ResolveSnapshotBranches + countSnapshotDiff
+│   │   ├── snapshot_branch.go    # ResolveHeadSnapshot + SnapshotFileDiff + countSnapshotDiff
 │   │   ├── diff.go               # diff 业务逻辑
 │   │   ├── restore.go            # 恢复逻辑
 │   │   ├── workspace.go          # restoreFilesToWorkspace（restore/switch 共用）

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -52,7 +51,7 @@ func TestCreateSnapshot_FirstCommit(t *testing.T) {
 		}
 	}
 
-	snap, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	snap, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -126,7 +125,7 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 
 	// First commit
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v1"), 0644)
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
@@ -135,7 +134,7 @@ func TestCreateSnapshot_SecondCommit(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content v2 - modified"), 0644)
 	os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("new file"), 0644)
 
-	snap2, err := CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil, nil)
+	snap2, err := CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot failed: %v", err)
 	}
@@ -191,12 +190,12 @@ func TestCreateSnapshot_NothingChanged(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
 
-	_, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil, nil)
+	_, err := CreateSnapshot(context.Background(), store, dir, "first commit", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot failed: %v", err)
 	}
 
-	_, err = CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil, nil)
+	_, err = CreateSnapshot(context.Background(), store, dir, "second commit", "test", nil)
 	if err == nil {
 		t.Fatal("expected 'nothing to save' error, got nil")
 	}
@@ -225,7 +224,7 @@ func TestCreateSnapshot_DefaultAuthor(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
 
-	snap, err := CreateSnapshot(context.Background(), store, dir, "test", "", nil, nil)
+	snap, err := CreateSnapshot(context.Background(), store, dir, "test", "", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot failed: %v", err)
 	}
@@ -238,7 +237,7 @@ func TestCreateSnapshot_EmptyMessage(t *testing.T) {
 	store := memory.NewMemoryStorage()
 	dir := t.TempDir()
 
-	_, err := CreateSnapshot(context.Background(), store, dir, "", "test", nil, nil)
+	_, err := CreateSnapshot(context.Background(), store, dir, "", "test", nil)
 	if err == nil {
 		t.Fatal("expected error for empty message, got nil")
 	}
@@ -276,106 +275,6 @@ func TestComputeFileHash_EmptyFile(t *testing.T) {
 
 	if txtHash != binHash {
 		t.Errorf("empty file hash mismatch across engines: txt=%x bin=%x", txtHash, binHash)
-	}
-}
-
-// TestSaveTag_AlreadyExists verifies that creating a tag whose name is
-// already taken returns ErrTagAlreadyExists. The workspace lock held inside
-// SaveTag makes the existence check + write atomic, so a second caller that
-// observes the tag (after the first releases the lock) sees it exists.
-func TestSaveTag_AlreadyExists(t *testing.T) {
-	store := setupTestStore(t)
-	dir := t.TempDir()
-
-	var snap1Hash core.Hash
-	snap1Hash[0] = 0xAA
-
-	if err := SaveTag(context.Background(), store, dir, "v1", snap1Hash); err != nil {
-		t.Fatalf("first SaveTag failed: %v", err)
-	}
-
-	err := SaveTag(context.Background(), store, dir, "v1", snap1Hash)
-	if !errors.Is(err, ErrTagAlreadyExists) {
-		t.Fatalf("expected ErrTagAlreadyExists on second SaveTag, got %v", err)
-	}
-
-	// The original tag must be untouched.
-	ref, err := store.GetRef(context.Background(), "tags/v1")
-	if err != nil {
-		t.Fatalf("GetRef tags/v1: %v", err)
-	}
-	if ref.Target != snap1Hash {
-		t.Errorf("tag target was clobbered: got %x, want %x", ref.Target, snap1Hash)
-	}
-}
-
-// TestSaveTag_ConcurrentSameName is a regression test for the TOCTOU race in
-// SaveTag: two goroutines creating the same tag name simultaneously must not
-// both succeed. Before the workspace lock was added, both could pass the
-// existence check and the second would silently overwrite the first. With the
-// lock, the calls serialize: exactly one succeeds, and the loser returns an
-// error (ErrTagAlreadyExists if it ran after the winner released the lock, or
-// ErrLocked if it contended on the lock while the winner held it). Either way
-// no double-create / overwrite occurs.
-func TestSaveTag_ConcurrentSameName(t *testing.T) {
-	store := setupTestStore(t)
-	dir := t.TempDir()
-
-	var snap1Hash, snap2Hash core.Hash
-	snap1Hash[0] = 0x11
-	snap2Hash[0] = 0x22
-
-	var (
-		wg     sync.WaitGroup
-		start  = make(chan struct{})
-		err1   error
-		err2   error
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		<-start
-		err1 = SaveTag(context.Background(), store, dir, "v1", snap1Hash)
-	}()
-	go func() {
-		defer wg.Done()
-		<-start
-		err2 = SaveTag(context.Background(), store, dir, "v1", snap2Hash)
-	}()
-	close(start)
-	wg.Wait()
-
-	// Exactly one must succeed; both succeeding is the TOCTOU bug.
-	successCount := 0
-	if err1 == nil {
-		successCount++
-	}
-	if err2 == nil {
-		successCount++
-	}
-	if successCount != 1 {
-		t.Fatalf("expected exactly one success, got %d (err1=%v, err2=%v)", successCount, err1, err2)
-	}
-
-	// The loser must return an error that signals the tag is taken or the
-	// workspace is locked — never a silent overwrite.
-	var loserErr error
-	if err1 != nil {
-		loserErr = err1
-	} else {
-		loserErr = err2
-	}
-	if !errors.Is(loserErr, ErrTagAlreadyExists) && !errors.Is(loserErr, ErrLocked) {
-		t.Fatalf("expected loser error to be ErrTagAlreadyExists or ErrLocked, got %v", loserErr)
-	}
-
-	// The stored tag must point at the winner's hash, not be clobbered.
-	ref, err := store.GetRef(context.Background(), "tags/v1")
-	if err != nil {
-		t.Fatalf("GetRef tags/v1: %v", err)
-	}
-	if ref.Target != snap1Hash && ref.Target != snap2Hash {
-		t.Errorf("tag target %x does not match either snapshot hash", ref.Target)
 	}
 }
 

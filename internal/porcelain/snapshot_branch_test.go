@@ -119,13 +119,13 @@ func TestUndoLastSave_Success(t *testing.T) {
 	dir := t.TempDir()
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("v1"), 0644)
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot: %v", err)
 	}
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("v2 modified"), 0644)
-	snap2, err := CreateSnapshot(context.Background(), store, dir, "second", "test", nil, nil)
+	snap2, err := CreateSnapshot(context.Background(), store, dir, "second", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestUndoLastSave_AtInitialSnapshot(t *testing.T) {
 	dir := t.TempDir()
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("v1"), 0644)
-	_, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	_, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil)
 	if err != nil {
 		t.Fatalf("CreateSnapshot: %v", err)
 	}
@@ -193,13 +193,13 @@ func TestUndoLastSave_UncommittedChanges(t *testing.T) {
 	dir := t.TempDir()
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("v1"), 0644)
-	_, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	_, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot: %v", err)
 	}
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("v2 modified"), 0644)
-	_, err = CreateSnapshot(context.Background(), store, dir, "second", "test", nil, nil)
+	_, err = CreateSnapshot(context.Background(), store, dir, "second", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot: %v", err)
 	}
@@ -221,13 +221,13 @@ func TestUndoLastSave_UpdatesIndex(t *testing.T) {
 	dir := t.TempDir()
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("v1"), 0644)
-	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil, nil)
+	snap1, err := CreateSnapshot(context.Background(), store, dir, "first", "test", nil)
 	if err != nil {
 		t.Fatalf("first CreateSnapshot: %v", err)
 	}
 
 	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("v2 modified"), 0644)
-	_, err = CreateSnapshot(context.Background(), store, dir, "second", "test", nil, nil)
+	_, err = CreateSnapshot(context.Background(), store, dir, "second", "test", nil)
 	if err != nil {
 		t.Fatalf("second CreateSnapshot: %v", err)
 	}

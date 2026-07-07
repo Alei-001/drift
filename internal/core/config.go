@@ -59,6 +59,8 @@ func DefaultConfig() *Config {
 //
 // This logic lives in the core package so both filesystem and memory storage
 // backends apply the same normalization, avoiding backend-specific drift.
+// After Normalize, every field is guaranteed to hold a legal value, so
+// callers can read CompressionLevel directly without going through ZstdLevel().
 func (c *CoreConfig) Normalize() {
 	if c.IgnoreFile == "" {
 		c.IgnoreFile = DefaultIgnoreFile
@@ -69,6 +71,11 @@ func (c *CoreConfig) Normalize() {
 	if c.AutoSaveKeep <= 0 {
 		c.AutoSaveKeep = DefaultAutoSaveKeep
 	}
+	// Clamp CompressionLevel into [MinZstdLevel, MaxZstdLevel], defaulting
+	// out-of-range-low to DefaultZstdLevel (so a zero value means "use the
+	// default" rather than "minimum compression"). After this clamp,
+	// ZstdLevel() returns c.CompressionLevel unchanged.
+	c.CompressionLevel = c.ZstdLevel()
 }
 
 func (c *CoreConfig) ZstdLevel() int {
