@@ -129,10 +129,13 @@ drift
 ├── check           校验数据完整性
 ├── gc              回收无引用的快照与块
 ├── config          配置管理（get/set/list）
-├── remote          管理远程存储（后续版本）
-├── sync            同步到远程（后续版本）
+├── remote          管理远程存储后端（add/remove/list/set-url/test）
+├── push            上传本地对象到远程（快照/块/refs）
+├── pull            下载远程对象到本地（快照/块/refs）
 └── help            帮助信息
 ```
+
+> 远程同步原计划为单一 `sync` 命令，实际拆分为 `push` + `pull` 两个方向独立的命令，语义更清晰、错误路径更可控。详见"远程同步"章节。
 
 ---
 
@@ -1361,6 +1364,227 @@ Error: unknown config key 'chunk.min_size'.
 
 ---
 
+## 远程同步
+
+### 设计要点
+
+- **本地优先**：`.drift/` 始终是主存储，所有命令默认走本地、零延迟；远程仅存对象副本。
+- **对象级内容寻址同步**：chunks 和 snapshots 文件名即 hash，同名对象内容必然相同，同步过程无需冲突解决。
+- **refs 策略**：同名 ref 指向相同 hash 时幂等无操作；指向不同 hash 时——push 拒绝覆盖（提示先 pull），pull 保留本地、远程版本另存为 `<name>.remote`。
+- **HEAD 与 config 不同步**：HEAD 是本机工作区状态，config 是本机行为配置，二者均不参与远程同步。
+- **两级配置分离**：`remotes.json`（仓库级，无密码，可分享）+ `credentials.json`（用户级 `~/.config/drift/` 或 `%APPDATA%\drift\`，0600 权限，按 host+user 匹配）。
+- **协议注册**：`ProtocolFactory` 通过 `init()` 注册，`NewRemoteFS` 按 `cfg.Type` 查找。当前支持 `webdav`（主力，覆盖网盘/NAS）和 `smb`（补充，Windows 共享/NAS）。
+
+> 完整设计见 [docs/remote-design.md](remote-design.md)。
+
+### `drift remote`
+
+```
+drift remote add <name> [--type webdav|smb] [--url <u>] [--user <u>] [--password <p>]
+                         [--no-save-password] [--option key=value]...
+drift remote remove <name>
+drift remote list
+drift remote set-url <name> <new-url>
+drift remote test <name>
+```
+
+管理远程存储后端。`add` 在缺少 `--url` 或 `--user` 时进入交互模式（TTY 提示输入，密码隐式输入，SMB 额外询问 domain）。密码默认保存到用户级 `credentials.json`，`--no-save-password` 跳过保存（每次 push/pull 时提示输入）。
+
+选项（仅 `add`）：
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--type` | `webdav` | 协议类型（`webdav` / `smb`） |
+| `--url` | （必填） | 远程 URL |
+| `--user` | （必填） | 用户名 |
+| `--password` | `""` | 密码；为空时交互提示 |
+| `--no-save-password` | `false` | 不保存密码到 credentials.json |
+| `--option` | — | 协议特定字段，`key=value`，可重复（如 SMB 的 `domain=WORKGROUP`） |
+
+示例：
+
+```
+drift remote add origin --type webdav --url https://dav.example.com/dav --user me
+drift remote add nas --type smb --url smb://nas.local/share --user me --option domain=WORKGROUP
+drift remote list
+drift remote set-url origin https://new.dav.example.com/dav
+drift remote test origin
+drift remote remove old-backup
+```
+
+Output — `list`：
+
+```
+origin  webdav  https://dav.example.com/dav
+nas     smb     smb://nas.local/share
+```
+
+Output — `list`（空）：
+
+```
+(no remotes configured)
+```
+
+Output — `add`：
+
+```
+Remote "origin" added (credentials saved to user-level config).
+```
+
+Output — `add`（未保存密码）：
+
+```
+Remote "origin" added (password NOT saved, will prompt on next push/pull).
+```
+
+Output — `remove`：
+
+```
+Remote "old-backup" removed. Credentials preserved in user-level config.
+```
+
+Output — `set-url`（host 变化时额外告警）：
+
+```
+Remote "origin" URL updated to https://new.dav.example.com/dav
+warning: host changed (dav.example.com → new.dav.example.com); password may need reconfiguring.
+```
+
+Output — `test`（成功）：
+
+```
+>>> Remote "origin" reachable [ok]
+```
+
+Error — 远程不存在：
+
+```
+remote "origin" not found
+```
+
+Error — 凭据缺失：
+
+```
+no credential for me@dav.example.com: run 'drift remote add' to configure
+```
+
+Error — 远程已存在：
+
+```
+remote "origin" already exists; use 'drift remote set-url' to update
+```
+
+- `remove` 不删除凭据（凭据可能被其他仓库复用）
+- `set-url` 检测 host 变化并告警，提示用户可能需要重新配置密码
+- `test` 通过 `List(".")` 验证连通性，覆盖 URL/凭据/网络三个失败维度
+
+---
+
+### `drift push`
+
+```
+drift push <remote> [--branch <name>] [--dry-run]
+```
+
+上传本地对象（snapshots / manifests / chunks / refs）到远程。已存在于远程的对象跳过；refs 分叉（同名不同目标）时报错，提示先 pull。HEAD 和 config 不上传。
+
+选项：
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--branch` / `-b` | `""`（全仓库） | 只推送指定分支链上的快照、chunk 及该分支 ref |
+| `--dry-run` | `false` | 预览将推送的内容（**当前未实现，传入会报错**） |
+
+示例：
+
+```
+drift push origin
+drift push origin --branch main
+```
+
+Output — 正常：
+
+```
+>>> Pushing to 'origin' [ok]
+  snapshots:  3 uploaded, 1 already present
+  manifests:  3 uploaded
+  chunks:     27 uploaded, 5 already present
+  refs:       2 updated
+```
+
+Error — 分叉（需先 pull）：
+
+```
+>>> Push [failed]
+Error: ...
+  hint: check remote configuration and network connectivity
+```
+
+Error — `--dry-run` 未实现：
+
+```
+dry-run mode is not yet implemented; omit --dry-run to push for real.
+```
+
+- **refs 快进判定**：`isAncestor()` 沿 PrevID 链判断目标差异是快进（祖先关系）还是真正分叉。快进允许覆盖远程 ref；零 hash 目标（新仓库）始终快进。
+- **幂等计数**：`pushRef` 返回 `(bool, error)`，只有真正写入时才计入 `RefsUpdated`，幂等推送显示 `refs: 0 updated`。
+
+---
+
+### `drift pull`
+
+```
+drift pull <remote> [--branch <name>] [--dry-run]
+```
+
+下载远程对象到本地。已存在本地对象跳过；分叉 refs 保留本地、远程版本另存为 `<name>.remote`；若当前分支 tip 前进，本地索引重建。HEAD 和 config 不下载；pull 不修改工作区文件——如需更新文件，pull 后执行 `drift restore @head`。
+
+选项：
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--branch` / `-b` | `""`（全仓库） | 只拉取指定分支链 |
+| `--dry-run` | `false` | 预览将拉取的内容（**当前未实现，传入会报错**） |
+
+示例：
+
+```
+drift pull origin
+drift pull origin --branch main
+```
+
+Output — 正常（无 tip 前进）：
+
+```
+>>> Pulling from 'origin' [ok]
+  snapshots:  3 downloaded, 1 already present
+  chunks:     27 downloaded, 5 already present
+  refs:       2 updated, 0 diverged (saved as .remote)
+```
+
+Output — 当前分支 tip 前进：
+
+```
+>>> Pulling from 'origin' [ok]
+  snapshots:  2 downloaded, 0 already present
+  chunks:     18 downloaded, 0 already present
+  refs:       1 updated, 0 diverged (saved as .remote)
+  index:      rebuilt (branch 'main' tip advanced)
+  hint: branch 'main' tip advanced. Working directory is out of sync.
+        run 'drift restore @head' to update your files.
+```
+
+Error — `--dry-run` 未实现：
+
+```
+dry-run mode is not yet implemented; omit --dry-run to pull for real.
+```
+
+- 分叉 refs 显示 `N diverged (saved as .remote)`，用户可检查 `.remote` 版本后决定如何处理（如新建分支接住远程历史）
+- `BranchTipChanged` 存储完整 ref 名（含 `heads/` 前缀），输出时剥离前缀以提升可读性
+
+---
+
 ## Git concept mapping
 
 | User sees | Git equivalent | Difference |
@@ -1378,6 +1602,9 @@ Error: unknown config key 'chunk.min_size'.
 | `main` | `main` / `master` | - |
 | `diff` | `diff` | Supports images, visual diff; `--` separator |
 | `config` | `config` | - |
+| `remote` | `remote` | Subcommands: add/remove/list/set-url/test; two-level config (repo + user creds) |
+| `push` | `push` | Object-level content-addressed; no merge; diverged refs error |
+| `pull` | `pull` / `fetch` | Diverged refs saved as `.remote`; does NOT touch working tree |
 | - | `merge`, `rebase`, `stash`, `cherry-pick`, `bisect` | Intentionally omitted |
 
 ---
@@ -1401,8 +1628,10 @@ branch    switch    tag    ignore    watch    gc
 ### 第三阶段：远程
 
 ```
-remote    sync
+remote    push    pull
 ```
+
+已完成：`remote`（add/remove/list/set-url/test）、`push`、`pull` 支持 WebDAV 与 SMB 协议，refs 快进判定与分叉保护，两级凭据分离。后续优化（Stage 6）：并发上传、进度条、credential helper。
 
 ---
 
@@ -1488,6 +1717,18 @@ drift check --verbose                  per-chunk results
 drift gc --dry-run                     preview reclaimable data
 drift gc                               reclaim unreachable data
 drift gc --keep-auto 5                 keep recent 5 auto-saves
+
+# 远程同步
+drift remote add origin --type webdav --url <u> --user <u>   add a remote
+drift remote add nas --type smb --url <u> --user <u> --option domain=WORKGROUP
+drift remote list                      list all remotes
+drift remote set-url origin <new-url>  update a remote's URL
+drift remote test origin               test connectivity
+drift remote remove old-backup         remove a remote (creds preserved)
+drift push origin                      upload all objects to remote
+drift push origin --branch main        push only one branch
+drift pull origin                      download remote objects
+drift pull origin --branch main        pull only one branch
 ```
 
 ---
@@ -1524,3 +1765,10 @@ drift gc --keep-auto 5                 keep recent 5 auto-saves
 | 移除全局 `--no-pager` | 当前未实现分页器，flag 为空操作；移除避免承诺未兑现 |
 | 移除全局 `-v`/`--verbose` | 与 `check --verbose` 命令级 flag 语义冲突且无读取处；移除避免混淆 |
 | `watch` 不支持 `--json` | 守护进程为实时日志流，不适合 JSON 信封；程序化访问可解析 `watch status` 文本输出 |
+| `sync` 拆分为 `push` + `pull` | 方向独立、错误路径更可控；单一 `sync` 难以表达"只上传不下载"等场景 |
+| 新增 `remote`/`push`/`pull` 命令族 | 第三阶段远程同步落地：WebDAV/SMB 协议、两级凭据分离、refs 快进判定与分叉保护 |
+| `push`/`pull` 的 `--dry-run` 声明但未实现 | flag 已注册以便未来兼容，当前传入会明确报错而非静默执行真实操作 |
+| `restore` 备份 ID 显示恢复前 HEAD | 工作区干净时无备份快照产生，fallback 显示恢复前的 HEAD ID（而非恢复目标），确保用户能据此撤销 |
+| `watch on` 预校验项目 | 原实现先 spawn 子进程再在子进程中打开项目，初始化失败时静默退出留下 stale PID 文件；预校验将错误前置到父进程 |
+| 文本检测增加控制字节比例阈值 | 原 NUL-only 启发式会将无 NUL 的二进制数据误判为 text；新增 10% 控制字节阈值作为二次防线 |
+| `remote` 命令族错误统一 `[failed]` 格式 | 原 `remove`/`set-url`/`add` 用裸 `fmt.Errorf`，与 `test`/`push`/`pull` 的格式化错误块不一致 |
