@@ -3,12 +3,14 @@
 # Produces:
 #   - Cross-platform archives (zip/tar.gz) via goreleaser
 #   - Linux packages (.deb/.rpm) via goreleaser nfpm
+#   - macOS packages (.pkg) via pkgbuild
 #   - SHA-256 checksums file
 #   - Windows graphical installer (.exe) via Inno Setup
 #
 # All artifacts are uploaded to the GitHub Release as drafts for review before
-# publishing. The Windows installer is built in a separate job because Inno
-# Setup runs natively on Windows runners.
+# publishing. The Windows installer and macOS .pkg are built in separate jobs
+# because their toolchains (Inno Setup, pkgbuild) run natively on their
+# respective OSes.
 
 name: release
 
@@ -98,5 +100,62 @@ jobs:
         with:
           draft: true
           files: dist/drift_*_windows_amd64_setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 3: macOS .pkg installers. Uses the system-provided pkgbuild tool to
+  # produce standard macOS installer packages for both Intel and Apple Silicon.
+  # No signing/notarization (keeps it simple); users may need to allow the
+  # package in System Settings > Privacy & Security on first launch.
+  macos-installer:
+    runs-on: macos-latest
+    needs: goreleaser
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download goreleaser artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: goreleaser-dist
+          path: dist/
+
+      - name: Determine version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build .pkg installers
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          for arch in amd64 arm64; do
+            tarball=$(ls dist/drift_*_darwin_${arch}.tar.gz | head -1)
+            extract_dir="dist/extract_${arch}"
+            pkg_root="dist/pkg_root_${arch}"
+            mkdir -p "$extract_dir" "$pkg_root"
+            tar xzf "$tarball" -C "$extract_dir"
+            # goreleaser places the binary at the archive root; find it to be safe.
+            bin=$(find "$extract_dir" -name drift -type f | head -1)
+            if [ -z "$bin" ]; then
+              echo "drift binary not found in $tarball"
+              exit 1
+            fi
+            cp "$bin" "$pkg_root/drift"
+            chmod +x "$pkg_root/drift"
+            # pkgbuild creates a standard macOS .pkg installer. The binary is
+            # installed to /usr/local/bin/drift (on PATH by default).
+            pkgbuild \
+              --root "$pkg_root" \
+              --identifier com.github.alei-001.drift \
+              --version "$version" \
+              --install-location /usr/local/bin \
+              "dist/drift_${version}_darwin_${arch}.pkg"
+            rm -rf "$extract_dir" "$pkg_root"
+          done
+
+      - name: Upload .pkg to release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/drift_*_darwin_*.pkg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
