@@ -66,9 +66,9 @@ Filename: "{app}\drift.exe"; Parameters: "version"; Description: "Show installed
 
 [Code]
 // PATH management via environment variable APIs (more reliable than setx).
+// Note: HWND_BROADCAST is a built-in Inno Setup constant — do not redefine it.
 const
   EnvironmentKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
-  HWND_BROADCAST = $FFFF;
   WM_SETTINGCHANGE = $001A;
   SMTO_ABORTIFHUNG = $0002;
 
