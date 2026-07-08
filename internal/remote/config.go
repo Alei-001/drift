@@ -10,7 +10,7 @@ import (
 )
 
 // RemoteConfig describes a single configured remote. Password is NOT stored
-// here — it lives in the user-level credentials.json, matched by host+user.
+// here — it lives in the user-level credentials.json, matched by remote name.
 // Protocol-specific fields (SMB domain, S3 region/bucket, SFTP key path, etc.)
 // go in Options so adding a new protocol never changes this struct.
 type RemoteConfig struct {

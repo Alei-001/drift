@@ -14,8 +14,8 @@ import (
 // remoteCmd is the parent command for remote management.
 var remoteCmd = &cobra.Command{
 	Use:   "remote",
-	Short: "Manage remote storage backends (add, remove, list, set-url, test)",
-	Long:  "Manage remote storage backends for push/pull. Subcommands: add, remove, list, set-url, test.",
+	Short: "Manage remote storage backends (add, list, remove, rename, set-url, show, test)",
+	Long:  "Manage remote storage backends for push/pull. Subcommands: add, list, remove, rename, set-url, show, test.",
 }
 
 // remoteListCmd lists all configured remotes.
@@ -132,12 +132,80 @@ var remoteTestCmd = &cobra.Command{
 			return ErrSilent
 		}
 		defer rfs.Close()
-		// Test by listing the root directory.
 		if _, err := rfs.List("."); err != nil {
 			statusFailed("Remote test", err.Error(), "check URL, credentials, and network connectivity")
 			return ErrSilent
 		}
 		statusOK("Remote %q reachable", name)
+		return nil
+	},
+}
+
+// remoteRenameCmd renames a remote.
+var remoteRenameCmd = &cobra.Command{
+	Use:   "rename <old-name> <new-name>",
+	Short: "Rename a remote",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		oldName, newName := args[0], args[1]
+		cwd, err := getCwd(cmd)
+		if err != nil {
+			return err
+		}
+		rf, err := loadRemotesOrReport(cwd)
+		if err != nil {
+			return err
+		}
+		cfg, err := rf.FindRemote(oldName)
+		if err != nil {
+			reportFailed("Remote rename", "remote rename", fmt.Sprintf("remote %q not found", oldName), "use 'drift remote list' to see configured remotes.")
+			return ErrSilent
+		}
+		if _, err := rf.FindRemote(newName); err == nil {
+			reportFailed("Remote rename", "remote rename", fmt.Sprintf("remote %q already exists", newName), "use a different name or remove the existing remote first.")
+			return ErrSilent
+		}
+		cfg.Name = newName
+		rf.RemoveRemote(oldName)
+		rf.AddOrUpdateRemote(cfg)
+		if err := saveRemotes(cwd, rf); err != nil {
+			return err
+		}
+		fmt.Printf("Remote %q renamed to %q\n", oldName, newName)
+		return nil
+	},
+}
+
+// remoteShowCmd displays the configuration of a single remote.
+var remoteShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Show a remote's configuration",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		cwd, err := getCwd(cmd)
+		if err != nil {
+			return err
+		}
+		rf, err := loadRemotesOrReport(cwd)
+		if err != nil {
+			return err
+		}
+		cfg, err := rf.FindRemote(name)
+		if err != nil {
+			reportFailed("Remote show", "remote show", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.")
+			return ErrSilent
+		}
+		fmt.Printf("  name:     %s\n", cfg.Name)
+		fmt.Printf("  type:     %s\n", cfg.Type)
+		fmt.Printf("  url:      %s\n", cfg.URL)
+		fmt.Printf("  user:     %s\n", cfg.User)
+		for k, v := range cfg.Options {
+			if k == "_password" {
+				continue
+			}
+			fmt.Printf("  option:   %s=%s\n", k, v)
+		}
 		return nil
 	},
 }
@@ -181,18 +249,14 @@ func resolveRemote(cwd, name string) (remote.RemoteConfig, error) {
 		}
 		return remote.RemoteConfig{}, err
 	}
-	// Look up password in user-level credentials.json.
-	host, err := remote.HostFromURL(cfg.URL)
-	if err != nil {
-		return remote.RemoteConfig{}, fmt.Errorf("parse remote URL: %w", err)
-	}
+	// Look up password in user-level credentials.json by remote name.
 	cred, err := remote.LoadCredentials()
 	if err != nil {
 		return remote.RemoteConfig{}, fmt.Errorf("load credentials: %w", err)
 	}
-	password, err := cred.FindCredential(host, cfg.User)
+	password, err := cred.FindCredential(name)
 	if err != nil {
-		return remote.RemoteConfig{}, fmt.Errorf("no credential for %s@%s: run 'drift remote add' to configure", cfg.User, host)
+		return remote.RemoteConfig{}, fmt.Errorf("no credential for remote %q: run 'drift remote add' to configure", name)
 	}
 	// Stash password in Options so the protocol factory can read it. This is
 	// a transient value (never persisted to remotes.json), kept only for the
@@ -210,5 +274,7 @@ func init() {
 	remoteCmd.AddCommand(remoteRemoveCmd)
 	remoteCmd.AddCommand(remoteSetURLCmd)
 	remoteCmd.AddCommand(remoteTestCmd)
+	remoteCmd.AddCommand(remoteRenameCmd)
+	remoteCmd.AddCommand(remoteShowCmd)
 	rootCmd.AddCommand(remoteCmd)
 }

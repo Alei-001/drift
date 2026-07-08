@@ -20,6 +20,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// concurrency is the maximum number of concurrent chunk transfers
+// during push and pull. Higher values improve throughput on high-latency
+// links (WebDAV) but may overwhelm low-bandwidth connections.
+const concurrency = 8
+
 // chunkHeaderSize and chunkFlagCompressed mirror the constants in
 // filesystem/chunk.go. They are duplicated here because sync.go needs to
 // re-encode chunks for upload (push) and decode them on download (pull),
@@ -41,6 +46,11 @@ type SyncStats struct {
 	RefsDiverged        int // pull only: refs saved as <name>.remote
 	IndexRebuilt        bool
 	BranchTipChanged    string // branch name whose tip advanced ("" if none)
+}
+
+// LsRemote lists all refs on a remote without downloading objects.
+func LsRemote(ctx context.Context, rfs RemoteFS) ([]*core.Reference, error) {
+	return listRemoteRefs(ctx, rfs)
 }
 
 // Push uploads local objects (snapshots, manifests, chunks, refs) to the
@@ -84,22 +94,50 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		stats.ManifestsUploaded++
 	}
 
-	// Upload chunks.
-	for _, ch := range chunkHashes {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+	// Upload chunks concurrently with progress reporting.
+	chunkTotal := len(chunkHashes)
+	if chunkTotal > 0 {
+		var chunkMu sync.Mutex
+		var chunkErr error
+		sem := make(chan struct{}, concurrency)
+		var wg sync.WaitGroup
+		for i, ch := range chunkHashes {
+			if err := ctx.Err(); err != nil {
+				chunkErr = err
+				break
+			}
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(idx int, h core.Hash) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				chPath := chunkRemotePath(h)
+				if _, statErr := rfs.Stat(chPath); statErr == nil {
+					chunkMu.Lock()
+					stats.ChunksSkipped++
+					chunkMu.Unlock()
+					reportProgress(idx+1, chunkTotal, "push")
+					return
+				}
+				if err := pushChunk(ctx, store, rfs, h); err != nil {
+					chunkMu.Lock()
+					if chunkErr == nil {
+						chunkErr = fmt.Errorf("push chunk %s: %w", h.String(), err)
+					}
+					chunkMu.Unlock()
+					return
+				}
+				chunkMu.Lock()
+				stats.ChunksUploaded++
+				chunkMu.Unlock()
+				reportProgress(idx+1, chunkTotal, "push")
+			}(i, ch)
 		}
-		chPath := chunkRemotePath(ch)
-		if _, err := rfs.Stat(chPath); err == nil {
-			stats.ChunksSkipped++
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("stat remote chunk %s: %w", ch.String(), err)
+		wg.Wait()
+		if chunkErr != nil {
+			return nil, chunkErr
 		}
-		if err := pushChunk(ctx, store, rfs, ch); err != nil {
-			return nil, fmt.Errorf("push chunk %s: %w", ch.String(), err)
-		}
-		stats.ChunksUploaded++
+		clearProgressLine()
 	}
 
 	// Upload refs (only those whose target snapshot exists on the remote).
@@ -161,23 +199,58 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		stats.SnapshotsUploaded++
 	}
 
-	// Download chunks.
-	for _, ch := range chunkHashes {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+	// Download chunks concurrently with progress reporting.
+	chunkTotal := len(chunkHashes)
+	if chunkTotal > 0 {
+		var chunkMu sync.Mutex
+		var chunkErr error
+		sem := make(chan struct{}, concurrency)
+		var wg sync.WaitGroup
+		for i, ch := range chunkHashes {
+			if err := ctx.Err(); err != nil {
+				chunkErr = err
+				break
+			}
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(idx int, h core.Hash) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				has, hasErr := store.HasChunk(ctx, h)
+				if hasErr != nil {
+					chunkMu.Lock()
+					if chunkErr == nil {
+						chunkErr = fmt.Errorf("check local chunk %s: %w", h.String(), hasErr)
+					}
+					chunkMu.Unlock()
+					return
+				}
+				if has {
+					chunkMu.Lock()
+					stats.ChunksSkipped++
+					chunkMu.Unlock()
+					reportProgress(idx+1, chunkTotal, "pull")
+					return
+				}
+				if err := pullChunk(ctx, store, rfs, h); err != nil {
+					chunkMu.Lock()
+					if chunkErr == nil {
+						chunkErr = fmt.Errorf("pull chunk %s: %w", h.String(), err)
+					}
+					chunkMu.Unlock()
+					return
+				}
+				chunkMu.Lock()
+				stats.ChunksUploaded++
+				chunkMu.Unlock()
+				reportProgress(idx+1, chunkTotal, "pull")
+			}(i, ch)
 		}
-		has, err := store.HasChunk(ctx, ch)
-		if err != nil {
-			return nil, fmt.Errorf("check local chunk %s: %w", ch.String(), err)
+		wg.Wait()
+		if chunkErr != nil {
+			return nil, chunkErr
 		}
-		if has {
-			stats.ChunksSkipped++
-			continue
-		}
-		if err := pullChunk(ctx, store, rfs, ch); err != nil {
-			return nil, fmt.Errorf("pull chunk %s: %w", ch.String(), err)
-		}
-		stats.ChunksUploaded++
+		clearProgressLine()
 	}
 
 	// Merge refs (append-only, never overwrite).
@@ -207,6 +280,102 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		branchName, _ := currentBranchName(ctx, store)
 		stats.BranchTipChanged = branchName
 	}
+
+	return stats, nil
+}
+
+// PushDryRun collects the push scope and returns stats without actually
+// uploading anything. The remote is only read (for existence checks).
+func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string) (*SyncStats, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	stats := &SyncStats{}
+
+	snapHashes, chunkHashes, refs, err := collectPushScope(ctx, store, branch)
+	if err != nil {
+		return nil, fmt.Errorf("collect push scope: %w", err)
+	}
+
+	for _, id := range snapHashes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		snapPath := snapshotRemotePath(id)
+		if _, err := rfs.Stat(snapPath); err == nil {
+			stats.SnapshotsSkipped++
+		} else if errors.Is(err, os.ErrNotExist) {
+			stats.SnapshotsUploaded++
+			stats.ManifestsUploaded++
+		} else {
+			return nil, fmt.Errorf("stat remote snapshot %s: %w", id.Hash.String(), err)
+		}
+	}
+
+	for _, ch := range chunkHashes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		chPath := chunkRemotePath(ch)
+		if _, err := rfs.Stat(chPath); err == nil {
+			stats.ChunksSkipped++
+		} else if errors.Is(err, os.ErrNotExist) {
+			stats.ChunksUploaded++
+		} else {
+			return nil, fmt.Errorf("stat remote chunk %s: %w", ch.String(), err)
+		}
+	}
+
+	for _, ref := range refs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		snapPath := snapshotRemotePath(core.SnapshotID{Hash: ref.Target})
+		if _, err := rfs.Stat(snapPath); err == nil {
+			stats.RefsUpdated++
+		}
+	}
+
+	return stats, nil
+}
+
+// PullDryRun collects the pull scope and returns stats without actually
+// downloading anything. The remote is only read (for listing).
+func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string) (*SyncStats, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	stats := &SyncStats{}
+
+	snapHashes, chunkHashes, refs, err := collectPullScope(ctx, rfs, branch)
+	if err != nil {
+		return nil, fmt.Errorf("collect pull scope: %w", err)
+	}
+
+	for _, id := range snapHashes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if _, err := store.GetSnapshot(ctx, id); err == nil {
+			stats.SnapshotsSkipped++
+		} else if errors.Is(err, storage.ErrNotFound) {
+			stats.SnapshotsUploaded++
+		}
+	}
+
+	for _, ch := range chunkHashes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		has, _ := store.HasChunk(ctx, ch)
+		if has {
+			stats.ChunksSkipped++
+		} else {
+			stats.ChunksUploaded++
+		}
+	}
+
+	stats.RefsUpdated = len(refs)
 
 	return stats, nil
 }
@@ -776,6 +945,18 @@ func parseHashHex(s string) (core.Hash, error) {
 }
 
 // --- zstd codec (shared, lazily initialized) ---
+
+// --- progress reporting ---
+
+// reportProgress prints a single-line progress indicator to stderr.
+// The \r character rewrites the same line without scrolling.
+func reportProgress(done, total int, op string) {
+	fmt.Fprintf(os.Stderr, "\r  chunks %s: %d/%d", op, done, total)
+}
+
+func clearProgressLine() {
+	fmt.Fprint(os.Stderr, "\r                    \r")
+}
 
 var (
 	zstdEncOnce sync.Once

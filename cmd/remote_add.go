@@ -129,6 +129,7 @@ var remoteAddCmd = &cobra.Command{
 				return fmt.Errorf("load credentials: %w", err)
 			}
 			cred.AddOrUpdateCredential(remote.Credential{
+				Remote:   name,
 				Host:     host,
 				User:     user,
 				Password: password,

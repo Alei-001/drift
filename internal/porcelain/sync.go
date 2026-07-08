@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/remote"
 	"github.com/Alei-001/drift/internal/storage"
 )
@@ -21,11 +23,35 @@ type PullResult struct {
 	Stats *remote.SyncStats
 }
 
-// PushToRemote uploads local objects to the named remote. The remote must be
-// configured in .drift/remotes.json with credentials in user-level
-// credentials.json. If branch is non-empty, only that branch's snapshot chain
-// and its chunks are pushed.
-func PushToRemote(ctx context.Context, store storage.Storer, workDir, remoteName, branch string) (*PushResult, error) {
+// resolveBranchOrDefault returns branch name from a flag value. When branch
+// is empty and all is false, resolves the current branch name. When all is
+// true, returns "" (push/pull all).
+func resolveBranchOrDefault(ctx context.Context, store storage.Storer, branch string, all bool) string {
+	if all || branch != "" {
+		return branch
+	}
+	if name, err := currentBranchName(ctx, store); err == nil {
+		return strings.TrimPrefix(name, "heads/")
+	}
+	return ""
+}
+
+// currentBranchName returns the full ref name (e.g. "heads/main") of the
+// current branch from a HEAD symref.
+func currentBranchName(ctx context.Context, store storage.Storer) (string, error) {
+	head, err := store.GetRef(ctx, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if head.SymRef == "" {
+		return "", fmt.Errorf("HEAD is not a symbolic ref")
+	}
+	return head.SymRef, nil
+}
+
+// PushToRemote uploads local objects to the named remote.
+func PushToRemote(ctx context.Context, store storage.Storer, workDir, remoteName, branch string, all bool) (*PushResult, error) {
+	branch = resolveBranchOrDefault(ctx, store, branch, all)
 	cfg, err := resolveRemoteConfig(workDir, remoteName)
 	if err != nil {
 		return nil, err
@@ -43,13 +69,25 @@ func PushToRemote(ctx context.Context, store storage.Storer, workDir, remoteName
 	return &PushResult{Stats: stats}, nil
 }
 
-// PullFromRemote downloads remote objects to local. The remote must be
-// configured in .drift/remotes.json with credentials in user-level
-// credentials.json. If branch is non-empty, only that branch's snapshot chain
-// and its chunks are pulled. After pulling, if the current branch tip changed,
-// the local index is rebuilt and the working directory is left out of sync
-// (the caller should advise the user to run 'drift restore').
-func PullFromRemote(ctx context.Context, store storage.Storer, workDir, remoteName, branch string) (*PullResult, error) {
+// PushDryRun returns what would be pushed without uploading.
+func PushDryRun(ctx context.Context, store storage.Storer, workDir, remoteName, branch string, all bool) (*remote.SyncStats, error) {
+	branch = resolveBranchOrDefault(ctx, store, branch, all)
+	cfg, err := resolveRemoteConfig(workDir, remoteName)
+	if err != nil {
+		return nil, err
+	}
+	rfs, err := remote.NewRemoteFS(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create remote client: %w", err)
+	}
+	defer rfs.Close()
+
+	return remote.PushDryRun(ctx, store, rfs, branch)
+}
+
+// PullFromRemote downloads remote objects to local.
+func PullFromRemote(ctx context.Context, store storage.Storer, workDir, remoteName, branch string, all bool) (*PullResult, error) {
+	branch = resolveBranchOrDefault(ctx, store, branch, all)
 	cfg, err := resolveRemoteConfig(workDir, remoteName)
 	if err != nil {
 		return nil, err
@@ -65,6 +103,37 @@ func PullFromRemote(ctx context.Context, store storage.Storer, workDir, remoteNa
 		return nil, err
 	}
 	return &PullResult{Stats: stats}, nil
+}
+
+// PullDryRun returns what would be pulled without downloading.
+func PullDryRun(ctx context.Context, store storage.Storer, workDir, remoteName, branch string, all bool) (*remote.SyncStats, error) {
+	branch = resolveBranchOrDefault(ctx, store, branch, all)
+	cfg, err := resolveRemoteConfig(workDir, remoteName)
+	if err != nil {
+		return nil, err
+	}
+	rfs, err := remote.NewRemoteFS(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create remote client: %w", err)
+	}
+	defer rfs.Close()
+
+	return remote.PullDryRun(ctx, store, rfs, branch)
+}
+
+// LsRemote lists all refs from a remote without downloading any objects.
+func LsRemote(ctx context.Context, workDir, remoteName string) ([]*core.Reference, error) {
+	cfg, err := resolveRemoteConfig(workDir, remoteName)
+	if err != nil {
+		return nil, err
+	}
+	rfs, err := remote.NewRemoteFS(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create remote client: %w", err)
+	}
+	defer rfs.Close()
+
+	return remote.LsRemote(ctx, rfs)
 }
 
 // resolveRemoteConfig loads the remote definition from .drift/remotes.json and
@@ -86,17 +155,13 @@ func resolveRemoteConfig(workDir, remoteName string) (remote.RemoteConfig, error
 		}
 		return remote.RemoteConfig{}, fmt.Errorf("find remote %q: %w", remoteName, err)
 	}
-	host, err := remote.HostFromURL(cfg.URL)
-	if err != nil {
-		return remote.RemoteConfig{}, fmt.Errorf("parse remote URL: %w", err)
-	}
 	cred, err := remote.LoadCredentials()
 	if err != nil {
 		return remote.RemoteConfig{}, fmt.Errorf("load credentials: %w", err)
 	}
-	password, err := cred.FindCredential(host, cfg.User)
+	password, err := cred.FindCredential(remoteName)
 	if err != nil {
-		return remote.RemoteConfig{}, fmt.Errorf("no credential for %s@%s: run 'drift remote add' to configure: %w", cfg.User, host, err)
+		return remote.RemoteConfig{}, fmt.Errorf("no credential for remote %q: run 'drift remote add' to configure: %w", remoteName, err)
 	}
 	if cfg.Options == nil {
 		cfg.Options = make(map[string]string)

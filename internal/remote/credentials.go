@@ -15,11 +15,12 @@ import (
 // plaintext passwords (v1; a credential-helper backend may follow in v2).
 const credentialFilePerm = 0o600
 
-// Credential is a single (host, user) → password entry. The match key is
-// host+user so the same NAS can have multiple accounts. Password is the only
-// secret; for passwordless protocols (future SSH key, AWS keys) this struct
-// will need extending, but v1 supports only password-based auth.
+// Credential is a remote-name → password entry. Using the remote name as
+// the key (rather than host+user) avoids collisions when the same host+user
+// is used with different passwords for different remotes (e.g. work vs
+// personal projects on the same NAS).
 type Credential struct {
+	Remote   string `json:"remote"`
 	Host     string `json:"host"`
 	User     string `json:"user"`
 	Password string `json:"password"`
@@ -83,23 +84,23 @@ func SaveCredentials(cf *CredentialsFile) error {
 	return fsutil.WriteFileAtomic(path, data, credentialFilePerm)
 }
 
-// FindCredential returns the password for the given host+user, or an error
+// FindCredential returns the password for the given remote name, or an error
 // wrapping os.ErrNotExist when no matching credential is configured.
-func (cf *CredentialsFile) FindCredential(host, user string) (string, error) {
+func (cf *CredentialsFile) FindCredential(remoteName string) (string, error) {
 	for _, c := range cf.Credentials {
-		if c.Host == host && c.User == user {
+		if c.Remote == remoteName {
 			return c.Password, nil
 		}
 	}
-	return "", fmt.Errorf("credential for %s@%s: %w", user, host, os.ErrNotExist)
+	return "", fmt.Errorf("credential for remote %q: %w", remoteName, os.ErrNotExist)
 }
 
 // AddOrUpdateCredential adds c to the file, or replaces the existing entry
-// with the same host+user. The returned bool is true when an existing entry
+// with the same remote name. The returned bool is true when an existing entry
 // was replaced.
 func (cf *CredentialsFile) AddOrUpdateCredential(c Credential) bool {
 	for i, existing := range cf.Credentials {
-		if existing.Host == c.Host && existing.User == c.User {
+		if existing.Remote == c.Remote {
 			cf.Credentials[i] = c
 			return true
 		}
