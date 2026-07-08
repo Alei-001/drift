@@ -29,18 +29,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: latest
@@ -49,7 +49,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: goreleaser-dist
           path: dist/
@@ -62,10 +62,10 @@ jobs:
     needs: goreleaser
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download goreleaser artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: goreleaser-dist
           path: dist/
@@ -77,7 +77,6 @@ jobs:
           $extractDir = "dist/drift_windows_amd64"
           New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
           Expand-Archive -Path $zip.FullName -DestinationPath $extractDir -Force
-          # Verify the binary exists.
           if (-not (Test-Path "$extractDir/drift.exe")) {
             throw "drift.exe not found in $extractDir"
           }
@@ -90,13 +89,13 @@ jobs:
           echo "version=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Compile Inno Setup installer
-        uses: Minionguyjpro/[email protected]
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
         with:
           path: installer/drift.iss
           options: /DMyAppVersion=${{ steps.version.outputs.version }} /DSourceDir=..\dist\drift_windows_amd64 /Q
 
       - name: Upload installer to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           files: dist/drift_*_windows_amd64_setup.exe
@@ -112,10 +111,10 @@ jobs:
     needs: goreleaser
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download goreleaser artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: goreleaser-dist
           path: dist/
@@ -133,7 +132,6 @@ jobs:
             pkg_root="dist/pkg_root_${arch}"
             mkdir -p "$extract_dir" "$pkg_root"
             tar xzf "$tarball" -C "$extract_dir"
-            # goreleaser places the binary at the archive root; find it to be safe.
             bin=$(find "$extract_dir" -name drift -type f | head -1)
             if [ -z "$bin" ]; then
               echo "drift binary not found in $tarball"
@@ -141,8 +139,6 @@ jobs:
             fi
             cp "$bin" "$pkg_root/drift"
             chmod +x "$pkg_root/drift"
-            # pkgbuild creates a standard macOS .pkg installer. The binary is
-            # installed to /usr/local/bin/drift (on PATH by default).
             pkgbuild \
               --root "$pkg_root" \
               --identifier com.github.alei-001.drift \
@@ -153,7 +149,7 @@ jobs:
           done
 
       - name: Upload .pkg to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           files: dist/drift_*_darwin_*.pkg

@@ -22,7 +22,13 @@ func Rel(basepath, targpath string) (string, error) {
 // Normalize ensures a path uses forward slashes and is cleaned of . and ..
 // components, matching the internal storage format.
 // Use this for user-provided paths before comparing with stored paths.
+//
+// On Unix, filepath.ToSlash only converts the OS separator (/) and leaves
+// backslashes intact. Since drift stores paths with forward slashes on all
+// platforms, we explicitly replace backslashes first so Windows-style paths
+// are normalized correctly on every OS.
 func Normalize(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
 	return filepath.ToSlash(filepath.Clean(p))
 }
 

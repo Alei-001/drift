@@ -67,12 +67,9 @@ nfpms:
     formats:
       - deb
       - rpm
-    # Install the binary to /usr/bin so `drift` is on PATH after apt/yum install.
-    contents:
-      - src: drift
-        dst: /usr/bin/drift
-    # Treat auto-save snapshots as documentation metadata, not config — no
-    # special systemd service or config file is needed.
+    # GoReleaser automatically adds the built binaries to the package. bindir
+    # controls where they are installed; /usr/bin is on PATH by default.
+    bindir: /usr/bin
 
 checksum:
   # Suffix `_checksums.txt` is matched by internal/version/findChecksumAsset.

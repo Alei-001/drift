@@ -50,7 +50,9 @@ func TestCheckWithin_BaseItself(t *testing.T) {
 
 // TestResolveSecurePath_InsideWorkspace verifies that a regular relative path
 // inside an existing workspace is accepted and returns the joined absolute
-// path.
+// path. The expected path must be symlink-resolved too because resolveSecurePath
+// calls filepath.EvalSymlinks on the workDir (e.g. /var -> /private/var on
+// macOS, 8.3 short names on Windows).
 func TestResolveSecurePath_InsideWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	rel := "sub/file.txt"
@@ -58,7 +60,11 @@ func TestResolveSecurePath_InsideWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurePath failed: %v", err)
 	}
-	want := filepath.Join(dir, rel)
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(dir): %v", err)
+	}
+	want := filepath.Join(resolvedDir, rel)
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
 	}
