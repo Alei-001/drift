@@ -302,34 +302,86 @@ drift/
 │   ├── root.go                   # drift 主命令
 │   ├── init.go                   # drift init
 │   ├── save.go                   # drift save
-│   ├── log.go                    # drift log
-│   ├── show.go                   # drift show
 │   ├── status.go                 # drift status
+│   ├── log.go                    # drift log
+│   ├── log_format.go             # log 格式化输出
+│   ├── log_json.go               # log JSON 输出
+│   ├── show.go                   # drift show
+│   ├── show_json.go              # show JSON 输出
+│   ├── show_open.go              # show --open
 │   ├── diff.go                   # drift diff
+│   ├── diff_json.go              # diff JSON 输出
+│   ├── diff_file_json.go         # diff --file JSON 输出
+│   ├── diff_stat.go              # diff --stat 统计
 │   ├── restore.go                # drift restore
 │   ├── branch.go                 # drift branch
 │   ├── switch.go                 # drift switch
+│   ├── tag.go                    # drift tag
+│   ├── undo.go                   # drift undo
+│   ├── resolve.go                # drift resolve（冲突解决）
 │   ├── ignore.go                 # drift ignore
 │   ├── watch.go                  # drift watch
 │   ├── check.go                  # drift check
-│   └── gc.go                     # drift gc
+│   ├── gc.go                     # drift gc
+│   ├── config.go                 # drift config
+│   ├── remote.go                 # drift remote
+│   ├── remote_add.go             # drift remote add
+│   ├── push.go                   # drift push
+│   ├── pull.go                   # drift pull
+│   ├── version.go                # drift version
+│   ├── upgrade.go                # drift upgrade
+│   ├── output.go                 # 输出格式化工具
+│   ├── json_output.go            # JSON 输出工具
+│   ├── console_windows.go        # Windows 控制台处理
+│   └── console_unix.go           # Unix 控制台处理
 │
 ├── internal/                     # 业务实现（外部不可导入）
 │   ├── porcelain/                # 业务逻辑层（"瓷器"）
 │   │   ├── project.go            # 项目初始化/打开/配置
 │   │   ├── snapshot.go           # 快照创建/读取/列表
+│   │   ├── snapshot_branch.go    # ResolveHeadSnapshot + SnapshotFileDiff + countSnapshotDiff
 │   │   ├── chunk.go              # chunkFile + computeFileHashFromChunks
 │   │   ├── tag.go                # SaveTag
 │   │   ├── branch.go             # 分支 CRUD
+│   │   ├── branch_history.go     # 分支历史查询
 │   │   ├── switch.go             # SwitchBranch
-│   │   ├── snapshot_branch.go    # ResolveHeadSnapshot + SnapshotFileDiff + countSnapshotDiff
-│   │   ├── diff.go               # diff 业务逻辑
 │   │   ├── restore.go            # 恢复逻辑
 │   │   ├── workspace.go          # restoreFilesToWorkspace（restore/switch 共用）
+│   │   ├── status.go             # 工作区状态计算
+│   │   ├── diff_snapshots.go     # 快照间 diff
+│   │   ├── diff_workspace.go     # 工作区 diff
+│   │   ├── diff_stat.go          # diff 统计
+│   │   ├── diff_types.go         # diff 类型定义
+│   │   ├── file_type.go          # 文件类型处理
+│   │   ├── file_view.go          # 文件视图
+│   │   ├── log.go                # log 业务逻辑
+│   │   ├── integrity.go          # 完整性校验
 │   │   ├── lock.go               # 工作区锁
-│   │   ├── watch.go              # watch 守护进程
+│   │   ├── resolve.go            # 冲突解决
+│   │   ├── sync.go               # 远程同步编排（push/pull）
+│   │   ├── watch_daemon.go       # watch 守护进程
+│   │   ├── watch_loop.go         # watch 轮询循环
+│   │   ├── watch_proc_unix.go    # watch 进程管理（Unix）
+│   │   ├── watch_proc_windows.go # watch 进程管理（Windows）
 │   │   ├── gc.go                 # 垃圾回收
 │   │   └── errors.go             # 业务层 sentinel errors
+│   │
+│   ├── remote/                   # 远程同步层
+│   │   ├── remote.go             # RemoteFS 接口 + 协议注册
+│   │   ├── config.go             # RemoteConfig 配置
+│   │   ├── credentials.go        # 凭据管理
+│   │   ├── sync.go               # 对象级内容寻址同步 + refs 快进判定
+│   │   ├── webdav.go             # WebDAV 协议实现
+│   │   ├── smb.go                # SMB 协议实现
+│   │   └── mock_remote.go        # 测试用 mock 实现
+│   │
+│   ├── version/                  # 版本元数据 + 自升级
+│   │   ├── version.go            # 构建时版本元数据
+│   │   ├── semver.go             # 语义化版本解析
+│   │   ├── release.go            # GitHub Releases 查询
+│   │   ├── archive.go            # 发布包解包
+│   │   ├── upgrade.go            # 自升级流程
+│   │   └── replace.go            # 二进制替换
 │   │
 │   ├── filetype/                     # 文件类型适配层（核心差异）
 │   │   ├── registry.go               # 引擎注册表 + 三轮分层检测（magic/extension/heuristic）
@@ -386,6 +438,7 @@ drift/
 │   │       │   ├── chunk.go
 │   │       │   ├── ref.go
 │   │       │   ├── snapshot.go
+│   │       │   ├── snapshot_codec.go # 快照 protobuf 编解码
 │   │       │   ├── index.go
 │   │       │   ├── preview.go
 │   │       │   ├── config.go
@@ -427,12 +480,13 @@ drift/
 │   ├── architecture.md           # 本文档
 │   ├── roadmap.md                # 路线图
 │   ├── CODE_STANDARDS.md         # 代码规范
-│   └── engine-plugin.md          # 引擎插件开发指南
+│   ├── CODE_REVIEW.md            # 代码评审标准
+│   ├── engine-plugin.md          # 引擎插件开发指南
+│   └── remote-design.md          # 远程同步设计
 │
 ├── go.mod
 ├── go.sum
 ├── AGENTS.md
-├── .goreleaser.yml               # 发布配置
 └── README.md
 ```
 
@@ -442,13 +496,15 @@ drift/
 |------|------|------|---------|
 | `cmd/drift/` | 程序入口（main） | cmd | 无（顶层） |
 | `cmd/` | CLI 参数解析、输出格式化、命令路由 | internal/porcelain | 无（顶层） |
-| `internal/porcelain/` | 业务逻辑编排、调用下层完成操作 | internal/filetype, chunker, storage, core | cmd |
+| `internal/porcelain/` | 业务逻辑编排、调用下层完成操作、远程同步编排（push/pull） | internal/filetype, chunker, storage, core, remote | cmd |
+| `internal/remote/` | 远程同步：RemoteFS 接口、WebDAV/SMB 实现、对象级内容寻址同步、refs 快进判定 | internal/storage, core | porcelain |
 | `internal/filetype/` | 文件类型检测、注册 ChunkerSelector/Differ/Previewer | internal/chunker, core | porcelain |
 | `internal/chunker/` | CDC 分块算法实现 | internal/core | filetype, porcelain |
 | `internal/storage/` | 数据持久化接口与实现 | internal/core, util | porcelain |
 | `internal/storage/backends/` | 存储后端实现（filesystem/memory） | internal/storage, core | porcelain |
 | `internal/core/` | 核心数据类型定义 | 无 | 所有模块 |
 | `internal/util/` | 通用工具 | 无 | 所有模块 |
+| `internal/version/` | 二进制版本元数据 + 自升级（GitHub Releases 查询/下载/校验/替换） | stdlib (net/http, archive) | cmd |
 
 > **watch 守护进程**：`drift watch on` 通过 `porcelain.StartDaemon` 启动轮询模式后台子进程，使用 `.drift/watch.pid` 文件管理生命周期（启动/停止/状态查询）。进程管理跨平台实现：Windows 通过 `taskkill /PID` 终止，Unix 通过 `SIGTERM` 终止（见 `watch_proc_windows.go` / `watch_proc_unix.go`）。
 
@@ -598,6 +654,45 @@ type ConfigStorer interface {
     GetConfig(ctx context.Context) (*core.Config, error)
     SetConfig(ctx context.Context, cfg *core.Config) error
 }
+
+
+// =================== internal/remote/remote.go ===================
+
+// RemoteFS 远程文件系统抽象接口 —— 所有远程协议（WebDAV/SMB/…）实现此接口
+// push/pull 逻辑仅针对此接口编程，新增协议只需实现它并在 init() 中注册
+type RemoteFS interface {
+    // Stat 返回远程路径的元数据，路径不存在时返回包装 os.ErrNotExist 的错误
+    Stat(path string) (*RemoteInfo, error)
+    // Read 打开远程文件用于读取，调用方负责关闭返回的 reader
+    Read(path string) (io.ReadCloser, error)
+    // Write 上传文件，自动创建父目录，已存在则覆盖
+    Write(path string, r io.Reader) error
+    // Remove 删除远程文件，文件不存在不视为错误
+    Remove(path string) error
+    // List 枚举目录下的条目，目录为空或不存在时返回空 slice（非 nil）
+    List(path string) ([]RemoteInfo, error)
+    // MkdirAll 创建目录树，类似 os.MkdirAll
+    MkdirAll(path string) error
+    // Close 释放协议级资源（连接/会话），不再使用时必须调用一次
+    Close() error
+}
+
+// RemoteInfo Stat/List 返回的元数据
+type RemoteInfo struct {
+    Path    string
+    Size    int64
+    IsDir   bool
+    ModTime time.Time
+}
+
+// ProtocolFactory 从 RemoteConfig 构造 RemoteFS，每个协议实现在 init() 中通过 Register 注册
+type ProtocolFactory func(cfg RemoteConfig) (RemoteFS, error)
+
+// Register 在给定名称下注册协议工厂，由各协议实现的 init() 调用；重复注册会 panic
+func Register(name string, f ProtocolFactory)
+
+// NewRemoteFS 查找 cfg.Type 对应的已注册工厂并构造 RemoteFS，未知协议返回 ErrUnsupported
+func NewRemoteFS(cfg RemoteConfig) (RemoteFS, error)
 ```
 
 ---
@@ -947,7 +1042,7 @@ sequenceDiagram
 | 1 | 一般错误 |
 | 2 | 参数错误 |
 | 3 | 存储错误（磁盘满/权限等） |
-| 4 | 网络错误（后续 remote 阶段） |
+| 4 | 网络错误（远程同步） |
 | 5 | 冲突错误（锁冲突等） |
 
 ### 6.2 CLI 输出格式
@@ -1112,7 +1207,7 @@ var defaultIgnorePatterns = []string{
 - **纯本地优先**：默认无网络请求，所有数据仅存 `.drift/`
 - **远程存储可选**：用户需显式执行 `drift remote add` 才会配置远程
 - **无遥测**：不收集任何使用数据
-- **数据加密**：`drift remote add --encrypt <key>` 对远程同步数据端到端加密
+- **数据加密**：（规划中，未实现）远程同步数据端到端加密
 
 ---
 
@@ -1125,7 +1220,7 @@ var defaultIgnorePatterns = []string{
 │                    分发渠道                            │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐            │
 │  │ Homebrew │  │ Scoop    │  │ 直接下载   │            │
-│  │ (macOS)  │  │ (Win)    │  │ (Linux)   │            │
+│  │ (规划中) │  │ (规划中) │  │ (Linux)   │            │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘            │
 │       │              │              │                   │
 │       └──────────────┼──────────────┘                   │

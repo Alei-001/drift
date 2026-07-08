@@ -216,3 +216,7 @@ Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ───
 - [x] 阶段一开发
 - [x] 阶段二开发（分支系统 + 自动化 + GC）
 - [x] 阶段三开发（富文件类型引擎：Image/Video + 分层检测 + 5 档分块）
+- [x] 阶段 3.5：远程同步（remote/push/pull，WebDAV + SMB 协议）
+- [x] version/upgrade 命令（版本查看 + GitHub Releases 自升级）
+- [ ] 发布流水线（goreleaser / GitHub Actions CI）—— `drift upgrade` 的端到端依赖此项
+- [ ] 阶段四开发（GUI 桌面应用）
