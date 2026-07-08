@@ -20,6 +20,10 @@
   #define SourceDir "..\dist\drift_windows_amd64"
 #endif
 
+; OutputBaseFilename must not contain dots (Inno Setup restriction).
+; MyAppVersion "0.1.0" becomes "0-1-0" in the filename.
+#define MyAppVersionSafe StringChange(MyAppVersion, ".", "-")
+
 [Setup]
 AppName=drift
 AppVersion={#MyAppVersion}
@@ -32,7 +36,7 @@ DefaultDirName={autopf}\drift
 DefaultGroupName=drift
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=drift_{#MyAppVersion}_windows_amd64_setup
+OutputBaseFilename=drift_{#MyAppVersionSafe}_windows_amd64_setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
