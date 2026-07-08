@@ -87,13 +87,20 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF -replace '^refs/tags/v',''
           echo "version=$tag" >> $env:GITHUB_OUTPUT
-          echo "version_safe=$($tag -replace '\.','-')" >> $env:GITHUB_OUTPUT
 
       - name: Compile Inno Setup installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
         with:
           path: installer/drift.iss
-          options: /DMyAppVersion=${{ steps.version.outputs.version }} /DMyAppVersionSafe=${{ steps.version.outputs.version_safe }} /DSourceDir=..\dist\drift_windows_amd64 /Q
+          options: /DMyAppVersion=${{ steps.version.outputs.version }} /DSourceDir=..\dist\drift_windows_amd64 /Q
+
+      - name: Rename installer to include version
+        shell: pwsh
+        run: |
+          $src = "dist/drift_windows_setup.exe"
+          $dst = "dist/drift_${{ steps.version.outputs.version }}_windows_amd64_setup.exe"
+          Move-Item $src $dst -Force
+          Write-Host "Renamed: $src -> $dst"
 
       - name: Upload installer to release
         uses: softprops/action-gh-release@v3

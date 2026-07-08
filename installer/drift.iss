@@ -20,14 +20,9 @@
   #define SourceDir "..\dist\drift_windows_amd64"
 #endif
 
-; OutputBaseFilename must not contain dots (Inno Setup restriction).
-; MyAppVersionSafe is "0.1.0" with dots replaced by dashes ("0-1-0").
-; It is passed via /D from the CI workflow because the Inno Setup
-; preprocessor's StringChange has a var parameter and cannot be used
-; in a #define expression.
-#ifndef MyAppVersionSafe
-  #define MyAppVersionSafe StringChange(MyAppVersion, ".", "-")
-#endif
+; OutputBaseFilename uses a fixed name to avoid Inno Setup preprocessor
+; issues with version strings (dots are rejected; dashes are parsed as
+; arithmetic). The CI workflow renames the output to include the version.
 
 [Setup]
 AppName=drift
@@ -41,7 +36,7 @@ DefaultDirName={autopf}\drift
 DefaultGroupName=drift
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename=drift_{#MyAppVersionSafe}_windows_amd64_setup
+OutputBaseFilename=drift_windows_setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
