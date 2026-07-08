@@ -277,7 +277,7 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 			return nil, fmt.Errorf("rebuild index: %w", err)
 		}
 		stats.IndexRebuilt = true
-		branchName, _ := currentBranchName(ctx, store)
+		branchName, _ := CurrentBranchName(ctx, store)
 		stats.BranchTipChanged = branchName
 	}
 
@@ -1012,7 +1012,7 @@ func rebuildIndex(ctx context.Context, store storage.Storer, tip core.SnapshotID
 	return store.SetIndex(ctx, newIndex)
 }
 
-func currentBranchName(ctx context.Context, store storage.Storer) (string, error) {
+func CurrentBranchName(ctx context.Context, store storage.Storer) (string, error) {
 	head, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return "", err
@@ -1024,7 +1024,7 @@ func currentBranchName(ctx context.Context, store storage.Storer) (string, error
 }
 
 func currentBranchTip(ctx context.Context, store storage.Storer) (core.SnapshotID, error) {
-	name, err := currentBranchName(ctx, store)
+	name, err := CurrentBranchName(ctx, store)
 	if err != nil {
 		return core.SnapshotID{}, err
 	}

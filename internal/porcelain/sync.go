@@ -30,23 +30,10 @@ func resolveBranchOrDefault(ctx context.Context, store storage.Storer, branch st
 	if all || branch != "" {
 		return branch
 	}
-	if name, err := currentBranchName(ctx, store); err == nil {
+	if name, err := remote.CurrentBranchName(ctx, store); err == nil {
 		return strings.TrimPrefix(name, "heads/")
 	}
 	return ""
-}
-
-// currentBranchName returns the full ref name (e.g. "heads/main") of the
-// current branch from a HEAD symref.
-func currentBranchName(ctx context.Context, store storage.Storer) (string, error) {
-	head, err := store.GetRef(ctx, "HEAD")
-	if err != nil {
-		return "", err
-	}
-	if head.SymRef == "" {
-		return "", fmt.Errorf("HEAD is not a symbolic ref")
-	}
-	return head.SymRef, nil
 }
 
 // PushToRemote uploads local objects to the named remote.

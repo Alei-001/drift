@@ -109,7 +109,7 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 	}
 
 	branchName := "main"
-	if name, err := currentBranchName(ctx, store); err == nil {
+	if name, err := remote.CurrentBranchName(ctx, store); err == nil {
 		branchName = strings.TrimPrefix(name, "heads/")
 	}
 
