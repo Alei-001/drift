@@ -17,6 +17,7 @@ import (
 	"github.com/Alei-001/drift/internal/storage"
 	"github.com/Alei-001/drift/internal/storage/backends/filesystem"
 	"github.com/klauspost/compress/zstd"
+	"github.com/schollz/progressbar/v3"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -97,18 +98,19 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 	// Upload chunks concurrently with progress reporting.
 	chunkTotal := len(chunkHashes)
 	if chunkTotal > 0 {
+		bar := progressbar.Default(int64(chunkTotal), "chunks push")
 		var chunkMu sync.Mutex
 		var chunkErr error
 		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
-		for i, ch := range chunkHashes {
+		for _, ch := range chunkHashes {
 			if err := ctx.Err(); err != nil {
 				chunkErr = err
 				break
 			}
 			sem <- struct{}{}
 			wg.Add(1)
-			go func(idx int, h core.Hash) {
+			go func(h core.Hash) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				chPath := chunkRemotePath(h)
@@ -116,7 +118,7 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 					chunkMu.Lock()
 					stats.ChunksSkipped++
 					chunkMu.Unlock()
-					reportProgress(idx+1, chunkTotal, "push")
+					bar.Add(1)
 					return
 				}
 				if err := pushChunk(ctx, store, rfs, h); err != nil {
@@ -130,14 +132,14 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 				chunkMu.Lock()
 				stats.ChunksUploaded++
 				chunkMu.Unlock()
-				reportProgress(idx+1, chunkTotal, "push")
-			}(i, ch)
+				bar.Add(1)
+			}(ch)
 		}
 		wg.Wait()
+		bar.Finish()
 		if chunkErr != nil {
 			return nil, chunkErr
 		}
-		clearProgressLine()
 	}
 
 	// Upload refs (only those whose target snapshot exists on the remote).
@@ -202,18 +204,19 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 	// Download chunks concurrently with progress reporting.
 	chunkTotal := len(chunkHashes)
 	if chunkTotal > 0 {
+		bar := progressbar.Default(int64(chunkTotal), "chunks pull")
 		var chunkMu sync.Mutex
 		var chunkErr error
 		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
-		for i, ch := range chunkHashes {
+		for _, ch := range chunkHashes {
 			if err := ctx.Err(); err != nil {
 				chunkErr = err
 				break
 			}
 			sem <- struct{}{}
 			wg.Add(1)
-			go func(idx int, h core.Hash) {
+			go func(h core.Hash) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				has, hasErr := store.HasChunk(ctx, h)
@@ -229,7 +232,7 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 					chunkMu.Lock()
 					stats.ChunksSkipped++
 					chunkMu.Unlock()
-					reportProgress(idx+1, chunkTotal, "pull")
+					bar.Add(1)
 					return
 				}
 				if err := pullChunk(ctx, store, rfs, h); err != nil {
@@ -243,14 +246,14 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 				chunkMu.Lock()
 				stats.ChunksUploaded++
 				chunkMu.Unlock()
-				reportProgress(idx+1, chunkTotal, "pull")
-			}(i, ch)
+				bar.Add(1)
+			}(ch)
 		}
 		wg.Wait()
+		bar.Finish()
 		if chunkErr != nil {
 			return nil, chunkErr
 		}
-		clearProgressLine()
 	}
 
 	// Merge refs (append-only, never overwrite).
@@ -945,18 +948,6 @@ func parseHashHex(s string) (core.Hash, error) {
 }
 
 // --- zstd codec (shared, lazily initialized) ---
-
-// --- progress reporting ---
-
-// reportProgress prints a single-line progress indicator to stderr.
-// The \r character rewrites the same line without scrolling.
-func reportProgress(done, total int, op string) {
-	fmt.Fprintf(os.Stderr, "\r  chunks %s: %d/%d", op, done, total)
-}
-
-func clearProgressLine() {
-	fmt.Fprint(os.Stderr, "\r                    \r")
-}
 
 var (
 	zstdEncOnce sync.Once

@@ -194,7 +194,7 @@ func TestUpgrade_FullReplace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archivePath, err := download(context.Background(), asset.BrowserDownloadURL)
+	archivePath, err := download(context.Background(), asset.BrowserDownloadURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestUpgrade_WithChecksumVerification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	archivePath, err := download(context.Background(), asset.BrowserDownloadURL)
+	archivePath, err := download(context.Background(), asset.BrowserDownloadURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestUpgrade_WithChecksumVerification(t *testing.T) {
 	if !ok {
 		t.Fatal("expected checksum asset")
 	}
-	csPath, err := download(context.Background(), cs.BrowserDownloadURL)
+	csPath, err := download(context.Background(), cs.BrowserDownloadURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,10 +267,10 @@ func TestUpgrade_ChecksumMismatch(t *testing.T) {
 
 	rel, _ := latestRelease(context.Background(), srv.url())
 	asset, _ := matchAsset(rel.Assets, runtime.GOOS, runtime.GOARCH)
-	archivePath, _ := download(context.Background(), asset.BrowserDownloadURL)
+	archivePath, _ := download(context.Background(), asset.BrowserDownloadURL, nil)
 	defer os.Remove(archivePath)
 	cs, _ := findChecksumAsset(rel.Assets)
-	csPath, _ := download(context.Background(), cs.BrowserDownloadURL)
+	csPath, _ := download(context.Background(), cs.BrowserDownloadURL, nil)
 	defer os.Remove(csPath)
 
 	ok, err := verifyChecksum(csPath, asset.Name, archivePath)

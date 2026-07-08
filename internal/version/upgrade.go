@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 )
@@ -18,9 +19,10 @@ type Result struct {
 
 // UpgradeOptions controls the behaviour of Upgrade.
 type UpgradeOptions struct {
-	Check  bool   // only check for a newer release, do not replace the binary
-	Force  bool   // replace even when already up to date
-	APIURL string // override GitHub API base (for tests); defaults to https://api.github.com
+	Check          bool      // only check for a newer release, do not replace the binary
+	Force          bool      // replace even when already up to date
+	APIURL         string    // override GitHub API base (for tests); defaults to https://api.github.com
+	ProgressWriter io.Writer // optional progress bar output (nil = no progress)
 }
 
 // Upgrade checks for a newer drift release on GitHub and, when available,
@@ -64,7 +66,7 @@ func Upgrade(ctx context.Context, currentVersion string, opt UpgradeOptions) (Re
 		return res, err
 	}
 
-	archivePath, err := download(ctx, asset.BrowserDownloadURL)
+	archivePath, err := download(ctx, asset.BrowserDownloadURL, opt.ProgressWriter)
 	if err != nil {
 		return res, err
 	}
@@ -72,7 +74,7 @@ func Upgrade(ctx context.Context, currentVersion string, opt UpgradeOptions) (Re
 
 	// Optional checksum verification.
 	if cs, ok := findChecksumAsset(rel.Assets); ok {
-		csPath, derr := download(ctx, cs.BrowserDownloadURL)
+		csPath, derr := download(ctx, cs.BrowserDownloadURL, nil)
 		if derr != nil {
 			return res, derr
 		}

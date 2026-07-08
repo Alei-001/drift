@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -64,6 +65,9 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		Check:  upgradeCheck,
 		Force:  upgradeForce,
 		APIURL: upgradeAPIURL,
+	}
+	if !globalJSON && !globalQuiet {
+		opt.ProgressWriter = os.Stderr
 	}
 
 	// Warn (human mode) when running a development build: version comparison

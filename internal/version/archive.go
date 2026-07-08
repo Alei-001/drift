@@ -14,11 +14,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 // download fetches a URL into a temporary file and returns its path. The
-// caller is responsible for removing the file.
-func download(ctx context.Context, url string) (string, error) {
+// caller is responsible for removing the file. When progressWriter is non-nil
+// and the response includes Content-Length, a progress bar is rendered to it.
+func download(ctx context.Context, url string, progressWriter io.Writer) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", &upgradeError{kind: "download", err: err}
@@ -38,7 +41,22 @@ func download(ctx context.Context, url string) (string, error) {
 		return "", &upgradeError{kind: "download", err: err}
 	}
 	defer tmp.Close()
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+
+	reader := io.Reader(resp.Body)
+	if progressWriter != nil && resp.ContentLength > 0 {
+		bar := progressbar.NewOptions64(
+			resp.ContentLength,
+			progressbar.OptionSetWriter(progressWriter),
+			progressbar.OptionShowBytes(true),
+			progressbar.OptionSetDescription("downloading"),
+			progressbar.OptionSetWidth(20),
+		)
+		r := progressbar.NewReader(resp.Body, bar)
+		reader = &r
+		defer bar.Finish()
+	}
+
+	if _, err := io.Copy(tmp, reader); err != nil {
 		os.Remove(tmp.Name())
 		return "", &upgradeError{kind: "download", err: err}
 	}
