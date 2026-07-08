@@ -9,15 +9,20 @@ import (
 	"github.com/Alei-001/drift/internal/version"
 )
 
+var versionVerbose bool
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Show drift version and build info",
-	Long:  "Show the version, commit, build date, and platform of the drift binary. This command does not require a drift repository and can be run anywhere.",
-	Args:  cobra.NoArgs,
-	RunE:  runVersion,
+	Short: "Show drift version",
+	Long: `Show the version of the drift binary.
+Use -v for full build details (commit, build date, Go version, platform).
+This command does not require a drift repository and can be run anywhere.`,
+	Args: cobra.NoArgs,
+	RunE: runVersion,
 }
 
 func init() {
+	versionCmd.Flags().BoolVarP(&versionVerbose, "verbose", "v", false, "show full build details")
 	rootCmd.AddCommand(versionCmd)
 }
 
@@ -49,15 +54,17 @@ func runVersion(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	// Quiet mode: still emit the bare version string so `drift -q version`
-	// is script-friendly (one line, no decoration).
 	if globalQuiet {
 		fmt.Println(info.Version)
 		return nil
 	}
 
-	// Human-readable: two lines.
+	if versionVerbose {
+		fmt.Println(info.String())
+		fmt.Printf("  %s  %s/%s\n", info.GoVersion, runtime.GOOS, runtime.GOARCH)
+		return nil
+	}
+
 	fmt.Println(info.String())
-	fmt.Printf("  %s  %s/%s\n", info.GoVersion, runtime.GOOS, runtime.GOARCH)
 	return nil
 }

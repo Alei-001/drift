@@ -33,7 +33,6 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 func TestRunVersion_Human(t *testing.T) {
-	// Inject a known version so the output is deterministic.
 	old := version.Version
 	version.Version = "v9.9.9"
 	defer func() { version.Version = old }()
@@ -47,8 +46,32 @@ func TestRunVersion_Human(t *testing.T) {
 		}
 	})
 
-	// Line 1: "drift v9.9.9 (commit: ..., built: ...)"
-	// Line 2: "  <goversion>  <os>/<arch>"
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %q", len(lines), out)
+	}
+	if !strings.HasPrefix(lines[0], "drift v9.9.9 ") {
+		t.Errorf("line 1 = %q, want prefix %q", lines[0], "drift v9.9.9 ")
+	}
+}
+
+func TestRunVersion_Verbose(t *testing.T) {
+	old := version.Version
+	version.Version = "v9.9.9"
+	defer func() { version.Version = old }()
+
+	globalJSON = false
+	globalQuiet = false
+	prevVerbose := versionVerbose
+	versionVerbose = true
+	defer func() { versionVerbose = prevVerbose }()
+
+	out := captureStdout(t, func() {
+		if err := runVersion(nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) < 2 {
 		t.Fatalf("expected >=2 lines, got %d: %q", len(lines), out)
@@ -111,7 +134,6 @@ func TestRunVersion_Quiet(t *testing.T) {
 		}
 	})
 
-	// Quiet mode prints just the bare version string.
 	got := strings.TrimSpace(out)
 	if got != "v9.9.9" {
 		t.Errorf("quiet output = %q, want %q", got, "v9.9.9")
