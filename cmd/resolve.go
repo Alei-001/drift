@@ -14,11 +14,11 @@ import (
 // resolveSnapshot resolves a snapshot reference to a snapshot.
 //
 // Snapshot reference syntax (see docs/cli-design.md "版本引用语法"):
-//   - @id:<hash-prefix> — match by snapshot hash prefix (>= 4 chars)
-//   - @tag:<name>       — resolve via tags/<name> reference
-//   - @branch:<name>    — resolve via heads/<name> reference (branch head)
-//   - @head             — current HEAD snapshot
-//   - <bare-name>       — equivalent to @branch:<bare-name>
+//   - id:<hash-prefix>  — match by snapshot hash prefix (>= 4 chars)
+//   - tag:<name>        — resolve via tags/<name> reference
+//   - branch:<name>     — resolve via heads/<name> reference (branch head)
+//   - head              — current HEAD snapshot
+//   - <bare-name>       — equivalent to branch:<bare-name>
 //
 // Returns nil if the snapshot is not found or the hash prefix is ambiguous.
 // Ambiguous-prefix details are printed to stderr to match the historical

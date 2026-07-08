@@ -10,10 +10,23 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/Alei-001/drift/internal/storage"
 )
+
+// isVersionRef reports whether s looks like a snapshot version reference
+// (id:..., tag:..., branch:..., or the bare keyword "head") rather than a
+// file path. Used by `drift show` to disambiguate a single argument.
+func isVersionRef(s string) bool {
+	if s == "head" {
+		return true
+	}
+	return strings.HasPrefix(s, "id:") ||
+		strings.HasPrefix(s, "tag:") ||
+		strings.HasPrefix(s, "branch:")
+}
 
 // Layout constants for showFileList output.
 const (
@@ -53,25 +66,24 @@ var showCmd = &cobra.Command{
 		}
 
 		// Argument parsing:
-		//   - 1 arg starting with '@': a version reference; list its files.
-		//   - 1 arg not starting with '@': treated as a file path with an
-		//     implicit HEAD version. This is an intentional UX decision:
-		//     `drift show README.md` reads more naturally than
-		//     `drift show @head README.md`. It does not conflict with
-		//     cli-design.md, whose examples always pass an explicit
-		//     version; the bare-name-as-branch grammar from cli-design.md
-		//     still applies when the user intends a branch (e.g.
-		//     `drift show main`).
-		//   - 2 args: version then file.
-		var versionLabel, filePath string
-		if len(args) == 1 {
-			if strings.HasPrefix(args[0], "@") {
-				versionLabel = args[0]
-			} else {
-				versionLabel = "@head"
-				filePath = args[0]
-			}
+	//   - 1 arg that looks like a version reference (starts with "id:",
+	//     "tag:", "branch:", or equals "head"): list that snapshot's files.
+	//   - 1 arg not matching a version prefix: treated as a file path with
+	//     an implicit HEAD version. This is an intentional UX decision:
+	//     `drift show README.md` reads more naturally than
+	//     `drift show head README.md`. The bare-name-as-branch grammar
+	//     still applies when the user intends a branch (e.g.
+	//     `drift show main`).
+	//   - 2 args: version then file.
+	var versionLabel, filePath string
+	if len(args) == 1 {
+		if isVersionRef(args[0]) {
+			versionLabel = args[0]
 		} else {
+			versionLabel = "head"
+			filePath = args[0]
+		}
+	} else {
 			versionLabel = args[0]
 			filePath = args[1]
 		}

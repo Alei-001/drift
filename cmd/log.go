@@ -280,7 +280,7 @@ func formatChangesCompact(added, modified, deleted int) string {
 
 func init() {
 	logCmd.Flags().IntVarP(&logLimit, "limit", "l", 30, "limit number of entries")
-	logCmd.Flags().StringVar(&logDetail, "detail", "", "show file change details for a snapshot (e.g. @id:12ab)")
+	logCmd.Flags().StringVar(&logDetail, "detail", "", "show file change details for a snapshot (e.g. id:12ab)")
 	logCmd.Flags().StringVar(&logBranch, "branch", "", "show history of a specific branch (default: current branch)")
 	logCmd.Flags().BoolVar(&logAll, "all", false, "show snapshots from all branches (including auto-saves)")
 	rootCmd.AddCommand(logCmd)

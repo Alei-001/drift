@@ -85,7 +85,7 @@ var tagListCmd = &cobra.Command{
 var tagAddCmd = &cobra.Command{
 	Use:   "add <name> <version>",
 	Short: "Tag an existing snapshot",
-	Long:  "Tag an existing snapshot with a human-readable name. The tag can later be used as @tag:<name> in show, diff, and restore commands.",
+	Long:  "Tag an existing snapshot with a human-readable name. The tag can later be used as tag:<name> in show, diff, and restore commands.",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()

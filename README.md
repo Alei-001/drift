@@ -102,10 +102,10 @@ drift save -m "Alt ending v1"
 drift switch main
 
 # Inspect a specific snapshot's file changes
-drift log --detail @id:12ab
+drift log --detail id:12ab
 
 # Restore the workspace to a previous snapshot (auto-backs up first)
-drift restore @id:12ab
+drift restore id:12ab
 ```
 
 ## Commands
@@ -134,11 +134,11 @@ drift restore @id:12ab
 
 Commands that take a `<version>` accept:
 
-- `@head` — current HEAD snapshot
-- `@id:<hash-prefix>` — match by hash prefix (≥ 4 chars)
-- `@tag:<name>` — resolve via tag
-- `@branch:<name>` — resolve via branch head
-- `<bare-name>` — shorthand for `@branch:<bare-name>`
+- `head` — current HEAD snapshot
+- `id:<hash-prefix>` — match by hash prefix (≥ 4 chars)
+- `tag:<name>` — resolve via tag
+- `branch:<name>` — resolve via branch head
+- `<bare-name>` — shorthand for `branch:<bare-name>`
 
 ## Project layout
 

@@ -39,7 +39,7 @@ var undoCmd = &cobra.Command{
 
 		// Capture the snapshot being undone (current HEAD) before the
 		// operation so we can report it to the user.
-		removed := resolveSnapshot(ctx, store, "@head")
+		removed := resolveSnapshot(ctx, store, "head")
 
 		if err := porcelain.UndoLastSave(ctx, store, cwd, &cfg.Core); err != nil {
 			if errors.Is(err, porcelain.ErrCannotUndo) {
@@ -53,7 +53,7 @@ var undoCmd = &cobra.Command{
 			return err
 		}
 
-		newHead := resolveSnapshot(ctx, store, "@head")
+		newHead := resolveSnapshot(ctx, store, "head")
 
 		hint := "the undone snapshot is now unreachable. It will be removed by 'drift gc'."
 

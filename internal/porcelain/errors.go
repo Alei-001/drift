@@ -22,7 +22,7 @@ var (
 	// exist.
 	ErrSnapshotNotFound = errors.New("snapshot not found")
 
-	// ErrAmbiguousID is returned when an @id:<prefix> reference matches more
+	// ErrAmbiguousID is returned when an id:<prefix> reference matches more
 	// than one snapshot. The wrapped error message lists the matching
 	// snapshots so callers can surface them to the user.
 	ErrAmbiguousID = errors.New("ambiguous snapshot ID prefix")

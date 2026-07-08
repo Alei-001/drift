@@ -68,7 +68,7 @@ var diffCmd = &cobra.Command{
 					"use 'drift save -m \"message\"' to create one first.")
 				return ErrSilent
 			}
-			return runDiffWorkspaceVs(ctx, store, cwd, &cfg.Core, headSnap, "@head", file)
+			return runDiffWorkspaceVs(ctx, store, cwd, &cfg.Core, headSnap, "head", file)
 		case 1:
 			snap1 := resolveSnapshot(ctx, store, snapArgs[0])
 			if snap1 == nil {

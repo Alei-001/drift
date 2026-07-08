@@ -11,18 +11,24 @@ import (
 )
 
 // minHashPrefixLen is the minimum number of hex characters required in an
-// @id:<prefix> reference. Shorter prefixes are rejected to avoid accidental
+// id:<prefix> reference. Shorter prefixes are rejected to avoid accidental
 // ambiguity as the snapshot count grows.
 const minHashPrefixLen = 4
 
 // ResolveSnapshotRef resolves a snapshot reference to a snapshot.
 //
 // Snapshot reference syntax (see docs/cli-design.md "版本引用语法"):
-//   - @id:<hash-prefix> — match by snapshot hash prefix (>= minHashPrefixLen chars)
-//   - @tag:<name>       — resolve via tags/<name> reference
-//   - @branch:<name>    — resolve via heads/<name> reference (branch head)
-//   - @head             — current HEAD snapshot
-//   - <bare-name>       — equivalent to @branch:<bare-name>
+//   - id:<hash-prefix>  — match by snapshot hash prefix (>= minHashPrefixLen chars)
+//   - tag:<name>        — resolve via tags/<name> reference
+//   - branch:<name>     — resolve via heads/<name> reference (branch head)
+//   - head              — current HEAD snapshot
+//   - <bare-name>       — equivalent to branch:<bare-name>
+//
+// The colon-prefixed syntax replaces the earlier @-prefixed form (@id:...,
+// @tag:..., @branch:..., @head) which collided with PowerShell's splat
+// operator and required quoting on Windows. Colons are ordinary characters
+// in all common shells (PowerShell, bash, zsh, fish, cmd) and are already
+// rejected by refname.Validate, so they cannot appear in branch or tag names.
 //
 // Returns ErrSnapshotNotFound if the referenced snapshot does not exist.
 // Returns an error wrapping ErrAmbiguousID if the hash prefix matches more
@@ -30,21 +36,19 @@ const minHashPrefixLen = 4
 // Returns an error if the hash prefix is shorter than minHashPrefixLen.
 func ResolveSnapshotRef(ctx context.Context, store storage.Storer, id string) (*core.Snapshot, error) {
 	switch {
-	case id == "@head":
+	case id == "head":
 		return resolveHead(ctx, store)
-	case strings.HasPrefix(id, "@id:"):
-		return resolveByID(ctx, store, id[4:])
-	case strings.HasPrefix(id, "@tag:"):
-		return resolveByRef(ctx, store, "tags/"+id[5:])
-	case strings.HasPrefix(id, "@branch:"):
-		return resolveByRef(ctx, store, "heads/"+id[8:])
-	case strings.HasPrefix(id, "@"):
-		// Unknown @ prefix — no match.
-		return nil, fmt.Errorf("unknown snapshot reference %q: %w", id, ErrSnapshotNotFound)
+	case strings.HasPrefix(id, "id:"):
+		return resolveByID(ctx, store, id[3:])
+	case strings.HasPrefix(id, "tag:"):
+		return resolveByRef(ctx, store, "tags/"+id[4:])
+	case strings.HasPrefix(id, "branch:"):
+		return resolveByRef(ctx, store, "heads/"+id[7:])
 	default:
-		// Bare name is equivalent to @branch:<name>. Branch names are
+		// Bare name is equivalent to branch:<name>. Branch names are
 		// user-chosen readable names and never collide with machine-generated
-		// hashes, so bare names are unambiguous.
+		// hashes, so bare names are unambiguous. refname.Validate rejects
+		// "head" as a reserved keyword, so bare "head" is always the keyword.
 		return resolveByRef(ctx, store, "heads/"+id)
 	}
 }

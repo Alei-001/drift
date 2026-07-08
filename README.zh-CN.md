@@ -90,10 +90,10 @@ drift save -m "备选结局 v1"
 drift switch main
 
 # 查看某个快照的文件变更明细
-drift log --detail @id:12ab
+drift log --detail id:12ab
 
 # 将工作区恢复到指定快照（恢复前自动备份）
-drift restore @id:12ab
+drift restore id:12ab
 ```
 
 ## 命令一览
@@ -120,11 +120,11 @@ drift restore @id:12ab
 
 接受 `<version>` 参数的命令支持以下写法：
 
-- `@head` —— 当前 HEAD 快照
-- `@id:<hash-prefix>` —— 按哈希前缀匹配（≥ 4 字符）
-- `@tag:<name>` —— 通过标签解析
-- `@branch:<name>` —— 通过分支头解析
-- `<bare-name>` —— `@branch:<bare-name>` 的简写
+- `head` —— 当前 HEAD 快照
+- `id:<hash-prefix>` —— 按哈希前缀匹配（≥ 4 字符）
+- `tag:<name>` —— 通过标签解析
+- `branch:<name>` —— 通过分支头解析
+- `<bare-name>` —— `branch:<bare-name>` 的简写
 
 ## 项目结构
 

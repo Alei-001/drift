@@ -86,6 +86,19 @@ func TestValidate_LeadingSlash(t *testing.T) {
 	}
 }
 
+func TestValidate_ReservedKeyword(t *testing.T) {
+	// "head" is reserved as a snapshot reference keyword and cannot be used
+	// as a branch or tag name (base name). The check is case-insensitive.
+	// "HEAD" (uppercase, no prefix) is the system ref and remains valid.
+	invalid := []string{"heads/head", "tags/head", "heads/Head", "heads/HEAD"}
+	for _, name := range invalid {
+		err := Validate(name)
+		if !errors.Is(err, storage.ErrInvalidRef) {
+			t.Errorf("Validate(%q) = %v, want ErrInvalidRef (reserved keyword)", name, err)
+		}
+	}
+}
+
 func TestIsWindowsReservedName(t *testing.T) {
 	reserved := []string{
 		"con", "aux", "nul", "prn",

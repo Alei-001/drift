@@ -40,6 +40,20 @@ func RefType(name string) core.RefType {
 	return core.RefTypeBranch
 }
 
+// reservedBareNames lists bare names that cannot be used as branch or tag
+// names because they are reserved as snapshot reference keywords (see
+// porcelain.ResolveSnapshotRef). The check is case-insensitive to avoid
+// ambiguity on case-insensitive filesystems (Windows, macOS default).
+//
+// Only "head" is reserved as a standalone keyword. The "id", "tag", and
+// "branch" prefixes require a colon (which is already rejected by the
+// character loop below), so bare names like "id", "tag", "branch" remain
+// valid branch names — they only take on keyword meaning when followed
+// by a colon.
+var reservedBareNames = map[string]bool{
+	"head": true,
+}
+
 // Validate validates a reference name. Returns nil if valid.
 func Validate(name string) error {
 	if name == "" {
@@ -68,6 +82,12 @@ func Validate(name string) error {
 	base := strings.ToLower(filepath.Base(name))
 	if IsWindowsReservedName(base) {
 		return fmt.Errorf("invalid ref name: %q is a reserved name: %w", name, storage.ErrInvalidRef)
+	}
+	// Reject reserved bare names (case-insensitive on the base name, e.g.
+	// "heads/head" → base "head") so they remain available as snapshot
+	// reference keywords. "HEAD" itself is allowed (system ref, handled above).
+	if reservedBareNames[base] {
+		return fmt.Errorf("invalid ref name: %q is a reserved keyword: %w", name, storage.ErrInvalidRef)
 	}
 	return nil
 }

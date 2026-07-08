@@ -58,7 +58,7 @@ files — if the branch tip advanced, run 'drift restore' to update them.`,
 			displayName := strings.TrimPrefix(stats.BranchTipChanged, "heads/")
 			fmt.Printf("  index:      rebuilt (branch '%s' tip advanced)\n", displayName)
 			fmt.Printf("  hint: branch '%s' tip advanced. Working directory is out of sync.\n", displayName)
-			fmt.Printf("        run 'drift restore @head' to update your files.\n")
+			fmt.Printf("        run 'drift restore head' to update your files.\n")
 		}
 		return nil
 	},

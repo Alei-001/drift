@@ -132,7 +132,7 @@ var restoreCmd = &cobra.Command{
 
 	// Use args[0] (the user-supplied version reference) in the
 	// status line so the output echoes what the user typed, e.g.
-	// ">>> Restored to @id:12ab [ok]".
+	// ">>> Restored to id:12ab [ok]".
 	if filePath != "" {
 			fmt.Printf(">>> Restored %s:%s [ok]\n", args[0], filePath)
 			fmt.Println()
