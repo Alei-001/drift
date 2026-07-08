@@ -61,6 +61,26 @@ Filename: "{app}\drift.exe"; Parameters: "version"; Description: "Show installed
 // PATH management via environment variable APIs (more reliable than setx).
 const
   EnvironmentKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
+  HWND_BROADCAST = $FFFF;
+  WM_SETTINGCHANGE = $001A;
+  SMTO_ABORTIFHUNG = $0002;
+
+// SendMessageTimeout broadcasts WM_SETTINGCHANGE so new terminals pick up the
+// updated PATH without requiring logoff/restart. lParam must be a pointer to
+// the string 'Environment'; declaring it as PChar lets Inno Setup pass a
+// string literal directly.
+function SendMessageTimeout(hWnd: HWND; Msg: UINT; wParam: UINT_PTR;
+  lParam: PChar; fuFlags: UINT; uTimeout: UINT;
+  out lpdwResult: UINT_PTR): UINT_PTR;
+external '[email protected] stdcall';
+
+procedure BroadcastEnvironmentChange;
+var
+  Dummy: UINT_PTR;
+begin
+  SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment',
+    SMTO_ABORTIFHUNG, 5000, Dummy);
+end;
 
 procedure EnvAddPath(Path: string);
 var
@@ -98,11 +118,17 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and IsTaskSelected('addpath') then
+  begin
     EnvAddPath(ExpandConstant('{app}'));
+    BroadcastEnvironmentChange;
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
+  begin
     EnvRemovePath(ExpandConstant('{app}'));
+    BroadcastEnvironmentChange;
+  end;
 end;

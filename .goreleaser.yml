@@ -54,7 +54,6 @@ archives:
     files:
       - LICENSE*
       - README*.md
-      - CHANGELOG*
 
 nfpms:
   - id: drift
