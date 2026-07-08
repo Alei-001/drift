@@ -10,6 +10,8 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/Alei-001/drift/internal/version"
 )
 
 // Global CLI option flags. These are bound to PersistentFlags in init() and
@@ -24,6 +26,10 @@ var rootCmd = &cobra.Command{
 	Use:   "drift",
 	Short: "Version control for creators",
 	Long:  "drift is a version control system designed for creative workflows.",
+	// Version populates the built-in --version flag output. We render a
+	// short single-line form here; the full version details (commit, build
+	// date, platform) are available via `drift version`.
+	Version: version.GetInfo().Version,
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
 	},

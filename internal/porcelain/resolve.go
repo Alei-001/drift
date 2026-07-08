@@ -15,9 +15,9 @@ import (
 // ambiguity as the snapshot count grows.
 const minHashPrefixLen = 4
 
-// ResolveVersion resolves a version reference to a snapshot.
+// ResolveSnapshotRef resolves a snapshot reference to a snapshot.
 //
-// Version reference syntax (see docs/cli-design.md "版本引用语法"):
+// Snapshot reference syntax (see docs/cli-design.md "版本引用语法"):
 //   - @id:<hash-prefix> — match by snapshot hash prefix (>= minHashPrefixLen chars)
 //   - @tag:<name>       — resolve via tags/<name> reference
 //   - @branch:<name>    — resolve via heads/<name> reference (branch head)
@@ -28,31 +28,31 @@ const minHashPrefixLen = 4
 // Returns an error wrapping ErrAmbiguousID if the hash prefix matches more
 // than one snapshot (the message lists the matching short IDs).
 // Returns an error if the hash prefix is shorter than minHashPrefixLen.
-func ResolveVersion(ctx context.Context, store storage.Storer, id string) (*core.Snapshot, error) {
+func ResolveSnapshotRef(ctx context.Context, store storage.Storer, id string) (*core.Snapshot, error) {
 	switch {
 	case id == "@head":
-		return resolveHeadForVersion(ctx, store)
+		return resolveHead(ctx, store)
 	case strings.HasPrefix(id, "@id:"):
-		return resolveByIDForVersion(ctx, store, id[4:])
+		return resolveByID(ctx, store, id[4:])
 	case strings.HasPrefix(id, "@tag:"):
-		return resolveByRefForVersion(ctx, store, "tags/"+id[5:])
+		return resolveByRef(ctx, store, "tags/"+id[5:])
 	case strings.HasPrefix(id, "@branch:"):
-		return resolveByRefForVersion(ctx, store, "heads/"+id[8:])
+		return resolveByRef(ctx, store, "heads/"+id[8:])
 	case strings.HasPrefix(id, "@"):
 		// Unknown @ prefix — no match.
-		return nil, fmt.Errorf("unknown version reference %q: %w", id, ErrSnapshotNotFound)
+		return nil, fmt.Errorf("unknown snapshot reference %q: %w", id, ErrSnapshotNotFound)
 	default:
 		// Bare name is equivalent to @branch:<name>. Branch names are
 		// user-chosen readable names and never collide with machine-generated
 		// hashes, so bare names are unambiguous.
-		return resolveByRefForVersion(ctx, store, "heads/"+id)
+		return resolveByRef(ctx, store, "heads/"+id)
 	}
 }
 
-// resolveHeadForVersion resolves the HEAD reference to a snapshot, following
-// symbolic references. Returns ErrSnapshotNotFound when HEAD is missing or
-// points to nothing.
-func resolveHeadForVersion(ctx context.Context, store storage.Storer) (*core.Snapshot, error) {
+// resolveHead resolves the HEAD reference to a snapshot, following symbolic
+// references. Returns ErrSnapshotNotFound when HEAD is missing or points to
+// nothing.
+func resolveHead(ctx context.Context, store storage.Storer) (*core.Snapshot, error) {
 	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("read HEAD: %w", ErrSnapshotNotFound)
@@ -75,11 +75,11 @@ func resolveHeadForVersion(ctx context.Context, store storage.Storer) (*core.Sna
 	return snap, nil
 }
 
-// resolveByIDForVersion resolves a snapshot by hash prefix. The prefix must be
-// at least minHashPrefixLen characters. Returns ErrSnapshotNotFound when no
-// snapshot matches, or an error wrapping ErrAmbiguousID when more than one
-// snapshot matches.
-func resolveByIDForVersion(ctx context.Context, store storage.Storer, prefix string) (*core.Snapshot, error) {
+// resolveByID resolves a snapshot by hash prefix. The prefix must be at least
+// minHashPrefixLen characters. Returns ErrSnapshotNotFound when no snapshot
+// matches, or an error wrapping ErrAmbiguousID when more than one snapshot
+// matches.
+func resolveByID(ctx context.Context, store storage.Storer, prefix string) (*core.Snapshot, error) {
 	if len(prefix) < minHashPrefixLen {
 		return nil, fmt.Errorf("snapshot ID prefix %q is too short (minimum %d characters)", prefix, minHashPrefixLen)
 	}
@@ -114,10 +114,10 @@ func resolveByIDForVersion(ctx context.Context, store storage.Storer, prefix str
 	return snap, nil
 }
 
-// resolveByRefForVersion resolves a snapshot via a named reference (e.g.
-// "heads/main", "tags/v1"). Returns ErrSnapshotNotFound when the reference or
-// its target snapshot is missing.
-func resolveByRefForVersion(ctx context.Context, store storage.Storer, refName string) (*core.Snapshot, error) {
+// resolveByRef resolves a snapshot via a named reference (e.g. "heads/main",
+// "tags/v1"). Returns ErrSnapshotNotFound when the reference or its target
+// snapshot is missing.
+func resolveByRef(ctx context.Context, store storage.Storer, refName string) (*core.Snapshot, error) {
 	ref, err := store.GetRef(ctx, refName)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {

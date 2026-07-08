@@ -9,6 +9,16 @@ go test -run TestFoo ./internal/porcelain/   # single test
 go test -count=1 ./internal/storage/backends/filesystem/  # skip cache
 ```
 
+Reproducible release build (injects version metadata consumed by
+`drift version` / `drift upgrade`):
+
+```powershell
+go build -ldflags "-X github.com/Alei-001/drift/internal/version.Version=v0.1.0 \
+  -X github.com/Alei-001/drift/internal/version.Commit=$(git rev-parse --short HEAD) \
+  -X github.com/Alei-001/drift/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  ./cmd/drift
+```
+
 No Makefile. No CI workflows. No lint config. Pure `go` toolchain.
 
 ## Protobuf codegen
@@ -45,6 +55,7 @@ internal/             → business implementation (not importable by external pr
     stream/           → chunk streaming helpers (PeekHeader, HashFileContent, …)
   core/               → domain types (Hash, Chunk, Snapshot, FileEntry, Config, …)
   util/               → fsutil, glob, pathutil, format, cache
+  version/            → build-time version metadata + self-upgrade (GitHub Releases)
 ```
 
 Imports: stdlib → third-party → project-internal, blank line between groups.
@@ -65,6 +76,7 @@ import any of the business packages, so the public surface is just the CLI.
 |---------|-----------|
 | `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrPermission`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
 | `internal/porcelain/` | `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrTagNotFound`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain`, `ErrAmbiguousID`, `ErrCannotUndo`, `ErrUncommittedChanges` |
+| `internal/version/` | `ErrNetwork`, `ErrNoRelease`, `ErrNoAsset` |
 
 Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify errors with `errors.Is` / `errors.As` — never `strings.Contains(err.Error(), …)`. Test code may use `strings.Contains` on error messages to assert user-facing text.
 

@@ -86,8 +86,9 @@ Error: <错误描述>
 | 类型 | 命令 | 输出特点 |
 |------|------|---------|
 | 执行 | init, save, restore, branch, switch, ignore, tag, undo | 状态行 + 文件列表 + 总结 |
-| 查询 | log, show, status, diff, check, config | 状态行 + 查询结果 + 总结 |
+| 查询 | log, show, status, diff, check, config, version | 状态行 + 查询结果 + 总结 |
 | 驻留 | watch | 状态行 + 实时日志流 + 结束总结 |
+| 工具 | upgrade | 状态行 + 升级摘要 |
 
 ### JSON 输出规范
 
@@ -132,6 +133,8 @@ drift
 ├── remote          管理远程存储后端（add/remove/list/set-url/test）
 ├── push            上传本地对象到远程（快照/块/refs）
 ├── pull            下载远程对象到本地（快照/块/refs）
+├── version         查看版本与构建信息
+├── upgrade         自升级到最新发布版
 └── help            帮助信息
 ```
 
@@ -1585,6 +1588,148 @@ dry-run mode is not yet implemented; omit --dry-run to pull for real.
 
 ---
 
+## 版本与自升级
+
+### 设计要点
+
+- **版本来源**：构建时通过 `-ldflags` 注入 `Version`/`Commit`/`BuildDate`；未注入时回退到 `runtime/debug.ReadBuildInfo()`，`go install` 构建的二进制会自动得到 module version 与 VCS revision
+- **无需项目**：`version` 与 `upgrade` 不依赖 `.drift/` 仓库，可在任意目录运行，便于排查"装了什么版本"
+- **`--version` 内置标志**：cobra 的内置 `--version` 走 `rootCmd.Version`，输出单行精简版本号；`drift version` 子命令输出完整的 commit/构建时间/平台信息
+- **自升级机制**：`upgrade` 查询 GitHub Releases API，按 `GOOS/GOARCH` 匹配预构建二进制，下载后原子替换运行中的可执行文件
+- **发布产物命名约定**：`drift_<version>_<os>_<arch>.{zip|tar.gz}`（windows 用 zip，其余用 tar.gz），附 `drift_<version>_checksums.txt`（SHA-256）
+- **原子替换**：两步 rename（当前二进制 → `.old`，新二进制 → 原路径），Windows 下运行中二进制不能覆盖但可重命名；失败时回滚 `.old`
+- **校验**：当 release 附带 `checksums.txt` 时，下载后校验 SHA-256；校验文件缺失或格式错误时跳过校验（HTTPS 已保护传输完整性），不阻断升级
+- **dev 构建**：当前版本为 `(devel)` 或 `v0.0.0-*` 伪版本时，视为比任何正式 release 旧，`upgrade` 总会提示升级
+
+### `drift version`
+
+查看当前二进制的版本与构建信息。无需 drift 仓库，任意目录可运行。
+
+**用法**
+
+```
+drift version
+```
+
+**输出（人类可读）**
+
+```
+drift v0.1.0 (commit: a1b2c3d, built: 2026-07-08T12:00:00Z)
+  go1.25  windows/amd64
+```
+
+**输出（`--json`）**
+
+```json
+{
+  "command": "version",
+  "status": "ok",
+  "data": {
+    "version": "v0.1.0",
+    "commit": "a1b2c3d",
+    "built": "2026-07-08T12:00:00Z",
+    "go_version": "go1.25",
+    "os": "windows",
+    "arch": "amd64"
+  },
+  "hint": null
+}
+```
+
+**`-q` 模式**：只输出纯版本号（如 `v0.1.0`），便于脚本管道使用。
+
+**`drift --version`**：cobra 内置标志，输出 `drift version v0.1.0`（单行精简）。
+
+### `drift upgrade`
+
+检查 GitHub 上的最新 release，并在有新版本时下载对应平台的预构建二进制原子替换当前可执行文件。无需 drift 仓库。
+
+**用法**
+
+```
+drift upgrade [--check] [--force]
+```
+
+**选项**
+
+| 选项 | 说明 |
+|------|------|
+| `--check` | 只检查是否有新版本，不执行升级 |
+| `--force` | 即使已是最新版也强制重新安装 |
+| `--json` | JSON 输出（全局选项） |
+| `-q` | 静默模式，成功无输出（全局选项） |
+
+**输出（已是最新）**
+
+```
+>>> Upgrade [ok]
+  already up to date (v0.2.0)
+```
+
+**输出（成功升级）**
+
+```
+>>> Upgrade [ok]
+  v0.1.0 -> v0.2.0
+  restart drift to use the new version.
+```
+
+**输出（`--check` 发现有更新）**
+
+```
+>>> Upgrade [ok]
+  update available: v0.1.0 -> v0.2.0
+```
+
+**输出（dev 构建，总是提示升级）**
+
+```
+>>> Running a development build (v0.0.0-20260708...); latest release will be offered. [warning]
+>>> Upgrade [ok]
+  update available: (devel) -> v0.1.0
+```
+
+**JSON 输出**
+
+```json
+{
+  "command": "upgrade",
+  "status": "ok",
+  "data": {
+    "from": "v0.1.0",
+    "to": "v0.2.0",
+    "upgraded": true,
+    "message": "v0.1.0 -> v0.2.0"
+  },
+  "hint": null
+}
+```
+
+**错误路径**
+
+| 场景 | 输出 |
+|------|------|
+| 网络不可达 | `>>> Upgrade [failed]` + hint: `check your network connection and GitHub availability.` |
+| 无 release（404） | `>>> Upgrade [failed]` + hint: `no GitHub release has been published yet; see .../releases.` |
+| 无匹配平台资产 | `>>> Upgrade [failed]` + hint: `no prebuilt binary for this platform; build from source with 'go install ...'.` |
+| 校验和不匹配 | `>>> Upgrade [failed]` + hint: `see .../releases for manual download.` |
+| 下载/解压/替换失败 | `>>> Upgrade [failed]` + hint: `see .../releases for manual download.` |
+
+**升级流程**
+
+1. `version.GetInfo()` 取当前版本
+2. `GET https://api.github.com/repos/Alei-001/drift/releases/latest` → `tag_name` + `assets[]`
+3. semver 比较（手写实现，不引入新依赖；支持 pre-release）
+4. 已最新且非 `--force` → 输出 `already up to date`
+5. `--check` → 输出 `update available` 后退出
+6. 按 `runtime.GOOS`/`runtime.GOARCH` 匹配资产（windows→`.zip`，其余→`.tar.gz`）
+7. 若存在 `checksums.txt` 资产 → 下载并校验 SHA-256
+8. 下载归档到临时文件
+9. 从 zip/tar.gz 解压出 `drift`/`drift.exe`（stdlib，无新依赖）
+10. 两步 rename 替换当前可执行文件，成功后清理 `.old`
+
+---
+
 ## Git concept mapping
 
 | User sees | Git equivalent | Difference |
@@ -1729,6 +1874,14 @@ drift push origin                      upload all objects to remote
 drift push origin --branch main        push only one branch
 drift pull origin                      download remote objects
 drift pull origin --branch main        pull only one branch
+
+# 版本与自升级
+drift version                          show version and build info
+drift version --json                   machine-readable version
+drift --version                        one-line version (cobra built-in)
+drift upgrade --check                  check for newer release
+drift upgrade                          upgrade to latest release
+drift upgrade --force                  reinstall even when up to date
 ```
 
 ---
@@ -1772,3 +1925,5 @@ drift pull origin --branch main        pull only one branch
 | `watch on` 预校验项目 | 原实现先 spawn 子进程再在子进程中打开项目，初始化失败时静默退出留下 stale PID 文件；预校验将错误前置到父进程 |
 | 文本检测增加控制字节比例阈值 | 原 NUL-only 启发式会将无 NUL 的二进制数据误判为 text；新增 10% 控制字节阈值作为二次防线 |
 | `remote` 命令族错误统一 `[failed]` 格式 | 原 `remove`/`set-url`/`add` 用裸 `fmt.Errorf`，与 `test`/`push`/`pull` 的格式化错误块不一致 |
+| 新增 `version`/`upgrade` 命令 | 用户需要查看已安装版本并自升级到最新 release；`upgrade` 走 GitHub Releases 二进制自更新，无需 Go 工具链 |
+| `cmd/version.go` 重命名为 `cmd/resolve.go` | 原文件名为快照版本引用解析（`resolveSnapshot`），与 CLI 自身版本混淆；重命名使文件名=职责 |

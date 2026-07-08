@@ -53,15 +53,28 @@ PSD, video) and stores only what actually changed.
 go install github.com/Alei-001/drift/cmd/drift@latest
 ```
 
-Or build from source:
+Or build from source (with version metadata injected via ldflags):
 
 ```powershell
 git clone https://github.com/Alei-001/drift.git
 cd drift
-go build -o drift ./cmd/drift
+go build -ldflags "-X github.com/Alei-001/drift/internal/version.Version=v0.1.0" -o drift ./cmd/drift
 ```
 
 Requires Go 1.24+.
+
+### Upgrade
+
+Once a GitHub release is published, self-upgrade to the latest version:
+
+```powershell
+drift upgrade          # download and replace the current binary
+drift upgrade --check  # only check for a newer release
+```
+
+Release assets follow the naming convention
+`drift_<version>_<os>_<arch>.{zip|tar.gz}` with an optional
+`drift_<version>_checksums.txt` (SHA-256) that is verified when present.
 
 ## Quick start
 
@@ -114,6 +127,8 @@ drift restore @id:12ab
 | `drift check` | Verify `.drift/` storage integrity |
 | `drift gc` | Remove unreachable snapshots and chunks |
 | `drift config {get,set,list}` | View and modify configuration |
+| `drift version` | Show version, commit, and build info |
+| `drift upgrade [--check] [--force]` | Self-upgrade to the latest GitHub release |
 
 ### Version references
 

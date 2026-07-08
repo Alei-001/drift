@@ -42,15 +42,27 @@
 go install github.com/Alei-001/drift/cmd/drift@latest
 ```
 
-或从源码构建：
+或从源码构建（通过 ldflags 注入版本信息）：
 
 ```powershell
 git clone https://github.com/Alei-001/drift.git
 cd drift
-go build -o drift ./cmd/drift
+go build -ldflags "-X github.com/Alei-001/drift/internal/version.Version=v0.1.0" -o drift ./cmd/drift
 ```
 
 需要 Go 1.24+。
+
+### 升级
+
+发布 GitHub release 后，可直接自升级到最新版：
+
+```powershell
+drift upgrade          # 下载并替换当前二进制
+drift upgrade --check  # 仅检查是否有新版本
+```
+
+发布产物命名约定：`drift_<版本>_<系统>_<架构>.{zip|tar.gz}`，附
+`drift_<版本>_checksums.txt`（SHA-256），存在时自动校验。
 
 ## 快速上手
 

@@ -1,40 +1,63 @@
 package cmd
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"os"
+	"runtime"
 
-	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/spf13/cobra"
+
+	"github.com/Alei-001/drift/internal/version"
 )
 
-// resolveSnapshot resolves a version reference to a snapshot.
-//
-// Version reference syntax (see docs/cli-design.md "版本引用语法"):
-//   - @id:<hash-prefix> — match by snapshot hash prefix (>= 4 chars)
-//   - @tag:<name>       — resolve via tags/<name> reference
-//   - @branch:<name>    — resolve via heads/<name> reference (branch head)
-//   - @head             — current HEAD snapshot
-//   - <bare-name>       — equivalent to @branch:<bare-name>
-//
-// Returns nil if the snapshot is not found or the hash prefix is ambiguous.
-// Ambiguous-prefix details are printed to stderr to match the historical
-// behavior. The caller is responsible for reporting a user-facing error on nil.
-//
-// This is a thin wrapper over porcelain.ResolveVersion so that existing
-// callers (which expect a *core.Snapshot with nil signalling "not found")
-// do not need to change. New code should call porcelain.ResolveVersion
-// directly to inspect the error.
-func resolveSnapshot(ctx context.Context, store storage.Storer, id string) *core.Snapshot {
-	snap, err := porcelain.ResolveVersion(ctx, store, id)
-	if err != nil {
-		if errors.Is(err, porcelain.ErrAmbiguousID) {
-			fmt.Fprintln(os.Stderr, err.Error())
-		}
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Show drift version and build info",
+	Long:  "Show the version, commit, build date, and platform of the drift binary. This command does not require a drift repository and can be run anywhere.",
+	Args:  cobra.NoArgs,
+	RunE:  runVersion,
+}
+
+func init() {
+	rootCmd.AddCommand(versionCmd)
+}
+
+// versionData is the JSON data payload of `drift version`.
+type versionData struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	Built     string `json:"built"`
+	GoVersion string `json:"go_version"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+}
+
+func runVersion(cmd *cobra.Command, args []string) error {
+	info := version.GetInfo()
+
+	if globalJSON {
+		return outputJSON(JSONEnvelope{
+			Command: "version",
+			Status:  "ok",
+			Data: versionData{
+				Version:   info.Version,
+				Commit:    info.Commit,
+				Built:     info.Built,
+				GoVersion: info.GoVersion,
+				OS:        info.OS,
+				Arch:      info.Arch,
+			},
+		})
+	}
+
+	// Quiet mode: still emit the bare version string so `drift -q version`
+	// is script-friendly (one line, no decoration).
+	if globalQuiet {
+		fmt.Println(info.Version)
 		return nil
 	}
-	return snap
+
+	// Human-readable: two lines.
+	fmt.Println(info.String())
+	fmt.Printf("  %s  %s/%s\n", info.GoVersion, runtime.GOOS, runtime.GOARCH)
+	return nil
 }
