@@ -43,6 +43,11 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
+; Broadcast WM_SETTINGCHANGE after install/uninstall so new terminals pick up
+; the updated PATH without requiring logoff/restart. Built-in alternative to
+; calling SendMessageTimeout manually (avoids PChar type issues in the
+; runner's Inno Setup version).
+ChangesEnvironment=yes
 ; Use the project icon for the installer and the uninstaller.
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\drift.exe
@@ -65,29 +70,10 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Filename: "{app}\drift.exe"; Parameters: "version"; Description: "Show installed version"; Flags: postinstall nowait skipifsilent runmaximized
 
 [Code]
-// PATH management via environment variable APIs (more reliable than setx).
-// Note: HWND_BROADCAST is a built-in Inno Setup constant — do not redefine it.
+// PATH management via registry APIs (more reliable than setx).
+// WM_SETTINGCHANGE broadcast is handled automatically by ChangesEnvironment=yes.
 const
   EnvironmentKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
-  WM_SETTINGCHANGE = $001A;
-  SMTO_ABORTIFHUNG = $0002;
-
-// SendMessageTimeout broadcasts WM_SETTINGCHANGE so new terminals pick up the
-// updated PATH without requiring logoff/restart. lParam must be a pointer to
-// the string 'Environment'; declaring it as PChar lets Inno Setup pass a
-// string literal directly.
-function SendMessageTimeout(hWnd: HWND; Msg: UINT; wParam: UINT_PTR;
-  lParam: PChar; fuFlags: UINT; uTimeout: UINT;
-  out lpdwResult: UINT_PTR): UINT_PTR;
-external '[email protected] stdcall';
-
-procedure BroadcastEnvironmentChange;
-var
-  Dummy: UINT_PTR;
-begin
-  SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment',
-    SMTO_ABORTIFHUNG, 5000, Dummy);
-end;
 
 procedure EnvAddPath(Path: string);
 var
@@ -125,17 +111,11 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if (CurStep = ssPostInstall) and IsTaskSelected('addpath') then
-  begin
     EnvAddPath(ExpandConstant('{app}'));
-    BroadcastEnvironmentChange;
-  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
-  begin
     EnvRemovePath(ExpandConstant('{app}'));
-    BroadcastEnvironmentChange;
-  end;
 end;
