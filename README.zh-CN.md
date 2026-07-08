@@ -50,7 +50,7 @@ cd drift
 go build -ldflags "-X github.com/Alei-001/drift/internal/version.Version=v0.1.0" -o drift ./cmd/drift
 ```
 
-需要 Go 1.24+。
+需要 Go 1.25+。
 
 ### 升级
 
@@ -164,7 +164,8 @@ go test ./...             # 运行全部测试
 go test -run TestFoo ./internal/porcelain/   # 单个测试
 ```
 
-无 Makefile、无 CI 配置、无 lint 配置 —— 纯 `go` 工具链。
+无 Makefile、无 lint 配置 —— 纯 `go` 工具链。CI 通过 GitHub Actions
+（见 `.github/workflows/`）。
 
 ### Protobuf 代码生成
 

@@ -1,0 +1,103 @@
+# GoReleaser configuration for drift.
+# Docs: https://goreleaser.com
+#
+# Release flow: push a tag (v0.1.0) -> GitHub Actions runs `goreleaser release`
+# -> produces archives + Linux packages + checksums -> uploads to the GitHub
+# Release. Windows setup.exe is built separately by Inno Setup in the workflow.
+#
+# Archive naming convention (must match internal/version/matchAsset):
+#   drift_<version>_<os>_<arch>.{zip|tar.gz}
+# Checksums file (must match internal/version/findChecksumAsset):
+#   drift_<version>_checksums.txt
+
+version: 2
+
+project_name: drift
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: drift
+    main: ./cmd/drift
+    binary: drift
+    # Strip debug info and inject version metadata. The three ldflags variables
+    # are read by internal/version.GetInfo().
+    ldflags:
+      - -s -w
+      - -X github.com/Alei-001/drift/internal/version.Version={{.Version}}
+      - -X github.com/Alei-001/drift/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/Alei-001/drift/internal/version.BuildDate={{.Date}}
+    env:
+      - CGO_ENABLED=0
+    targets:
+      - windows_amd64
+      - windows_arm64
+      - linux_amd64
+      - linux_arm64
+      - darwin_amd64
+      - darwin_arm64
+
+archives:
+  - id: default
+    # Default name template produces drift_<version>_<os>_<arch>, which matches
+    # the suffix-matching logic in internal/version/release.go matchAsset().
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Windows archives as zip (matchAsset expects .zip for windows), everything
+    # else as tar.gz.
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # Additional files packaged alongside the binary.
+    files:
+      - LICENSE*
+      - README*.md
+      - CHANGELOG*
+
+nfpms:
+  - id: drift
+    # Linux distribution packages only (deb + rpm). Windows/macOS users get
+    # archives or the Inno Setup .exe.
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    homepage: https://github.com/Alei-001/drift
+    maintainer: drift <[email protected]>
+    description: Content-addressed version control for creators.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    # Install the binary to /usr/bin so `drift` is on PATH after apt/yum install.
+    contents:
+      - src: drift
+        dst: /usr/bin/drift
+    # Treat auto-save snapshots as documentation metadata, not config — no
+    # special systemd service or config file is needed.
+
+checksum:
+  # Suffix `_checksums.txt` is matched by internal/version/findChecksumAsset.
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+release:
+  github:
+    owner: Alei-001
+    name: drift
+  draft: true
+  prerelease: auto
+  name_template: "{{ .Tag }}"

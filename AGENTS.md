@@ -19,7 +19,9 @@ go build -ldflags "-X github.com/Alei-001/drift/internal/version.Version=v0.1.0 
   ./cmd/drift
 ```
 
-No Makefile. No CI workflows. No lint config. Pure `go` toolchain.
+No Makefile. No lint config. Pure `go` toolchain. CI via GitHub Actions
+(`.github/workflows/ci.yml` builds+tests on 3 OSes; `release.yml` publishes
+on version tags via GoReleaser + Inno Setup).
 
 ## Protobuf codegen
 
@@ -116,7 +118,7 @@ Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify erro
 
 ```
 module github.com/Alei-001/drift
-go 1.24
+go 1.25
 ```
 
 Key deps: `cobra`, `zeebo/blake3`, `klauspost/compress/zstd`, `google.golang.org/protobuf`, `go-cdc-chunkers`, `hashicorp/golang-lru/v2`.

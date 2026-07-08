@@ -61,7 +61,7 @@ cd drift
 go build -ldflags "-X github.com/Alei-001/drift/internal/version.Version=v0.1.0" -o drift ./cmd/drift
 ```
 
-Requires Go 1.24+.
+Requires Go 1.25+.
 
 ### Upgrade
 
@@ -178,7 +178,8 @@ go test ./...             # run all tests
 go test -run TestFoo ./internal/porcelain/   # single test
 ```
 
-No Makefile, no CI workflows, no lint config — pure `go` toolchain.
+No Makefile, no lint config — pure `go` toolchain. CI via GitHub Actions
+(see `.github/workflows/`).
 
 ### Protobuf codegen
 

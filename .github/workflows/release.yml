@@ -1,0 +1,102 @@
+# Release workflow: triggered by version tags (v*.*.*).
+#
+# Produces:
+#   - Cross-platform archives (zip/tar.gz) via goreleaser
+#   - Linux packages (.deb/.rpm) via goreleaser nfpm
+#   - SHA-256 checksums file
+#   - Windows graphical installer (.exe) via Inno Setup
+#
+# All artifacts are uploaded to the GitHub Release as drafts for review before
+# publishing. The Windows installer is built in a separate job because Inno
+# Setup runs natively on Windows runners.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  # Job 1: goreleaser produces archives, Linux packages, and checksums on
+  # Linux (fast, cross-compile from a single host).
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: goreleaser-dist
+          path: dist/
+          retention-days: 7
+
+  # Job 2: Inno Setup builds the Windows .exe installer. Depends on goreleaser
+  # for the prebuilt drift.exe (extracted from the windows_amd64 zip).
+  windows-installer:
+    runs-on: windows-latest
+    needs: goreleaser
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download goreleaser artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: goreleaser-dist
+          path: dist/
+
+      - name: Extract drift.exe from windows_amd64 archive
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist/drift_*_windows_amd64.zip -ErrorAction Stop | Select-Object -First 1
+          $extractDir = "dist/drift_windows_amd64"
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath $extractDir -Force
+          # Verify the binary exists.
+          if (-not (Test-Path "$extractDir/drift.exe")) {
+            throw "drift.exe not found in $extractDir"
+          }
+
+      - name: Determine version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF -replace '^refs/tags/v',''
+          echo "version=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Compile Inno Setup installer
+        uses: Minionguyjpro/[email protected]
+        with:
+          path: installer/drift.iss
+          options: /DMyAppVersion=${{ steps.version.outputs.version }} /DSourceDir=dist\drift_windows_amd64 /Q
+
+      - name: Upload installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: dist/drift_*_windows_amd64_setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
