@@ -93,7 +93,7 @@ jobs:
         uses: Minionguyjpro/[email protected]
         with:
           path: installer/drift.iss
-          options: /DMyAppVersion=${{ steps.version.outputs.version }} /DSourceDir=dist\drift_windows_amd64 /Q
+          options: /DMyAppVersion=${{ steps.version.outputs.version }} /DSourceDir=..\dist\drift_windows_amd64 /Q
 
       - name: Upload installer to release
         uses: softprops/action-gh-release@v2

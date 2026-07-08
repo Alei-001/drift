@@ -7,13 +7,17 @@
 ;
 ; Build (local, for testing):
 ;   iscc /DMyAppVersion=0.1.0 /DSourceDir=dist/drift_windows_amd64 installer/drift.iss
+;
+; Path resolution: Inno Setup resolves relative paths against the .iss file's
+; directory (installer/), NOT the working directory. All paths to repo-root
+; files therefore use the ..\ prefix.
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-dev"
 #endif
 
 #ifndef SourceDir
-  #define SourceDir "dist\drift_windows_amd64"
+  #define SourceDir "..\dist\drift_windows_amd64"
 #endif
 
 [Setup]
@@ -27,7 +31,7 @@ AppUpdatesURL=https://github.com/Alei-001/drift/releases
 DefaultDirName={autopf}\drift
 DefaultGroupName=drift
 DisableProgramGroupPage=yes
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=drift_{#MyAppVersion}_windows_amd64_setup
 Compression=lzma2
 SolidCompression=yes
@@ -36,9 +40,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 ; Use the project icon for the installer and the uninstaller.
-SetupIconFile=assets\icon.ico
+SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\drift.exe
-LicenseFile=LICENSE
+LicenseFile=..\LICENSE
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -49,9 +53,9 @@ Name: "addpath"; Description: "Add drift to PATH (recommended)"; GroupDescriptio
 
 [Files]
 Source: "{#SourceDir}\drift.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\README.zh-CN.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
 ; Offer to run drift version after install so the user can verify.
