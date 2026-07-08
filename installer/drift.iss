@@ -50,7 +50,6 @@ LicenseFile=..\LICENSE
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "addpath"; Description: "Add drift to PATH (recommended)"; GroupDescription: "Additional tasks:"

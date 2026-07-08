@@ -93,7 +93,6 @@ jobs:
         with:
           path: installer/drift.iss
           options: /DMyAppVersion=${{ steps.version.outputs.version }} /DSourceDir=..\dist\drift_windows_amd64 /Q
-          install_latest: true
 
       - name: Rename installer to include version
         shell: pwsh
