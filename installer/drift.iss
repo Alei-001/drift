@@ -21,8 +21,13 @@
 #endif
 
 ; OutputBaseFilename must not contain dots (Inno Setup restriction).
-; MyAppVersion "0.1.0" becomes "0-1-0" in the filename.
-#define MyAppVersionSafe StringChange(MyAppVersion, ".", "-")
+; MyAppVersionSafe is "0.1.0" with dots replaced by dashes ("0-1-0").
+; It is passed via /D from the CI workflow because the Inno Setup
+; preprocessor's StringChange has a var parameter and cannot be used
+; in a #define expression.
+#ifndef MyAppVersionSafe
+  #define MyAppVersionSafe StringChange(MyAppVersion, ".", "-")
+#endif
 
 [Setup]
 AppName=drift
