@@ -12,18 +12,18 @@
 
 ---
 
-面向创作者的版本控制 —— 基于内容寻址、分块去重的版本控制系统，专为写作、绘画、设计等创意工作设计。与把所有文件当作不透明字节处理的 Git 不同，drift 理解富媒体文件（图片、PSD、视频），只存储真正发生变化的部分。
+面向创作者的版本控制 —— 基于内容寻址、分块去重的版本控制系统，专为写作、绘画、设计等创意工作设计。与把所有文件当作不透明字节处理的 Git 不同，drift 能识别图片和视频的格式与元信息，并通过内容定义分块只存储真正发生变化的部分。
 
-> 当前状态：阶段 1–3 已完成（本地核心 + 分支 + 文件类型引擎）。GUI 与远程同步为后续阶段规划，参见 [docs/roadmap.md](docs/roadmap.md)。
+> 当前状态：阶段 1–3.5 已完成（本地核心 + 分支 + 文件类型引擎 + 远程同步）。GUI 桌面应用为后续规划，参见 [docs/roadmap.md](docs/roadmap.md)。
 
 ## 为什么需要 drift？
 
 | Git 的痛点 | drift 的解决方案 |
 |---|---|
-| 200 MB 的 PSD 只改了一个图层 → 整个文件重新存储 | FastCDC 内容定义分块，只存储变化的块 |
+| 200 MB 的文件只改了一小部分 → 整个文件重新存储 | FastCDC 内容定义分块，只存储变化的块 |
 | 暂存区 / 提交 / 合并 —— 程序员的心智模型 | `save` 自动捕获所有变更；无暂存区，无合并 |
-| 二进制文件的 diff 只显示原始字节 | 可插拔的文件类型引擎（text/image/video/binary），支持格式感知的 diff 与预览 |
-| 没有可视化时间线 | 保存时即生成缩略图与元数据（阶段 3），为 GUI 时间线（阶段 4）做准备 |
+| 二进制文件的 diff 只显示原始字节 | 可插拔的文件类型引擎（text/image/video/binary），文本支持逐行 diff，图片/视频显示格式与尺寸变化 |
+| 没有可视化时间线 | CLI 阶段以表格浏览历史；GUI 可视化时间线为阶段 4 规划 |
 | 分支意味着合并冲突 | 分支是纯分叉用于实验，用户手动合并，永远不会有冲突 |
 
 ## 特性
@@ -32,8 +32,9 @@
 - **CDC 分块** —— FastCDC 变长内容定义分块，对超大文件（>100 MB）提供定长 fallback。上层使用 zstd 压缩。
 - **无暂存区** —— `drift save` 原样捕获工作区。作者只需关注作品本身，无需关心索引。
 - **无合并的分支** —— 创建实验性分支，自由切换，从任意位置恢复。永远不会有合并冲突。
-- **文件类型引擎** —— 文本（unified diff）、图片（元数据 + 预览）、视频（元数据）、二进制（fallback）。新引擎通过注册表插拔。
+- **文件类型引擎** —— 文本（逐行 unified diff）、图片（格式/尺寸/大小对比，支持 PNG/JPEG/GIF/WebP/BMP/TIFF）、视频（格式识别 + 尺寸解析，支持 MP4/MOV/AVI/MKV/WebM）、二进制（兜底）。新引擎通过注册表插拔。
 - **自动监听** —— `drift watch on` 在文件变更时自动保存，auto-save 默认在 `log` 中隐藏。
+- **远程同步** —— 通过 WebDAV 或 SMB 协议将本地仓库推送到远程存储，支持增量同步与分支级推送/拉取。
 - **单一二进制** —— macOS / Windows / Linux 通用的 Go 静态二进制。无需运行时，无需安装守护进程。
 
 ## 安装
@@ -94,6 +95,15 @@ drift log --detail id:12ab
 
 # 将工作区恢复到指定快照（恢复前自动备份）
 drift restore id:12ab
+
+# 撤销最近一次保存
+drift undo
+
+# 配置远程仓库并同步
+drift remote add origin webdav://example.com/dav/my-novel
+drift push origin            # 推送本地数据到远程
+drift pull origin            # 从远程拉取最新数据
+drift clone webdav://example.com/dav/my-novel my-novel  # 克隆远程仓库
 ```
 
 ## 命令一览
@@ -112,9 +122,18 @@ drift restore id:12ab
 | `drift switch <branch>` | 切换分支（用 `-c` 可同时创建） |
 | `drift tag {list,add,delete,rename}` | 管理标签 |
 | `drift watch {on,off,status,pause,resume}` | 后台自动保存守护进程 |
+| `drift ignore <pattern>` | 添加忽略规则到 `.driftignore` |
+| `drift resolve <version>` | 解析版本引用为快照 ID |
+| `drift remote {add,list,remove}` | 管理远程仓库配置 |
+| `drift push <remote> [--branch <name>] [--dry-run]` | 推送本地数据到远程 |
+| `drift pull <remote> [--branch <name>] [--dry-run]` | 从远程拉取数据到本地 |
+| `drift clone <remote-url> <path>` | 克隆远程仓库到本地 |
+| `drift ls-remote <remote>` | 列出远程仓库的分支与标签 |
 | `drift check` | 校验 `.drift/` 存储完整性 |
-| `drift gc` | 清理不可达的快照与分块 |
+| `drift gc [--dry-run]` | 清理不可达的快照与分块 |
 | `drift config {get,set,list}` | 查看与修改配置 |
+| `drift version` | 显示版本、提交与构建信息 |
+| `drift upgrade [--check] [--force]` | 自升级到最新 GitHub release |
 
 ### 版本引用语法
 
@@ -139,8 +158,10 @@ internal/             业务实现（不可被外部项目导入）
     backends/         filesystem（生产）与 memory（测试）实现
     refname/          分支 / 标签名校验
     stream/           分块流式辅助
+  remote/             远程同步：WebDAV/SMB 协议、push/pull 传输
   core/               领域类型：Hash、Chunk、Snapshot、FileEntry、Config 等
   util/               fsutil、glob、pathutil、format、cache
+  version/            版本元数据 + GitHub Releases 自升级
 docs/                 设计与参考文档
 ```
 

@@ -14,20 +14,22 @@
 
 Version control for creators — a content-addressed, chunk-deduplicated version
 control system designed for writers, illustrators, and designers. Unlike Git,
-which treats every file as opaque bytes, drift understands rich media (images,
-PSD, video) and stores only what actually changed.
+which treats every file as opaque bytes, drift recognizes image and video
+formats, shows meaningful metadata in diffs, and stores only what actually
+changed through content-defined chunking.
 
-> Status: Phase 1–3 complete (local core + branches + filetype engines). GUI
-> and remote sync are planned phases; see [docs/roadmap.md](docs/roadmap.md).
+> Status: Phase 1–3.5 complete (local core + branches + filetype engines +
+> remote sync). GUI desktop app is a planned phase; see
+> [docs/roadmap.md](docs/roadmap.md).
 
 ## Why drift?
 
 | Pain point with Git | drift answer |
 |---|---|
-| 200 MB PSD changes by one layer → store the whole file again | FastCDC content-defined chunking stores only the changed blocks |
+| 200 MB file changes by a small part → store the whole file again | FastCDC content-defined chunking stores only the changed blocks |
 | Staging area / commits / merge — a programmer's mental model | `save` captures all changes automatically; no staging, no merge |
-| Diff shows raw bytes for binary files | Pluggable filetype engines (text/image/video/binary) with format-aware diff and previews |
-| No visual timeline | Thumbnails and metadata are generated at save time (Phase 3), preparing for the GUI timeline (Phase 4) |
+| Diff shows raw bytes for binary files | Pluggable filetype engines (text/image/video/binary): text gets unified diff, images/videos show format and dimension changes |
+| No visual timeline | CLI stage shows history in tables; GUI visual timeline is Phase 4 |
 | Branches mean merge conflicts | Branches are pure forks for experimentation; user merges manually |
 
 ## Features
@@ -40,10 +42,14 @@ PSD, video) and stores only what actually changed.
   think about their work, not about indexes.
 - **Branches without merge** — create experimental branches, switch freely,
   restore from anywhere. No merge conflicts, ever.
-- **Filetype engines** — text (unified diff), image (metadata + preview),
-  video (metadata), binary (fallback). New engines plug in via a registry.
+- **Filetype engines** — text (unified diff), image (format/dimension/size
+  comparison, supports PNG/JPEG/GIF/WebP/BMP/TIFF), video (format detection +
+  dimension parsing, supports MP4/MOV/AVI/MKV/WebM), binary (fallback). New
+  engines plug in via a registry.
 - **Automatic watches** — `drift watch on` auto-saves on file change, with
   auto-saves hidden from `log` by default.
+- **Remote sync** — push/pull to remote storage via WebDAV or SMB, with
+  incremental transfer and branch-scoped sync.
 - **Single binary** — one static Go binary for macOS / Windows / Linux. No
   runtime, no daemons to install.
 
@@ -106,6 +112,15 @@ drift log --detail id:12ab
 
 # Restore the workspace to a previous snapshot (auto-backs up first)
 drift restore id:12ab
+
+# Undo the last save
+drift undo
+
+# Configure a remote and sync
+drift remote add origin webdav://example.com/dav/my-novel
+drift push origin            # push local data to remote
+drift pull origin            # pull latest data from remote
+drift clone webdav://example.com/dav/my-novel my-novel  # clone a remote repo
 ```
 
 ## Commands
@@ -124,8 +139,15 @@ drift restore id:12ab
 | `drift switch <branch>` | Switch to a branch (optionally create with `-c`) |
 | `drift tag {list,add,delete,rename}` | Manage tags |
 | `drift watch {on,off,status,pause,resume}` | Background auto-save daemon |
+| `drift ignore <pattern>` | Add ignore rules to `.driftignore` |
+| `drift resolve <version>` | Resolve a version reference to a snapshot ID |
+| `drift remote {add,list,remove}` | Manage remote repository configuration |
+| `drift push <remote> [--branch <name>] [--dry-run]` | Push local data to remote |
+| `drift pull <remote> [--branch <name>] [--dry-run]` | Pull data from remote to local |
+| `drift clone <remote-url> <path>` | Clone a remote repository to local |
+| `drift ls-remote <remote>` | List branches and tags on a remote |
 | `drift check` | Verify `.drift/` storage integrity |
-| `drift gc` | Remove unreachable snapshots and chunks |
+| `drift gc [--dry-run]` | Remove unreachable snapshots and chunks |
 | `drift config {get,set,list}` | View and modify configuration |
 | `drift version` | Show version, commit, and build info |
 | `drift upgrade [--check] [--force]` | Self-upgrade to the latest GitHub release |
@@ -153,8 +175,10 @@ internal/             business implementation (not importable externally)
     backends/         filesystem (prod) and memory (tests) implementations
     refname/          branch / tag name validation
     stream/           chunk streaming helpers
+  remote/             remote sync: WebDAV/SMB protocols, push/pull transfer
   core/               domain types: Hash, Chunk, Snapshot, FileEntry, Config, ...
   util/               fsutil, glob, pathutil, format, cache
+  version/            build-time version metadata + self-upgrade
 docs/                 design and reference docs
 ```
 
