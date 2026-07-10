@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/Alei-001/drift/internal/core"
@@ -153,6 +154,8 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 		toSnap = snap
 	}
 	diffCount := countSnapshotDiff(fromSnap, toSnap)
+
+	slog.Info("branch switched", "from", fromBranch, "to", name, "created", create, "autosave", autosaveID, "diff_files", diffCount)
 
 	return autosaveID, fromBranch, diffCount, nil
 }

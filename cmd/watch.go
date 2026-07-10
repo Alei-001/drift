@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -146,8 +147,14 @@ var watchDaemonCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		// File logging is initialized by rootCmd.PersistentPreRunE (shared
+		// with all commands). The daemon runs as a background process
+		// without a terminal, so slog output goes to .drift/logs/drift.log.
+		slog.Info("watch daemon starting", "cwd", cwd, "interval", watchInterval, "keep", watchKeep)
+
 		store, cfg, err := openProjectOrReport("Watch", "watch", cwd)
 		if err != nil {
+			slog.Error("watch daemon open project failed", "error", err)
 			// Init failed before RunDaemonLoop could install its cleanup
 			// handlers. The parent already wrote watch.pid pointing at this
 			// process; remove it so a subsequent `drift watch status` does
@@ -158,7 +165,9 @@ var watchDaemonCmd = &cobra.Command{
 			return err
 		}
 		defer store.Close()
+		slog.Info("watch daemon project opened, entering loop")
 		porcelain.RunDaemonLoop(ctx, store, cwd, watchInterval, watchKeep, &cfg.Core)
+		slog.Info("watch daemon exited")
 		return nil
 	},
 }

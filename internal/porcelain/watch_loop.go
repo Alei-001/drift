@@ -79,12 +79,14 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 		case <-sigChan:
 			// Best-effort cleanup: the daemon is exiting, so stale pid/state
 			// files are harmless if removal fails (the next start reclaims them).
+			slog.Info("watch daemon received signal, stopping", "auto_saves", state.AutoSaves, "pruned", state.Pruned)
 			os.Remove(pidPath)
 			os.Remove(statePath)
 			return
 		case <-ctx.Done():
 			// Best-effort cleanup: same rationale as sigChan — the daemon is
 			// exiting and leftover files will be reclaimed on next start.
+			slog.Info("watch daemon context cancelled, stopping", "auto_saves", state.AutoSaves, "pruned", state.Pruned)
 			os.Remove(pidPath)
 			os.Remove(statePath)
 			return
@@ -105,6 +107,7 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			changes, err := DetectChanges(ctx, store, cwd, cfg)
 			if err != nil {
 				state.LastError = "detect: " + err.Error()
+				slog.Warn("detect changes failed", "error", err)
 				writeStateMergingPause(statePath, state)
 				continue
 			}
@@ -117,6 +120,7 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			// record it and wait for the next period rather than blocking.
 			if err := AcquireWorkspaceLock(cwd); err != nil {
 				state.LastError = err.Error()
+				slog.Warn("acquire workspace lock for auto-save", "error", err)
 				writeStateMergingPause(statePath, state)
 				continue
 			}
@@ -124,6 +128,8 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", cfg)
 			if err != nil {
 				state.LastError = "save: " + err.Error()
+				slog.Error("auto-save failed", "error", err, "changes", fmt.Sprintf("+%d ~%d -%d",
+					len(changes.Added), len(changes.Modified), len(changes.Deleted)))
 				ReleaseWorkspaceLock(cwd)
 				writeStateMergingPause(statePath, state)
 				continue
@@ -134,6 +140,7 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			state.LastSaveChanges = fmt.Sprintf("+%d ~%d -%d",
 				len(changes.Added), len(changes.Modified), len(changes.Deleted))
 			state.LastError = ""
+			slog.Info("auto-save completed", "changes", state.LastSaveChanges, "total_saves", state.AutoSaves)
 
 			if keep > 0 {
 				pruned, pruneErr := pruneAutoSnapshots(ctx, store, keep)

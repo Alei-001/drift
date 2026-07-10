@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"time"
 
@@ -251,6 +252,8 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	if err := store.SetIndex(ctx, newIndex); err != nil {
 		return nil, fmt.Errorf("update index: %w", err)
 	}
+
+	slog.Info("snapshot created", "id", snap.ShortID(), "branch", symRef, "files", len(snap.Files), "size", snap.TotalSize, "message", message)
 
 	return snap, nil
 }

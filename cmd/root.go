@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Alei-001/drift/internal/util/logutil"
 	"github.com/Alei-001/drift/internal/version"
 )
 
@@ -21,6 +23,10 @@ var (
 	globalJSON  bool
 	globalQuiet bool
 )
+
+// logFile holds the file handle for .drift/logs/drift.log when file logging
+// is active. It is closed in Execute() after the command finishes.
+var logFile *os.File
 
 var rootCmd = &cobra.Command{
 	Use:   "drift",
@@ -35,6 +41,29 @@ var rootCmd = &cobra.Command{
 	},
 	SilenceErrors: true,
 	SilenceUsage:  true,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Best-effort file logging: if the current directory is a drift
+		// project, redirect slog output to .drift/logs/drift.log so
+		// operations are recorded for troubleshooting. Commands that
+		// don't operate on a project (version, upgrade, init) silently
+		// skip logging initialization. Failures are non-fatal: the
+		// default stderr logger is used as fallback.
+		cwd, err := getCwd(cmd)
+		if err != nil {
+			return nil
+		}
+		driftDir := filepath.Join(cwd, ".drift")
+		if _, err := os.Stat(driftDir); err != nil {
+			return nil
+		}
+		f, err := logutil.InitFileLogger(driftDir)
+		if err != nil {
+			slog.Warn("init file logger", "error", err)
+			return nil
+		}
+		logFile = f
+		return nil
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
@@ -71,6 +100,12 @@ func Execute() {
 		if !errors.Is(err, ErrSilent) {
 			fmt.Fprintln(os.Stderr, err)
 		}
+		if logFile != nil {
+			logFile.Close()
+		}
 		os.Exit(1)
+	}
+	if logFile != nil {
+		logFile.Close()
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -187,6 +188,12 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 				return backupID, fmt.Errorf("update index: %w", err)
 			}
 		}
+	}
+
+	if filePath == "" {
+		slog.Info("snapshot restored", "id", snapshotID.Hash.String(), "files", len(snap.Files), "backup", backupID)
+	} else {
+		slog.Info("file restored", "snapshot", snapshotID.Hash.String(), "file", filePath, "backup", backupID)
 	}
 
 	return backupID, nil

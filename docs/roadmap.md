@@ -62,7 +62,7 @@
 | `porcelain/branch.go` | 分支创建 / 切换 / 删除 / 重命名逻辑 | ✅ 已完成 |
 | `cmd/branch.go` | `drift branch` / `branch -d` / `branch -m` 命令 | ✅ 已完成 |
 | `cmd/switch.go` | `drift switch` / `drift switch -c` 命令 | ✅ 已完成 |
-| `cmd/watch.go` | `drift watch` 命令（fsnotify） | ✅ 已完成 |
+| `cmd/watch.go` | `drift watch` 命令（轮询模式） | ✅ 已完成 |
 | `cmd/ignore.go` | `drift ignore` 命令 | ✅ 已完成 |
 | `porcelain/lock.go` | 工作区锁（watch/switch 协调） | ✅ 已完成 |
 | `porcelain/gc.go` | 垃圾回收（不可达快照与块清理） | ✅ 已完成 |

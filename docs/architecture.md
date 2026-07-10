@@ -224,8 +224,8 @@ flowchart LR
 | **CLI 框架** | spf13/cobra | v1.10.2 | ★★★★★ | 43k+ stars，K8s/Hugo/GitHub CLI 均用 |
 | **哈希算法** | zeebo/blake3 | v0.2.4 | ★★★★☆ | Pure Go + AVX2，412 导入者，备选 lukechampine/blake3 (v1.4.1) |
 | **CDC 分块** | PlakarKorp/go-cdc-chunkers | v1.0.0 | ★★★★☆ | 唯一成熟 Go CDC 库，ISC 许可，持续维护 |
-| **文件监视** | fsnotify/fsnotify | v1.9.1 | ★★★★☆ | 10.7k stars，321k+ 依赖，备选 fork 可用 |
-| **图片处理** | davidbyttow/govips | v2.18.0 | ★★★★☆ | 活跃维护（2026-03），MIT 许可，40+ 格式 |
+| **文件监视** | 轮询（time.Ticker） | — | — | 跨平台可靠，兼容网络盘（NAS/SMB）；fsnotify 为未来可选优化 |
+| **图片处理** | 纯 Go（magic bytes 解析） | — | — | 当前仅解析图片头信息（格式/尺寸），无 CGO 依赖；govips 推迟至需要像素级处理时引入 |
 | **压缩** | klauspost/compress/zstd | v1.18.6 | ★★★★★ | 4.9k stars，2,565+ 导入者，纯 Go |
 | **序列化** | google.golang.org/protobuf | v1.36+ | ★★★★★ | Google 官方 Go protobuf，无替代品 |
 | **日志** | log/slog | — | ★★★★★ | Go 1.21+ 标准库，零外部依赖 |
@@ -244,8 +244,8 @@ flowchart LR
 **四星项（有取舍，有备选）**：
 - `zeebo/blake3` — 未达 v1.0 是唯一扣分项，但 4 年生产验证 + 412 导入者证明可靠。备选 `lukechampine/blake3`（v1.4.1，纯 Go 无 ASM 加速）
 - `go-cdc-chunkers` — Go 生态唯一的 CDC 分块库，虽 stars 不多但 ISC 许可 + 持续维护 + Plakar 团队背书
-- `fsnotify` — 2026 年 5 月的维护者争议是扣分项，备选 fork `gofsnotify/fsnotify` 随时可用
-- `govips` — 需要 libvips C 库（CGO），是我们有意接受的妥协。纯 Go 方案（`imaging`/`gg`）图片处理慢 4-8x，不可接受
+- **文件监视** — 当前采用 `time.Ticker` 轮询模式。fsnotify（inotify/kqueue）对网络文件系统（NFS/SMB 挂载）支持不可靠，而 drift 的目标用户（创作者）常在 NAS 上工作。轮询虽然检测延迟较高（默认 300 秒），但跨平台兼容性是更重要的属性。fsnotify 作为未来可选优化保留（可混合事件驱动 + 轮询 fallback）
+- **图片处理** — 当前图片引擎仅解析文件头 magic bytes 和尺寸信息（纯 Go，无 CGO）。govips（需 libvips C 库）推迟至需要像素级 diff 或缩略图生成时再引入。当前阶段保持单二进制无 CGO 优势优先级更高
 
 **自研项**：
 - **ODB** — 基于 CDC 分块 + 内容寻址的对象存储。现有方案（restic/kopia 的存储层）耦合在其备份框架中无法复用，体量小而独立，自研性价比最高
@@ -255,15 +255,18 @@ flowchart LR
 ```
 // go.mod
 require (
-    github.com/PlakarKorp/go-cdc-chunkers  v1.0.0
-    github.com/davidbyttow/govips/v2       v2.18.0
-    github.com/fsnotify/fsnotify           v1.9.1
+    github.com/PlakarKorp/go-cdc-chunkers  v1.1.0
     github.com/hashicorp/golang-lru/v2     v2.0.7
+    github.com/hirochachacha/go-smb2       v1.1.0
     github.com/klauspost/compress          v1.18.6
+    github.com/schollz/progressbar/v3      v3.19.1
     github.com/spf13/cobra                 v1.10.2
-    github.com/stretchr/testify            v1.10.0
+    github.com/studio-b12/gowebdav         v0.12.0
     github.com/zeebo/blake3                v0.2.4
-    google.golang.org/protobuf             v1.36.0
+    golang.org/x/net                       v0.56.0
+    golang.org/x/term                      v0.44.0
+    golang.org/x/text                      v0.38.0
+    google.golang.org/protobuf             v1.36.11
 )
 ```
 
@@ -271,7 +274,7 @@ require (
 
 | 类别 | 选型 | 用途 |
 |------|------|------|
-| **测试** | stretchr/testify | 断言 + mock + suite，21k stars，Go 最流行测试库 |
+| **测试** | Go stdlib `testing` | 标准库测试框架，零外部依赖，不使用 testify/gomega 等断言库 |
 | **基准测试** | Go bench | 分块算法性能基准 |
 | **Lint** | golangci/golangci-lint | 19.1k stars，50+ linter 集成，IDE 全覆盖 |
 | **格式化** | gofmt + goimports | 代码风格统一 |
@@ -283,7 +286,7 @@ require (
 | 未选 | 原因 |
 |------|------|
 | **Git 底层存储** | packfile 对大文件/二进制 delta 效果差，需要 CDC 分块 |
-| **SQLite/RocksDB** | 增加 CGO 依赖，破坏单二进制优势。除图片处理（govips 需 libvips）外，原则上避免 CGO |
+| **SQLite/RocksDB** | 增加 CGO 依赖，破坏单二进制优势。原则上避免 CGO（图片处理 govips 为未来可能的唯一 CGO 妥协，当前未引入） |
 | **Rust** | 团队可能更熟悉 Go，且 go-git 架构可直接借鉴 |
 | **Electron GUI** | 太重量级，后续 GUI 用 Wails(Go+Web前端) 更轻量 |
 | **libgit2** | C 绑定增加复杂度，不如直接借鉴 go-git 纯 Go 实现 |
@@ -863,7 +866,7 @@ type CoreConfig struct {
 >
 > **块文件格式**：每个块文件以 1 字节头部开头，最低位（0x01）为压缩标志，随后是原始或 zstd 压缩的块数据。读取时先校验解压后数据的 BLAKE3 哈希与文件名一致，防止数据损坏。
 >
-> **工作区锁**：并发控制由 porcelain 层的 `workspace.lock` 文件负责（无 storage.lock）。锁文件为 JSON 格式，包含 PID 和时间戳，支持陈旧锁自动检测（超时 10 分钟或进程不存在时自动释放）。使用 `O_CREATE|O_EXCL` 原子创建，保证无竞争。
+> **工作区锁**：并发控制由 porcelain 层的 `workspace.lock` 文件负责（无 storage.lock）。锁文件为 JSON 格式，包含 PID 和时间戳，支持陈旧锁自动检测（超时 10 分钟或进程不存在时自动释放）。使用 `O_CREATE|O_EXCL` 原子创建，保证创建过程无竞争。陈旧锁恢复路径（检测→删除→重建）存在极小的 TOCTOU 窗口，代码通过删除后 re-verify（检查 PID + 时间戳是否变化）来缓解。worst case 是两个进程同时进入恢复路径，但由于块存储是内容寻址的（天然无竞争），不会导致数据损坏，仅可能导致工作区文件被两个进程同时写入。未来可考虑迁移到 OS 级文件锁（`flock`/`LockFileEx`）彻底消除此窗口。
 
 ### 4.3 序列化格式
 
@@ -1159,6 +1162,7 @@ func formatError(err error) string {
 | 机制 | 实现 |
 |------|------|
 | **写入校验** | 块写入后立即读取并校验 BLAKE3 哈希 |
+| **读取校验** | 每次 `GetChunk` 读取后重新计算 BLAKE3 哈希并与文件名校验，不匹配则返回 `ErrCorrupted`。配合 LRU 缓存，热块不重复校验，兼顾安全性与性能 |
 | **定期校验** | `drift check` 命令，遍历所有块校验完整性 |
 | **原子写入** | 写入临时文件 → fsync → rename，杜绝半写状态 |
 | **损坏恢复** | 索引保留块引用计数，损坏块通过日志追踪 |
@@ -1544,23 +1548,24 @@ func chunkFile(ctx context.Context, path string, r io.Reader, engine filetype.En
 |------|------|-------|------|---------|--------|------|
 | spf13/cobra | github.com/spf13/cobra | ~44k | Apache-2.0 | v1.10.2 (2025-12) | 活跃 | ✅ 已确认 |
 | zeebo/blake3 | github.com/zeebo/blake3 | ~800 | CC0-1.0 | v0.2.4 (2024-08) | 维护中 | ⚠️ 未达 v1.0，纯 Go + ASM，412 导入者 |
-| go-cdc-chunkers | github.com/PlakarKorp/go-cdc-chunkers | — | ISC | v1.0.0 (2025-07) | 活跃 | ✅ 已确认 |
-| fsnotify/fsnotify | github.com/fsnotify/fsnotify | ~10.7k | BSD-3 | v1.9.1 (2025) | 活跃 | ⚠️ 有治理争议，关注社区动态 |
-| davidbyttow/govips | github.com/davidbyttow/govips | ~1.2k | MIT | v2.18.0 (2026-03) | 活跃 | ✅ 替代 bimg 的选择 |
+| go-cdc-chunkers | github.com/PlakarKorp/go-cdc-chunkers | — | ISC | v1.1.0 (2025-07) | 活跃 | ✅ 已确认 |
 | klauspost/compress | github.com/klauspost/compress | ~4.9k | MIT/BSD/Apache | v1.18.6 (2026-04) | 活跃 | ✅ 已确认 |
 | hashicorp/golang-lru | github.com/hashicorp/golang-lru | ~5k | MPL-2.0 | v2 (2023) | 稳定 | ✅ Vault/Consul 同源 |
+| studio-b12/gowebdav | github.com/studio-b12/gowebdav | — | BSD-3 | v0.12.0 | 维护中 | ✅ WebDAV 远程同步协议 |
+| hirochachacha/go-smb2 | github.com/hirochachacha/go-smb2 | — | BSD-2 | v1.1.0 | 社区维护 | ✅ SMB 远程同步协议 |
+| schollz/progressbar | github.com/schollz/progressbar/v3 | — | MIT | v3.19.1 | 活跃 | ✅ push/pull 进度条 |
 
 ### 开发与测试工具
 
 | 依赖 | 仓库 | Stars | 许可 | 状态 |
 |------|------|-------|------|------|
-| stretchr/testify | github.com/stretchr/testify | ~21k | MIT | ✅ 已确认 |
+| Go stdlib testing | — | — | — | ✅ 唯一测试框架，不使用 testify 等外部断言库 |
 | golangci/golangci-lint | github.com/golangci/golangci-lint | ~19.1k | GPL-3.0 | ✅ 已确认 |
 | goreleaser/goreleaser | github.com/goreleaser/goreleaser | ~15.9k | MIT | ✅ 已确认 |
 
 ### 关键发现与决策
 
-1. **bimg → govips**：bimg（3k stars）已超过 1 年未维护，OpenSSF 评分 2.5/10。替换为 govips（1.2k stars），后者持续活跃更新（v2.18.0 at 2026-03），同样基于 libvips
+1. **不引入 govips**：当前图片引擎仅解析文件头（magic bytes + 尺寸），纯 Go 实现，无 CGO 依赖。govips（需 libvips C 库）推迟至需要像素级 diff 或缩略图生成时再评估引入。当前阶段保持单二进制无 CGO 优势优先级更高
 2. **blake3 未达 v1.0**：zeebo/blake3 在 v0.2.4 稳定运行多年，412 个项目依赖。备选 lukechampine/blake3（v1.4.1），但 zeebo 版性能更好（AVX2 加速）
-3. **fsnotify 治理问题**：2026 年 5 月发生维护者冲突，有 fork `gofsnotify/fsnotify` 作为备选。当前版本经社区验证无恶意代码，持续关注
-4. **CGO 妥协**：govips 需要 CGO（libvips C 库），与我们"避免 CGO"原则冲突。但图片处理领域纯 Go 方案（imaging/gg）性能差距太大（4-8x），此为有意妥协
+3. **不引入 fsnotify**：当前文件监视采用 `time.Ticker` 轮询模式。fsnotify（inotify/kqueue）对网络文件系统（NFS/SMB）支持不可靠，而 drift 目标用户常在 NAS 上工作。轮询跨平台兼容性更优，fsnotify 作为未来可选优化保留
+4. **不引入 testify**：使用 Go 标准库 `testing` 作为唯一测试框架，零外部测试依赖，CI 更简洁

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -49,6 +50,7 @@ func PushToRemote(ctx context.Context, store storage.Storer, workDir, remoteName
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("push completed", "remote", remoteName, "branch", branch, "snapshots", stats.SnapshotsUploaded, "chunks", stats.ChunksUploaded, "refs", stats.RefsUpdated)
 	return &PushResult{Stats: stats}, nil
 }
 
@@ -85,6 +87,7 @@ func PullFromRemote(ctx context.Context, store storage.Storer, workDir, remoteNa
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("pull completed", "remote", remoteName, "branch", branch, "snapshots", stats.SnapshotsUploaded, "chunks", stats.ChunksUploaded, "refs", stats.RefsUpdated, "index_rebuilt", stats.IndexRebuilt)
 	return &PullResult{Stats: stats}, nil
 }
 

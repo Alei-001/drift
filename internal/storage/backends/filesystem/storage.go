@@ -35,6 +35,7 @@ func NewFSStorage(root string) (*FSStorage, error) {
 		filepath.Join(root, PreviewsDir),
 		filepath.Join(root, RefsDir, HeadsDir),
 		filepath.Join(root, RefsDir, TagsDir),
+		filepath.Join(root, LogsDir),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, fsutil.DefaultDirPerm); err != nil {
