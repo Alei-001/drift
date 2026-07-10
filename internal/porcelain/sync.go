@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/remote"
@@ -30,10 +29,7 @@ func resolveBranchOrDefault(ctx context.Context, store storage.Storer, branch st
 	if all || branch != "" {
 		return branch
 	}
-	if name, err := remote.CurrentBranchName(ctx, store); err == nil {
-		return strings.TrimPrefix(name, "heads/")
-	}
-	return ""
+	return ResolveCurrentBranchName(ctx, store)
 }
 
 // PushToRemote uploads local objects to the named remote.
