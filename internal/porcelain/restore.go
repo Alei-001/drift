@@ -49,7 +49,7 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 
 	if !noBackup {
 		backupMsg := fmt.Sprintf("backup: restore to %s", snapshotID.Hash.String())
-		backupSnap, backupErr := createSnapshotInLock(ctx, store, workDir, backupMsg, "drift", cfg)
+		backupSnap, backupErr := createSnapshotInLock(ctx, store, workDir, backupMsg, "drift", cfg, false)
 		if backupErr != nil {
 			if !errors.Is(backupErr, ErrNothingToSave) {
 				return "", fmt.Errorf("create backup: %w", backupErr)

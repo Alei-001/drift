@@ -4,16 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"time"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/filetype"
 	"github.com/Alei-001/drift/internal/storage"
 	"github.com/Alei-001/drift/internal/util/fsutil"
 	"github.com/Alei-001/drift/internal/util/pathutil"
+	"github.com/schollz/progressbar/v3"
 	"github.com/zeebo/blake3"
 	"google.golang.org/protobuf/proto"
 )
@@ -37,10 +36,10 @@ func CreateSnapshot(ctx context.Context, store storage.Storer, workDir string, m
 		return nil, fmt.Errorf("acquire workspace lock: %w", err)
 	}
 	defer ReleaseWorkspaceLock(workDir)
-	return createSnapshotInLock(ctx, store, workDir, message, author, cfg)
+	return createSnapshotInLock(ctx, store, workDir, message, author, cfg, true)
 }
 
-func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir string, message string, author string, cfg *core.CoreConfig) (*core.Snapshot, error) {
+func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir string, message string, author string, cfg *core.CoreConfig, showProgress bool) (*core.Snapshot, error) {
 	if message == "" {
 		return nil, fmt.Errorf("message is required")
 	}
@@ -67,11 +66,7 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		oldIndex = &core.Index{}
 	}
 
-	type fileInfo struct {
-		path string
-		info os.FileInfo
-	}
-	var workspaceFiles []fileInfo
+	var workspaceFiles []workspaceFile
 	err = fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -79,7 +74,7 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		if info.IsDir() {
 			return nil
 		}
-		workspaceFiles = append(workspaceFiles, fileInfo{path: path, info: info})
+		workspaceFiles = append(workspaceFiles, workspaceFile{path: path, info: info})
 		return nil
 	})
 	if err != nil {
@@ -95,6 +90,21 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	var totalSize int64
 	changed := false
 
+	// Show a progress bar for user-initiated saves with many files. The
+	// threshold is intentionally low (10) so even moderate projects get
+	// feedback; the progressbar library is a no-op on non-terminal stderr.
+	var bar *progressbar.ProgressBar
+	if showProgress && len(workspaceFiles) >= 10 {
+		bar = progressbar.Default(int64(len(workspaceFiles)), "saving")
+	}
+
+	// First pass: separate unchanged (fast path) from changed files.
+	// Unchanged files are identified by matching ModTime + Size against
+	// the old index; their entries are copied without re-chunking.
+	entryMap := make(map[string]core.FileEntry, len(workspaceFiles))
+	var orderedPaths []string
+	var tasks []fileTask
+
 	for _, f := range workspaceFiles {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -103,11 +113,12 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		if err != nil {
 			return nil, fmt.Errorf("relative path for %s: %w", f.path, err)
 		}
+		orderedPaths = append(orderedPaths, relPath)
 
 		if oldEntry, ok := oldIndexMap[relPath]; ok &&
 			oldEntry.Size == f.info.Size() &&
 			oldEntry.ModTime == f.info.ModTime().UnixNano() {
-			entry := core.FileEntry{
+			entryMap[relPath] = core.FileEntry{
 				Path:    relPath,
 				Mode:    core.FileMode(f.info.Mode()),
 				Size:    f.info.Size(),
@@ -115,78 +126,45 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 				Chunks:  oldEntry.Chunks,
 				Hash:    oldEntry.Hash,
 			}
-			fileEntries = append(fileEntries, entry)
 			totalSize += f.info.Size()
+			if bar != nil {
+				bar.Add(1) //nolint:errcheck
+			}
 			continue
 		}
 
-		file, err := os.Open(f.path)
-		if err != nil {
-			return nil, fmt.Errorf("open file %s: %w", f.path, err)
-		}
+		tasks = append(tasks, fileTask{wf: f, relPath: relPath})
+	}
 
-		header, err := io.ReadAll(io.LimitReader(file, core.HeaderPeekSize))
-		if err != nil {
-			file.Close()
-			return nil, fmt.Errorf("read header %s: %w", f.path, err)
-		}
-		engine := filetype.DetectEngine(relPath, header)
-		if engine == nil {
-			file.Close()
-			return nil, fmt.Errorf("no engine detected for %s", relPath)
-		}
+	// Concurrent processing of changed files using a worker pool sized
+	// to runtime.NumCPU(). Each task opens its own file and stores chunks
+	// to content-addressed paths, so no locking is needed.
+	processedEntries, err := chunkFilesConcurrent(ctx, store, tasks, bar)
+	if err != nil {
+		return nil, err
+	}
 
-		if _, err := file.Seek(0, io.SeekStart); err != nil {
-			file.Close()
-			return nil, fmt.Errorf("seek %s: %w", f.path, err)
-		}
+	// Merge results in workspace walk order (deterministic) and detect
+	// actual changes by comparing content hashes.
+	for _, relPath := range orderedPaths {
+		entry, ok := entryMap[relPath]
+		if !ok {
+			entry = processedEntries[relPath]
+			totalSize += entry.Size
 
-		chunks, err := chunkFile(ctx, f.path, file, engine, f.info.Size())
-		file.Close()
-		if err != nil {
-			return nil, fmt.Errorf("chunk file %s: %w", f.path, err)
-		}
-
-		var chunkHashes []core.Hash
-		for _, c := range chunks {
-			has, err := store.HasChunk(ctx, c.Hash)
-			if err != nil {
-				return nil, fmt.Errorf("check chunk existence %s: %w", c.Hash.String(), err)
-			}
-			if !has {
-				if err := store.PutChunk(ctx, c); err != nil {
-					return nil, fmt.Errorf("store chunk %s: %w", c.Hash.String(), err)
+			if oldEntry, ok := oldIndexMap[relPath]; ok {
+				if oldEntry.Hash != entry.Hash {
+					changed = true
 				}
+			} else {
+				changed = true
 			}
-			chunkHashes = append(chunkHashes, c.Hash)
-		}
-
-		fileHash := computeFileHashFromChunks(chunks)
-
-		var metadata *core.FileMetadata
-		if m := engine.Metadata(); m != nil {
-			metadata = m
-		}
-
-		entry := core.FileEntry{
-			Path:     relPath,
-			Mode:     core.FileMode(f.info.Mode()),
-			Size:     f.info.Size(),
-			ModTime:  f.info.ModTime().UnixNano(),
-			Chunks:   chunkHashes,
-			Hash:     fileHash,
-			Metadata: metadata,
 		}
 		fileEntries = append(fileEntries, entry)
-		totalSize += f.info.Size()
+	}
 
-		if oldEntry, ok := oldIndexMap[relPath]; !ok {
-			changed = true
-		} else if oldEntry.Size != f.info.Size() || oldEntry.ModTime != f.info.ModTime().UnixNano() {
-			changed = true
-		} else if oldEntry.Hash != fileHash {
-			changed = true
-		}
+	if bar != nil {
+		bar.Finish() //nolint:errcheck
 	}
 
 	if !changed && len(oldIndexMap) != len(workspaceFiles) {
@@ -256,41 +234,4 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	slog.Info("snapshot created", "id", snap.ShortID(), "branch", symRef, "files", len(snap.Files), "size", snap.TotalSize, "message", message)
 
 	return snap, nil
-}
-
-// ComputeFileHash returns the BLAKE3 file hash for filePath by chunking it
-// with the detected engine and hashing the concatenation of chunk hashes.
-// The hash is independent of chunk data layout and matches the hash
-// CreateSnapshot would produce for the same file.
-func ComputeFileHash(filePath string) (core.Hash, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return core.Hash{}, fmt.Errorf("open file %s: %w", filePath, err)
-	}
-	defer file.Close()
-
-	header, err := io.ReadAll(io.LimitReader(file, core.HeaderPeekSize))
-	if err != nil {
-		return core.Hash{}, fmt.Errorf("read header %s: %w", filePath, err)
-	}
-	engine := filetype.DetectEngine(filePath, header)
-	if engine == nil {
-		return core.Hash{}, fmt.Errorf("no engine detected for %s", filePath)
-	}
-
-	info, err := file.Stat()
-	if err != nil {
-		return core.Hash{}, fmt.Errorf("stat file %s: %w", filePath, err)
-	}
-
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return core.Hash{}, fmt.Errorf("seek %s: %w", filePath, err)
-	}
-
-	chunks, err := chunkFile(context.Background(), filePath, file, engine, info.Size())
-	if err != nil {
-		return core.Hash{}, fmt.Errorf("chunk file %s: %w", filePath, err)
-	}
-
-	return computeFileHashFromChunks(chunks), nil
 }

@@ -203,17 +203,13 @@ func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 		}
 	}
 
+	// Batch check: list remote chunk directories once instead of per-chunk Stat.
+	remoteChunkSet := listRemoteChunkHashes(ctx, rfs, chunkHashes)
 	for _, ch := range chunkHashes {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		chPath := chunkRemotePath(ch)
-		if _, err := rfs.Stat(chPath); err == nil {
+		if remoteChunkSet[ch] {
 			stats.ChunksSkipped++
-		} else if errors.Is(err, os.ErrNotExist) {
-			stats.ChunksUploaded++
 		} else {
-			return nil, fmt.Errorf("stat remote chunk %s: %w", ch.String(), err)
+			stats.ChunksUploaded++
 		}
 	}
 
@@ -254,12 +250,10 @@ func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 		}
 	}
 
+	// Batch check: list local chunks once instead of per-chunk HasChunk.
+	localChunkSet := listLocalChunkHashes(ctx, store)
 	for _, ch := range chunkHashes {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		has, _ := store.HasChunk(ctx, ch)
-		if has {
+		if localChunkSet[ch] {
 			stats.ChunksSkipped++
 		} else {
 			stats.ChunksUploaded++
@@ -272,17 +266,37 @@ func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 }
 
 // pushChunksConcurrent uploads chunkHashes to rfs with bounded concurrency.
+// Remote chunk existence is checked in batch (one List per prefix directory)
+// before uploading, replacing N per-chunk Stat calls with at most 256 List
+// calls (typically far fewer).
 func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats) error {
 	chunkTotal := len(chunkHashes)
 	if chunkTotal == 0 {
 		return nil
 	}
-	bar := progressbar.Default(int64(chunkTotal), "chunks push")
+
+	// Batch check: list remote chunk directories to build existence set.
+	remoteChunkSet := listRemoteChunkHashes(ctx, rfs, chunkHashes)
+
+	// Partition into skip / upload lists.
+	var toUpload []core.Hash
+	for _, ch := range chunkHashes {
+		if remoteChunkSet[ch] {
+			stats.ChunksSkipped++
+		} else {
+			toUpload = append(toUpload, ch)
+		}
+	}
+	if len(toUpload) == 0 {
+		return nil
+	}
+
+	bar := progressbar.Default(int64(len(toUpload)), "chunks push")
 	var mu sync.Mutex
 	var firstErr error
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
-	for _, ch := range chunkHashes {
+	for _, ch := range toUpload {
 		if err := ctx.Err(); err != nil {
 			firstErr = err
 			break
@@ -292,14 +306,6 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 		go func(h core.Hash) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			chPath := chunkRemotePath(h)
-			if _, statErr := rfs.Stat(chPath); statErr == nil {
-				mu.Lock()
-				stats.ChunksSkipped++
-				mu.Unlock()
-				bar.Add(1) //nolint:errcheck
-				return
-			}
 			if err := pushChunk(ctx, store, rfs, h); err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -320,17 +326,36 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 }
 
 // pullChunksConcurrent downloads chunkHashes from rfs with bounded concurrency.
+// Local chunk existence is checked in batch (one ListChunks call) before
+// downloading, replacing N per-chunk HasChunk calls with a single call.
 func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats) error {
 	chunkTotal := len(chunkHashes)
 	if chunkTotal == 0 {
 		return nil
 	}
-	bar := progressbar.Default(int64(chunkTotal), "chunks pull")
+
+	// Batch check: list local chunks once instead of per-chunk HasChunk.
+	localChunkSet := listLocalChunkHashes(ctx, store)
+
+	// Partition into skip / download lists.
+	var toDownload []core.Hash
+	for _, ch := range chunkHashes {
+		if localChunkSet[ch] {
+			stats.ChunksSkipped++
+		} else {
+			toDownload = append(toDownload, ch)
+		}
+	}
+	if len(toDownload) == 0 {
+		return nil
+	}
+
+	bar := progressbar.Default(int64(len(toDownload)), "chunks pull")
 	var mu sync.Mutex
 	var firstErr error
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
-	for _, ch := range chunkHashes {
+	for _, ch := range toDownload {
 		if err := ctx.Err(); err != nil {
 			firstErr = err
 			break
@@ -340,22 +365,6 @@ func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 		go func(h core.Hash) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			has, hasErr := store.HasChunk(ctx, h)
-			if hasErr != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("check local chunk %s: %w", h.String(), hasErr)
-				}
-				mu.Unlock()
-				return
-			}
-			if has {
-				mu.Lock()
-				stats.ChunksSkipped++
-				mu.Unlock()
-				bar.Add(1) //nolint:errcheck
-				return
-			}
 			if err := pullChunk(ctx, store, rfs, h); err != nil {
 				mu.Lock()
 				if firstErr == nil {

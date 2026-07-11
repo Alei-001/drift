@@ -62,7 +62,7 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 			return "", "", 0, ErrUncommittedChanges
 		}
 	} else {
-		autosaveSnap, err = createSnapshotInLock(ctx, store, workDir, "auto - switch backup", author, cfg)
+		autosaveSnap, err = createSnapshotInLock(ctx, store, workDir, "auto - switch backup", author, cfg, false)
 		if err != nil {
 			if !errors.Is(err, ErrNothingToSave) {
 				return "", "", 0, fmt.Errorf("auto-save: %w", err)

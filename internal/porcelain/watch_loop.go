@@ -125,7 +125,7 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 				continue
 			}
 			msg := AutoSavePrefix + " " + time.Now().Format("2006-01-02 15:04")
-			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", cfg)
+			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", cfg, false)
 			if err != nil {
 				state.LastError = "save: " + err.Error()
 				slog.Error("auto-save failed", "error", err, "changes", fmt.Sprintf("+%d ~%d -%d",
