@@ -36,7 +36,7 @@ Release assets follow the naming convention
 with an optional drift_<version>_checksums.txt (SHA-256) that is verified
 when present.`,
 	Args: cobra.NoArgs,
-	RunE:  runUpgrade,
+	RunE: runUpgrade,
 }
 
 func init() {

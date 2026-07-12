@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/spf13/cobra"
 	"github.com/Alei-001/drift/internal/util/fsutil"
+	"github.com/spf13/cobra"
 )
 
 // ignoreCmd is the parent command for ignore-rule management. It has no

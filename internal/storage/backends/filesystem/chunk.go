@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	chunkHeaderSize = 1
+	chunkHeaderSize          = 1
 	chunkFlagCompressed byte = 0x01
 )
 

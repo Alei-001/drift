@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/Alei-001/drift/internal/remote"
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 

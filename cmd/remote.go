@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/spf13/cobra"
 	"github.com/Alei-001/drift/internal/remote"
+	"github.com/spf13/cobra"
 )
 
 // remoteCmd is the parent command for remote management.

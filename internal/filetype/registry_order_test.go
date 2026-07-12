@@ -24,10 +24,10 @@ var (
 // → binary so that specific formats are matched before the binary fallback.
 func TestRegistrationOrder(t *testing.T) {
 	cases := []struct {
-		name        string
-		path        string
-		header      []byte
-		wantEngine  string
+		name       string
+		path       string
+		header     []byte
+		wantEngine string
 	}{
 		{
 			name:       "png matches image engine not binary",

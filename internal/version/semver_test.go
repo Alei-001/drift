@@ -17,11 +17,11 @@ func TestParseSemver(t *testing.T) {
 		{"v1.2.3-alpha.1", 1, 2, 3, []string{"alpha", "1"}, false},
 		{"v1.2.3+build.5", 1, 2, 3, nil, false}, // build metadata stripped
 		{"v1.2.3-rc.1+build.5", 1, 2, 3, []string{"rc", "1"}, false},
-		{"v1.2", 0, 0, 0, nil, true},            // too few parts
-		{"v1.2.3.4", 0, 0, 0, nil, true},        // too many parts
-		{"v1.2.x", 0, 0, 0, nil, true},          // non-numeric
-		{"", 0, 0, 0, nil, true},                // empty
-		{"v-1.0.0", 0, 0, 0, nil, true},         // negative
+		{"v1.2", 0, 0, 0, nil, true},     // too few parts
+		{"v1.2.3.4", 0, 0, 0, nil, true}, // too many parts
+		{"v1.2.x", 0, 0, 0, nil, true},   // non-numeric
+		{"", 0, 0, 0, nil, true},         // empty
+		{"v-1.0.0", 0, 0, 0, nil, true},  // negative
 	}
 	for _, c := range cases {
 		v, err := parseSemver(c.in)
@@ -120,8 +120,8 @@ func TestIsNewer(t *testing.T) {
 		{"v1.0.0", "v0.9.0", true, false},
 		{"v0.9.0", "v1.0.0", false, false},
 		{"v1.0.0", "v1.0.0", false, false},
-		{"v1.0.0", "(devel)", true, false},  // dev is always older
-		{"v1.0.0", "", true, false},          // empty current treated as dev
+		{"v1.0.0", "(devel)", true, false}, // dev is always older
+		{"v1.0.0", "", true, false},        // empty current treated as dev
 		{"not-a-version", "v1.0.0", false, true},
 		{"v1.0.0", "not-a-version", false, true},
 	}

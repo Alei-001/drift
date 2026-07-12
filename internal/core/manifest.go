@@ -44,5 +44,3 @@ func ManifestToSummary(m *SnapshotManifest) *SnapshotSummary {
 	}
 	return ss
 }
-
-

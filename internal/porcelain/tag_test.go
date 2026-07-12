@@ -12,7 +12,9 @@ import (
 
 // putTestSnapshot stores a minimal snapshot in the memory backend for tag
 // tests that need a valid snapshot ID to point at.
-func putTestSnapshot(t *testing.T, store interface{ PutSnapshot(context.Context, *core.Snapshot) error }) core.SnapshotID {
+func putTestSnapshot(t *testing.T, store interface {
+	PutSnapshot(context.Context, *core.Snapshot) error
+}) core.SnapshotID {
 	t.Helper()
 	snap := &core.Snapshot{
 		ID:        core.SnapshotID{Hash: core.Hash{0xAA, 0xBB}},

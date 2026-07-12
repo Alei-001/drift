@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/util/cache"
 	"github.com/Alei-001/drift/internal/util/fsutil"
+	"github.com/klauspost/compress/zstd"
 )
 
 type FSStorage struct {
@@ -20,10 +20,10 @@ type FSStorage struct {
 	// encoder/decoder (SetCompressionConfig and Close). It does NOT protect
 	// data-access methods (GetChunk/PutChunk): those rely on the
 	// porcelain workspace lock guaranteeing single-threaded access.
-	lifecycleMu  sync.Mutex
-	zstdDecoder  *zstd.Decoder
-	zstdEncoder  *zstd.Encoder
-	compression  bool
+	lifecycleMu sync.Mutex
+	zstdDecoder *zstd.Decoder
+	zstdEncoder *zstd.Encoder
+	compression bool
 	// packMu protects the packIndices cache. Although FSStorage assumes
 	// single-threaded access, save's worker pool may concurrently call
 	// GetChunk (read already-stored chunks) and trigger lazy pack index

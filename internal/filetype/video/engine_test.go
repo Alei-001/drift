@@ -22,7 +22,8 @@ func buildBox(boxType string, payload []byte) []byte {
 
 // buildMP4WithDimensions constructs a minimal MP4 byte stream whose first
 // trak/tkhd reports the given pixel dimensions. The layout is:
-//   ftyp | moov(trak(tkhd))
+//
+//	ftyp | moov(trak(tkhd))
 func buildMP4WithDimensions(width, height int) []byte {
 	// tkhd payload, version 0 (84 bytes). Width/height are fixed 16.16 at
 	// payload offsets 76 and 80.

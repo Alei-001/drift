@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/Alei-001/drift/internal/porcelain"
+	"github.com/spf13/cobra"
 )
 
 // undoData is the JSON data payload of `drift undo` on success.

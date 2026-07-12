@@ -282,14 +282,16 @@ func TestComputeFileHash_EmptyFile(t *testing.T) {
 // simulating whole-file chunking. Used to test the large-file guard.
 type nilChunkerEngine struct{}
 
-func (nilChunkerEngine) Name() string                                                 { return "nil-test" }
-func (nilChunkerEngine) DetectByMagic([]byte) bool                                    { return false }
-func (nilChunkerEngine) DetectByExtension(string) bool                                { return false }
-func (nilChunkerEngine) DetectByHeuristic(string, []byte) bool                        { return false }
-func (nilChunkerEngine) ChunkerFor(int64) chunker.Chunker           { return nil }
-func (nilChunkerEngine) Diff(context.Context, string, io.Reader, string, io.Reader) (string, error) { return "", nil }
-func (nilChunkerEngine) Preview([]byte, int64, io.Reader, int) (string, error)        { return "", nil }
-func (nilChunkerEngine) Metadata() *core.FileMetadata                                 { return nil }
+func (nilChunkerEngine) Name() string                          { return "nil-test" }
+func (nilChunkerEngine) DetectByMagic([]byte) bool             { return false }
+func (nilChunkerEngine) DetectByExtension(string) bool         { return false }
+func (nilChunkerEngine) DetectByHeuristic(string, []byte) bool { return false }
+func (nilChunkerEngine) ChunkerFor(int64) chunker.Chunker      { return nil }
+func (nilChunkerEngine) Diff(context.Context, string, io.Reader, string, io.Reader) (string, error) {
+	return "", nil
+}
+func (nilChunkerEngine) Preview([]byte, int64, io.Reader, int) (string, error) { return "", nil }
+func (nilChunkerEngine) Metadata() *core.FileMetadata                          { return nil }
 
 // TestChunkFile_NilChunkerLargeFile is a regression test for OOM: when
 // ChunkerFor returns nil (whole-file mode) and the file exceeds 64 KB,

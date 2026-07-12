@@ -27,4 +27,3 @@ type ConfigStorer interface {
 func NormalizeConfig(cfg *core.Config) {
 	cfg.Core.Normalize()
 }
-

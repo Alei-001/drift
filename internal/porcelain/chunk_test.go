@@ -79,8 +79,8 @@ func TestCountFileLines(t *testing.T) {
 	hash3 := core.Hash{0x03}
 
 	store := memory.NewMemoryStorage()
-	store.PutChunk(context.Background(), &core.Chunk{Hash: hash1, Data: []byte("line1\nline2\n")})       // 2 newlines
-	store.PutChunk(context.Background(), &core.Chunk{Hash: hash2, Data: []byte("line3\nline4")})         // 1 newline
+	store.PutChunk(context.Background(), &core.Chunk{Hash: hash1, Data: []byte("line1\nline2\n")})        // 2 newlines
+	store.PutChunk(context.Background(), &core.Chunk{Hash: hash2, Data: []byte("line3\nline4")})          // 1 newline
 	store.PutChunk(context.Background(), &core.Chunk{Hash: hash3, Data: []byte("line5\nline6\nline7\n")}) // 3 newlines
 
 	entry := core.FileEntry{

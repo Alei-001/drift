@@ -18,14 +18,14 @@ import (
 )
 
 const (
-	packIndexMagic        = "DPID"
-	packIndexVersion      = 1
-	packThreshold         = 512
-	packRewriteRatio      = 0.5
-	packPrefix            = "pack-"
-	packNameFormat        = packPrefix + "%08d"
-	packEntrySize         = 45
-	packIndexHeaderSize   = 4 + 1 + 4 // magic + version + chunk_count
+	packIndexMagic      = "DPID"
+	packIndexVersion    = 1
+	packThreshold       = 512
+	packRewriteRatio    = 0.5
+	packPrefix          = "pack-"
+	packNameFormat      = packPrefix + "%08d"
+	packEntrySize       = 45
+	packIndexHeaderSize = 4 + 1 + 4 // magic + version + chunk_count
 )
 
 // packEntry records where a single chunk lives inside a pack file.

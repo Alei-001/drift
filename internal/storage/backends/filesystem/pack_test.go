@@ -205,7 +205,6 @@ func TestHasChunk_Pack(t *testing.T) {
 	}
 }
 
-
 func TestPackIndex_WriteRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	fs, err := NewFSStorage(tmpDir)
@@ -371,4 +370,3 @@ func TestNextPackName(t *testing.T) {
 		t.Errorf("expected pack-00000006, got %q", name)
 	}
 }
-

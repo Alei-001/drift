@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 
+	"github.com/Alei-001/drift/internal/core"
 	cdc "github.com/PlakarKorp/go-cdc-chunkers"
 	_ "github.com/PlakarKorp/go-cdc-chunkers/chunkers/fastcdc"
-	"github.com/Alei-001/drift/internal/core"
 	"github.com/zeebo/blake3"
 )
 

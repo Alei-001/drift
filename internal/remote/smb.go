@@ -22,16 +22,18 @@ func init() {
 // Unlike WebDAV (stateless HTTP), SMB holds a live TCP connection + session,
 // so Close() must be called to release resources.
 type SMBFS struct {
-	conn   net.Conn
+	conn    net.Conn
 	session *smb2.Session
-	share  *smb2.Share
+	share   *smb2.Share
 	// subPath is the path within the share (the part of the URL after the
 	// share name). All operations are relative to this path.
 	subPath string
 }
 
 // NewSMBFS constructs an SMBFS from a RemoteConfig. The URL format is:
-//   smb://host[:port]/share[/path]
+//
+//	smb://host[:port]/share[/path]
+//
 // The password is read from cfg.Options["_password"] (populated by
 // resolveRemoteConfig from the user-level credentials.json).
 // cfg.Options["domain"] optionally specifies the SMB domain.
@@ -145,7 +147,7 @@ type smbReadCloser struct {
 }
 
 func (r *smbReadCloser) Read(p []byte) (int, error) { return r.file.Read(p) }
-func (r *smbReadCloser) Close() error                { return r.file.Close() }
+func (r *smbReadCloser) Close() error               { return r.file.Close() }
 
 // Read opens a remote file for streaming. The caller must close the reader.
 func (s *SMBFS) Read(p string) (io.ReadCloser, error) {

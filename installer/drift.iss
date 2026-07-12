@@ -20,6 +20,11 @@
   #define SourceDir "..\dist\drift_windows_amd64"
 #endif
 
+; VersionInfoVersion requires a 4-part version (x.x.x.x). MyAppVersion
+; from the CI tag is 3-part semver (x.x.x), so append ".0" via the
+; preprocessor to produce the required format.
+#define MyAppVersionFull MyAppVersion + ".0"
+
 ; OutputBaseFilename uses a fixed name to avoid Inno Setup preprocessor
 ; issues with version strings (dots are rejected; dashes are parsed as
 ; arithmetic). The CI workflow renames the output to include the version.
@@ -29,7 +34,7 @@ AppName=drift
 AppId={{A6D130FE-690D-4B4D-B6A0-5B351FD020BC}
 AppVersion={#MyAppVersion}
 AppVerName=drift {#MyAppVersion}
-VersionInfoVersion={#MyAppVersion}.0
+VersionInfoVersion={#MyAppVersionFull}
 AppPublisher=drift
 AppPublisherURL=https://github.com/Alei-001/drift
 AppSupportURL=https://github.com/Alei-001/drift/issues

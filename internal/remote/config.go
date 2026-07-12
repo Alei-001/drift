@@ -15,8 +15,8 @@ import (
 // go in Options so adding a new protocol never changes this struct.
 type RemoteConfig struct {
 	Name    string            `json:"name"`
-	Type    string            `json:"type"`             // "webdav" | "smb" | future
-	URL     string            `json:"url"`              // webdav: https://host[:port]/path; smb: smb://host[:port]/share[/path]
+	Type    string            `json:"type"` // "webdav" | "smb" | future
+	URL     string            `json:"url"`  // webdav: https://host[:port]/path; smb: smb://host[:port]/share[/path]
 	User    string            `json:"user"`
 	Options map[string]string `json:"options,omitempty"` // protocol-specific fields
 }

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/Alei-001/drift/internal/storage"
+	"github.com/spf13/cobra"
 )
 
 // Column widths for the default table view. Messages, branch names, and tags

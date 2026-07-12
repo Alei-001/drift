@@ -66,39 +66,39 @@ var showCmd = &cobra.Command{
 		}
 
 		// Argument parsing:
-	//   - 1 arg that looks like a version reference (starts with "id:",
-	//     "tag:", "branch:", or equals "head"): list that snapshot's files.
-	//   - 1 arg not matching a version prefix: treated as a file path with
-	//     an implicit HEAD version. This is an intentional UX decision:
-	//     `drift show README.md` reads more naturally than
-	//     `drift show head README.md`. The bare-name-as-branch grammar
-	//     still applies when the user intends a branch (e.g.
-	//     `drift show main`).
-	//   - 2 args: version then file.
-	var versionLabel, filePath string
-	if len(args) == 1 {
-		if isVersionRef(args[0]) {
-			versionLabel = args[0]
+		//   - 1 arg that looks like a version reference (starts with "id:",
+		//     "tag:", "branch:", or equals "head"): list that snapshot's files.
+		//   - 1 arg not matching a version prefix: treated as a file path with
+		//     an implicit HEAD version. This is an intentional UX decision:
+		//     `drift show README.md` reads more naturally than
+		//     `drift show head README.md`. The bare-name-as-branch grammar
+		//     still applies when the user intends a branch (e.g.
+		//     `drift show main`).
+		//   - 2 args: version then file.
+		var versionLabel, filePath string
+		if len(args) == 1 {
+			if isVersionRef(args[0]) {
+				versionLabel = args[0]
+			} else {
+				versionLabel = "head"
+				filePath = args[0]
+			}
 		} else {
-			versionLabel = "head"
-			filePath = args[0]
-		}
-	} else {
 			versionLabel = args[0]
 			filePath = args[1]
 		}
 
 		snapshot := resolveSnapshot(ctx, store, versionLabel)
-	if snapshot == nil {
-		reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
-			"use 'drift log' to list available snapshots.")
-		return ErrSilent
-	}
+		if snapshot == nil {
+			reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
+				"use 'drift log' to list available snapshots.")
+			return ErrSilent
+		}
 
-	if filePath == "" {
-		return showFileList(ctx, store, snapshot, versionLabel)
-	}
-	return showFile(ctx, store, cwd, snapshot, versionLabel, filePath)
+		if filePath == "" {
+			return showFileList(ctx, store, snapshot, versionLabel)
+		}
+		return showFile(ctx, store, cwd, snapshot, versionLabel, filePath)
 	},
 }
 

@@ -4,9 +4,9 @@ package core
 // storage-layer normalization, and downstream consumers (chunker, fsutil)
 // all reference the same source of truth instead of repeating magic literals.
 const (
-	DefaultChunkMinSize     = 128 * 1024  // 128KB
-	DefaultChunkAvgSize     = 256 * 1024  // 256KB
-	DefaultChunkMaxSize     = 512 * 1024  // 512KB
+	DefaultChunkMinSize     = 128 * 1024 // 128KB
+	DefaultChunkAvgSize     = 256 * 1024 // 256KB
+	DefaultChunkMaxSize     = 512 * 1024 // 512KB
 	DefaultIgnoreFile       = ".driftignore"
 	DefaultAutoSaveInterval = 300
 	DefaultAutoSaveKeep     = 10

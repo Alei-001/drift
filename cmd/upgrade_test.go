@@ -29,7 +29,7 @@ func newFakeUpgradeServer(t *testing.T, status int, body string) *fakeUpgradeSer
 	return f
 }
 
-func (f *fakeUpgradeServer) close() { f.server.Close() }
+func (f *fakeUpgradeServer) close()      { f.server.Close() }
 func (f *fakeUpgradeServer) url() string { return f.server.URL }
 
 func (f *fakeUpgradeServer) handle(w http.ResponseWriter, r *http.Request) {

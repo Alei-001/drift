@@ -28,7 +28,7 @@ func TestFileMode_IsRegular(t *testing.T) {
 	if !FileModeRegular.IsRegular() {
 		t.Error("FileModeRegular should be regular")
 	}
-	if !FileMode(FileModeRegular|0o755).IsRegular() {
+	if !FileMode(FileModeRegular | 0o755).IsRegular() {
 		t.Error("regular with perm bits should be regular")
 	}
 	if FileModeDir.IsRegular() {

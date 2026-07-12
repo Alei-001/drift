@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/Alei-001/drift/internal/porcelain"
+	"github.com/spf13/cobra"
 )
 
 var (

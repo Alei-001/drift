@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/porcelain"
+	"github.com/spf13/cobra"
 )
 
 var restoreNoBackup bool
@@ -66,74 +66,74 @@ var restoreCmd = &cobra.Command{
 		}
 
 		// Capture the pre-restore HEAD so we can report it as the undo point
-	// when no backup snapshot was created (clean workspace). This must be
-	// read BEFORE RestoreSnapshot, which moves HEAD to the restore target.
-	var prevHeadID string
-	if prevHead, refErr := store.GetRef(ctx, "HEAD"); refErr == nil && !prevHead.Target.IsZero() {
-		prevHeadID = prevHead.Target.String()
-	}
-
-	backupID, err := porcelain.RestoreSnapshot(ctx, store, cwd, snapshot.ID, filePath, restoreNoBackup, &cfg.Core)
-	if err != nil {
-		// Tailor the hint to the failure: ErrFileNotFound means the file
-		// simply doesn't exist in that snapshot (the user should list
-		// files with `drift show`), whereas other errors (e.g. write
-		// failures) suggest saving first.
-		hint := "use 'drift save' first, or restore a single file."
-		if errors.Is(err, porcelain.ErrFileNotFound) {
-			hint = fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", args[0])
+		// when no backup snapshot was created (clean workspace). This must be
+		// read BEFORE RestoreSnapshot, which moves HEAD to the restore target.
+		var prevHeadID string
+		if prevHead, refErr := store.GetRef(ctx, "HEAD"); refErr == nil && !prevHead.Target.IsZero() {
+			prevHeadID = prevHead.Target.String()
 		}
-		reportFailed("Restore", "restore", err.Error(), hint)
-		return ErrSilent
-	}
 
-	// If no backup snapshot was created (workspace was clean), fall back
-	// to the pre-restore HEAD as the undo point so the user knows how to
-	// revert. Using prevHeadID (captured above) instead of re-reading HEAD
-	// is essential: RestoreSnapshot already moved HEAD to the restore target.
-	if backupID == "" && !restoreNoBackup {
-		backupID = prevHeadID
-	}
-
-	if globalJSON {
-		data := restoreData{
-			Version: args[0],
-			Mode:    "full",
-			Backup:  backupID,
-		}
-		if filePath != "" {
-			data.Mode = "file"
-			data.File = filePath
-		} else {
-			data.Added = toRestoreFiles(add)
-			data.Modified = toRestoreFiles(mod)
-			data.Deleted = del
-			data.Summary = &restoreSummary{
-				Total:    len(add) + len(mod) + len(del),
-				Added:    len(add),
-				Modified: len(mod),
-				Deleted:  len(del),
+		backupID, err := porcelain.RestoreSnapshot(ctx, store, cwd, snapshot.ID, filePath, restoreNoBackup, &cfg.Core)
+		if err != nil {
+			// Tailor the hint to the failure: ErrFileNotFound means the file
+			// simply doesn't exist in that snapshot (the user should list
+			// files with `drift show`), whereas other errors (e.g. write
+			// failures) suggest saving first.
+			hint := "use 'drift save' first, or restore a single file."
+			if errors.Is(err, porcelain.ErrFileNotFound) {
+				hint = fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", args[0])
 			}
+			reportFailed("Restore", "restore", err.Error(), hint)
+			return ErrSilent
 		}
-		if err := outputJSON(JSONEnvelope{
-			Command: "restore",
-			Status:  "ok",
-			Data:    data,
-		}); err != nil {
-			return err
+
+		// If no backup snapshot was created (workspace was clean), fall back
+		// to the pre-restore HEAD as the undo point so the user knows how to
+		// revert. Using prevHeadID (captured above) instead of re-reading HEAD
+		// is essential: RestoreSnapshot already moved HEAD to the restore target.
+		if backupID == "" && !restoreNoBackup {
+			backupID = prevHeadID
 		}
-		return nil
-	}
 
-	// Quiet mode: success produces no output (exit code is authoritative).
-	if globalQuiet {
-		return nil
-	}
+		if globalJSON {
+			data := restoreData{
+				Version: args[0],
+				Mode:    "full",
+				Backup:  backupID,
+			}
+			if filePath != "" {
+				data.Mode = "file"
+				data.File = filePath
+			} else {
+				data.Added = toRestoreFiles(add)
+				data.Modified = toRestoreFiles(mod)
+				data.Deleted = del
+				data.Summary = &restoreSummary{
+					Total:    len(add) + len(mod) + len(del),
+					Added:    len(add),
+					Modified: len(mod),
+					Deleted:  len(del),
+				}
+			}
+			if err := outputJSON(JSONEnvelope{
+				Command: "restore",
+				Status:  "ok",
+				Data:    data,
+			}); err != nil {
+				return err
+			}
+			return nil
+		}
 
-	// Use args[0] (the user-supplied version reference) in the
-	// status line so the output echoes what the user typed, e.g.
-	// ">>> Restored to id:12ab [ok]".
-	if filePath != "" {
+		// Quiet mode: success produces no output (exit code is authoritative).
+		if globalQuiet {
+			return nil
+		}
+
+		// Use args[0] (the user-supplied version reference) in the
+		// status line so the output echoes what the user typed, e.g.
+		// ">>> Restored to id:12ab [ok]".
+		if filePath != "" {
 			fmt.Printf(">>> Restored %s:%s [ok]\n", args[0], filePath)
 			fmt.Println()
 			fmt.Printf("  ~  %s\n", filePath)

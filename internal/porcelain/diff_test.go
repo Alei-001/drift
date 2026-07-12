@@ -110,8 +110,8 @@ func TestDiffSnapshots_AddedModifiedDeleted(t *testing.T) {
 	snap2 := &core.Snapshot{
 		ID: core.SnapshotID{Hash: core.Hash{0x02}},
 		Files: []core.FileEntry{
-			{Path: "a", Hash: hashA, Size: 10, Chunks: []core.Hash{hashA}},           // unchanged
-			{Path: "b", Hash: hashB2, Size: 25, Chunks: []core.Hash{hashB2}},         // modified (hash + size)
+			{Path: "a", Hash: hashA, Size: 10, Chunks: []core.Hash{hashA}},            // unchanged
+			{Path: "b", Hash: hashB2, Size: 25, Chunks: []core.Hash{hashB2}},          // modified (hash + size)
 			{Path: "d", Hash: core.Hash{0xDD}, Size: 40, Chunks: []core.Hash{{0xDD}}}, // added
 		},
 	}
