@@ -74,7 +74,7 @@ func (fs *FSStorage) nextPackName() (string, error) {
 		if !strings.HasPrefix(base, packPrefix) {
 			continue
 		}
-		numStr := base[5:]
+		numStr := base[len(packPrefix):]
 		n, err := strconv.Atoi(numStr)
 		if err != nil {
 			continue

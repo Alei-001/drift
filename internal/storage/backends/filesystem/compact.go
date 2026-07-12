@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,6 +103,7 @@ func (fs *FSStorage) CompactChunks(ctx context.Context, reachable map[core.Hash]
 		}
 		idx, err := fs.getPackIndex(name)
 		if err != nil {
+			slog.Warn("skip corrupt pack index during compact", "pack", name, "error", err)
 			continue
 		}
 
