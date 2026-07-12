@@ -13,4 +13,5 @@ const (
 	HeadFile     = "HEAD"
 	IndexFile    = "index"
 	ConfigFile   = "config"
+	PacksDir     = "packs"
 )

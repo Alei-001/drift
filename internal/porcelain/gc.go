@@ -22,9 +22,9 @@ type GCReport struct {
 	SnapshotsRemoved int
 	ChunksRemoved    int
 	FreedBytes       int64
-	// AutoKept is the number of unreachable [auto] snapshots preserved by
-	// --keep-auto. They are not counted in SnapshotsRemoved.
-	AutoKept int
+	AutoKept         int
+	LoosePacked      int
+	PacksRewritten   int
 }
 
 // collectRoots gathers the target hashes of all branch and tag references.
@@ -157,9 +157,6 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 	}
 
 	// --- Unreferenced chunks ---
-	// Collect chunk hashes referenced by reachable snapshots and kept
-	// auto-saves. ListSnapshots returns metadata-only snapshots (nil Files),
-	// so fetch each snapshot's full data to access its chunk references.
 	reachableChunks := make(map[core.Hash]bool)
 	for _, snap := range allSnapshots {
 		if err := ctx.Err(); err != nil {
@@ -170,7 +167,6 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 		}
 		full, err := store.GetSnapshot(ctx, snap.ID)
 		if err != nil {
-			// Snapshot was deleted or corrupted; skip it.
 			continue
 		}
 		for _, f := range full.Files {
@@ -182,16 +178,11 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 		}
 	}
 
-	// Include chunks referenced by the workspace index. The index may
-	// reference chunks from snapshots that are otherwise unreachable
-	// (e.g. after a partial restore or branch switch), and deleting them
-	// would corrupt the index.
 	idx, err := store.GetIndex(ctx)
 	if err != nil {
 		if !errors.Is(err, storage.ErrNotFound) {
 			return report, fmt.Errorf("get workspace index: %w", err)
 		}
-		// No index exists yet; nothing to mark as reachable.
 	} else {
 		for _, e := range idx.Entries {
 			for _, c := range e.Chunks {
@@ -202,27 +193,36 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 		}
 	}
 
-	allChunks, err := store.ListChunks(ctx)
-	if err != nil {
-		return report, fmt.Errorf("list chunks: %w", err)
-	}
+	if compactor, ok := store.(storage.ChunkCompactor); ok {
+		cr, err := compactor.CompactChunks(ctx, reachableChunks, dryRun)
+		if err != nil {
+			return report, fmt.Errorf("compact chunks: %w", err)
+		}
+		report.ChunksRemoved = cr.LooseDeleted + cr.PackDeadRemoved
+		report.FreedBytes = cr.FreedBytes
+		report.LoosePacked = cr.LoosePacked
+		report.PacksRewritten = cr.PacksRewritten
+	} else {
+		allChunks, err := store.ListChunks(ctx)
+		if err != nil {
+			return report, fmt.Errorf("list chunks: %w", err)
+		}
 
-	for _, ch := range allChunks {
-		if err := ctx.Err(); err != nil {
-			return report, err
-		}
-		if reachableChunks[ch] {
-			continue
-		}
-		// Accumulate freed bytes in both modes. If GetChunk fails, skip the
-		// size contribution without aborting the pass.
-		if chunk, gerr := store.GetChunk(ctx, ch); gerr == nil {
-			report.FreedBytes += int64(chunk.Size)
-		}
-		report.ChunksRemoved++
-		if !dryRun {
-			if err := store.DeleteChunk(ctx, ch); err != nil {
-				return report, fmt.Errorf("delete chunk %s: %w", ch.FullString(), err)
+		for _, ch := range allChunks {
+			if err := ctx.Err(); err != nil {
+				return report, err
+			}
+			if reachableChunks[ch] {
+				continue
+			}
+			if chunk, gerr := store.GetChunk(ctx, ch); gerr == nil {
+				report.FreedBytes += int64(chunk.Size)
+			}
+			report.ChunksRemoved++
+			if !dryRun {
+				if err := store.DeleteChunk(ctx, ch); err != nil {
+					return report, fmt.Errorf("delete chunk %s: %w", ch.FullString(), err)
+				}
 			}
 		}
 	}
