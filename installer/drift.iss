@@ -20,10 +20,12 @@
   #define SourceDir "..\dist\drift_windows_amd64"
 #endif
 
-; VersionInfoVersion requires a 4-part version (x.x.x.x). MyAppVersion
-; from the CI tag is 3-part semver (x.x.x), so append ".0" via the
-; preprocessor to produce the required format.
-#define MyAppVersionFull MyAppVersion + ".0"
+; VersionInfoVersion requires a 4-part version (x.x.x.x). The CI passes
+; MyAppVersionFull (e.g. 0.2.0.0) via /D; the fallback appends .0 to
+; the 3-part semver for local builds.
+#ifndef MyAppVersionFull
+  #define MyAppVersionFull MyAppVersion + ".0"
+#endif
 
 ; OutputBaseFilename uses a fixed name to avoid Inno Setup preprocessor
 ; issues with version strings (dots are rejected; dashes are parsed as
