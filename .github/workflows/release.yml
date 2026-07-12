@@ -89,6 +89,19 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF -replace '^refs/tags/v',''
           echo "version=$tag" >> $env:GITHUB_OUTPUT
+          $parts = $tag.Split('.')
+          while ($parts.Count -lt 4) { $parts += '0' }
+          $full = $parts -join '.'
+          echo "version_full=$full" >> $env:GITHUB_OUTPUT
+
+      - name: Set numeric version in Inno Setup script
+        shell: pwsh
+        run: |
+          $numeric = "${{ steps.version.outputs.version_full }}"
+          $content = Get-Content installer/drift.iss -Raw
+          $content = $content -replace '#define MyAppVersionFull\s+"[^"]+"', "#define MyAppVersionFull `"$numeric`""
+          Set-Content installer/drift.iss -Value $content
+          Write-Host "Set MyAppVersionFull = $numeric"
 
       - name: Compile Inno Setup installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
