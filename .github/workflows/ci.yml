@@ -38,8 +38,18 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::Files need gofmt:"
+            echo "$out"
+            exit 1
+          fi
+
       - name: Test
-        # TestAcquireWorkspaceLock_StaleLockToctouRace is flaky on all platforms
+        # TestAcquireWorkspaceLock_StaleLockToctouRace is flaky on Windows
         # (TOCTOU race in concurrent lock acquisition, see AGENTS.md). Skip it
         # to keep CI green; the lock logic is covered by other tests.
         run: go test ./... -count=1 -skip TestAcquireWorkspaceLock_StaleLockToctouRace

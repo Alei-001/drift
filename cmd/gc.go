@@ -53,6 +53,8 @@ func runGC(cmd *cobra.Command, args []string) error {
 				ChunksRemoved:    report.ChunksRemoved,
 				FreedBytes:       report.FreedBytes,
 				AutoKept:         report.AutoKept,
+				LoosePacked:      report.LoosePacked,
+				PacksRewritten:   report.PacksRewritten,
 			},
 		}); err != nil {
 			return err
@@ -87,6 +89,12 @@ func runGC(cmd *cobra.Command, args []string) error {
 		snapshotLine += fmt.Sprintf(" (%d auto-saves kept by --keep-auto=%d)", report.AutoKept, gcKeepAuto)
 	}
 	fmt.Println(snapshotLine)
+	if report.LoosePacked > 0 {
+		fmt.Printf("  packed:     %d loose chunks\n", report.LoosePacked)
+	}
+	if report.PacksRewritten > 0 {
+		fmt.Printf("  repacked:   %d packs rewritten\n", report.PacksRewritten)
+	}
 	fmt.Printf("  chunks:     %d %s\n", report.ChunksRemoved, verb)
 	if gcDryRun {
 		fmt.Printf("  freed:      ~%s\n", formatSize(report.FreedBytes))
@@ -103,4 +111,6 @@ type gcData struct {
 	ChunksRemoved    int   `json:"chunks_removed"`
 	FreedBytes       int64 `json:"freed_bytes"`
 	AutoKept         int   `json:"auto_kept"`
+	LoosePacked      int   `json:"loose_packed"`
+	PacksRewritten   int   `json:"packs_rewritten"`
 }

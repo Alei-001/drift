@@ -24,6 +24,12 @@ type FSStorage struct {
 	zstdDecoder  *zstd.Decoder
 	zstdEncoder  *zstd.Encoder
 	compression  bool
+	// packMu protects the packIndices cache. Although FSStorage assumes
+	// single-threaded access, save's worker pool may concurrently call
+	// GetChunk (read already-stored chunks) and trigger lazy pack index
+	// loading, so packIndices needs mutex protection.
+	packMu      sync.Mutex
+	packIndices map[string]*packIndex
 }
 
 func NewFSStorage(root string) (*FSStorage, error) {
@@ -36,6 +42,7 @@ func NewFSStorage(root string) (*FSStorage, error) {
 		filepath.Join(root, RefsDir, HeadsDir),
 		filepath.Join(root, RefsDir, TagsDir),
 		filepath.Join(root, LogsDir),
+		filepath.Join(root, ChunksDir, PacksDir),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, fsutil.DefaultDirPerm); err != nil {
@@ -69,6 +76,7 @@ func NewFSStorage(root string) (*FSStorage, error) {
 		zstdDecoder:  decoder,
 		zstdEncoder:  encoder,
 		compression:  true,
+		packIndices:  make(map[string]*packIndex),
 	}, nil
 }
 

@@ -4,13 +4,15 @@
 #   - Cross-platform archives (zip/tar.gz) via goreleaser
 #   - Linux packages (.deb/.rpm) via goreleaser nfpm
 #   - macOS packages (.pkg) via pkgbuild
-#   - SHA-256 checksums file
+#   - SHA-256 checksums file (goreleaser, covers archives + Linux packages)
+#   - Per-artifact .sha256 sidecar files (covers installer + .pkg)
 #   - Windows graphical installer (.exe) via Inno Setup
 #
 # All artifacts are uploaded to the GitHub Release as drafts for review before
 # publishing. The Windows installer and macOS .pkg are built in separate jobs
 # because their toolchains (Inno Setup, pkgbuild) run natively on their
-# respective OSes.
+# respective OSes. Each installer ships with a .sha256 sidecar so users can
+# verify integrity without consulting the aggregate checksums file.
 
 name: release
 
@@ -102,11 +104,22 @@ jobs:
           Move-Item $src $dst -Force
           Write-Host "Renamed: $src -> $dst"
 
-      - name: Upload installer to release
+      - name: Generate installer .sha256 sidecar
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist/drift_*_windows_amd64_setup.exe | Select-Object -First 1
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          $sidecar = "$($exe.FullName).sha256"
+          "$hash  $($exe.Name)" | Out-File -NoNewline -Encoding ASCII $sidecar
+          Write-Host "Created: $sidecar"
+
+      - name: Upload installer and checksum to release
         uses: softprops/action-gh-release@v3
         with:
           draft: true
-          files: dist/drift_*_windows_amd64_setup.exe
+          files: |
+            dist/drift_*_windows_amd64_setup.exe
+            dist/drift_*_windows_amd64_setup.exe.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -138,28 +151,40 @@ jobs:
             tarball=$(ls dist/drift_*_darwin_${arch}.tar.gz | head -1)
             extract_dir="dist/extract_${arch}"
             pkg_root="dist/pkg_root_${arch}"
-            mkdir -p "$extract_dir" "$pkg_root"
+            mkdir -p "$extract_dir" "$pkg_root/bin" "$pkg_root/share/drift"
             tar xzf "$tarball" -C "$extract_dir"
             bin=$(find "$extract_dir" -name drift -type f | head -1)
             if [ -z "$bin" ]; then
               echo "drift binary not found in $tarball"
               exit 1
             fi
-            cp "$bin" "$pkg_root/drift"
-            chmod +x "$pkg_root/drift"
+            cp "$bin" "$pkg_root/bin/drift"
+            chmod +x "$pkg_root/bin/drift"
+            cp LICENSE "$pkg_root/share/drift/"
+            cp README.md "$pkg_root/share/drift/"
+            cp README.zh-CN.md "$pkg_root/share/drift/"
             pkgbuild \
               --root "$pkg_root" \
               --identifier com.github.alei-001.drift \
               --version "$version" \
-              --install-location /usr/local/bin \
+              --install-location /usr/local \
               "dist/drift_${version}_darwin_${arch}.pkg"
             rm -rf "$extract_dir" "$pkg_root"
           done
 
-      - name: Upload .pkg to release
+      - name: Generate .sha256 sidecars
+        run: |
+          for pkg in dist/drift_*_darwin_*.pkg; do
+            name="${pkg##*/}"
+            (cd dist && sha256sum "$name" > "$name.sha256")
+          done
+
+      - name: Upload .pkg and checksums to release
         uses: softprops/action-gh-release@v3
         with:
           draft: true
-          files: dist/drift_*_darwin_*.pkg
+          files: |
+            dist/drift_*_darwin_*.pkg
+            dist/drift_*_darwin_*.pkg.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -26,8 +26,10 @@
 
 [Setup]
 AppName=drift
+AppId={{A6D130FE-690D-4B4D-B6A0-5B351FD020BC}
 AppVersion={#MyAppVersion}
 AppVerName=drift {#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
 AppPublisher=drift
 AppPublisherURL=https://github.com/Alei-001/drift
 AppSupportURL=https://github.com/Alei-001/drift/issues
