@@ -107,7 +107,7 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 			Flags: flags,
 		}
 		fs.chunkCache.Add(hash, ch)
-		return ch, nil
+		return storage.CloneChunk(ch), nil
 	}
 	if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("open chunk %x: %w", hash[:8], err)

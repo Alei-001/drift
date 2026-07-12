@@ -22,7 +22,8 @@ const (
 	packIndexVersion      = 1
 	packThreshold         = 512
 	packRewriteRatio      = 0.5
-	packNameFormat        = "pack-%08d"
+	packPrefix            = "pack-"
+	packNameFormat        = packPrefix + "%08d"
 	packEntrySize         = 45
 	packIndexHeaderSize   = 4 + 1 + 4 // magic + version + chunk_count
 )
@@ -70,7 +71,7 @@ func (fs *FSStorage) nextPackName() (string, error) {
 			continue
 		}
 		base := strings.TrimSuffix(name, ".pack")
-		if !strings.HasPrefix(base, "pack-") {
+		if !strings.HasPrefix(base, packPrefix) {
 			continue
 		}
 		numStr := base[5:]
@@ -265,7 +266,7 @@ func (fs *FSStorage) listPackNames() ([]string, error) {
 			continue
 		}
 		base := strings.TrimSuffix(name, ".pack")
-		if !strings.HasPrefix(base, "pack-") {
+		if !strings.HasPrefix(base, packPrefix) {
 			continue
 		}
 		names = append(names, base)

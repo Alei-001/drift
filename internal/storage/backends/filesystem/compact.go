@@ -22,18 +22,27 @@ func (fs *FSStorage) CompactChunks(ctx context.Context, reachable map[core.Hash]
 	aliveLoose := make(map[core.Hash]struct{})
 
 	err := filepath.WalkDir(chunksDir, func(path string, d os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return fmt.Errorf("walk chunks: %w", err)
 		}
 		if d.IsDir() {
-			rel, _ := filepath.Rel(chunksDir, path)
+			rel, err := filepath.Rel(chunksDir, path)
+			if err != nil {
+				return fmt.Errorf("rel path %s: %w", path, err)
+			}
 			rel = filepath.ToSlash(rel)
 			if rel == PacksDir {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		rel, _ := filepath.Rel(chunksDir, path)
+		rel, err := filepath.Rel(chunksDir, path)
+		if err != nil {
+			return fmt.Errorf("rel path %s: %w", path, err)
+		}
 		rel = filepath.ToSlash(rel)
 		parts := strings.Split(rel, "/")
 		if len(parts) != 2 {

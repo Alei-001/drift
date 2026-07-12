@@ -175,7 +175,8 @@ jobs:
       - name: Generate .sha256 sidecars
         run: |
           for pkg in dist/drift_*_darwin_*.pkg; do
-            sha256sum "$pkg" > "$pkg.sha256"
+            name="${pkg##*/}"
+            (cd dist && sha256sum "$name" > "$name.sha256")
           done
 
       - name: Upload .pkg and checksums to release
