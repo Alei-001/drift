@@ -89,16 +89,12 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF -replace '^refs/tags/v',''
           echo "version=$tag" >> $env:GITHUB_OUTPUT
-          $parts = $tag.Split('.')
-          while ($parts.Count -lt 4) { $parts += '0' }
-          $full = $parts -join '.'
-          echo "version_full=$full" >> $env:GITHUB_OUTPUT
 
       - name: Compile Inno Setup installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.8
         with:
           path: installer/drift.iss
-          options: /DMyAppVersion=${{ steps.version.outputs.version }} /DMyAppVersionFull=${{ steps.version.outputs.version_full }} /DSourceDir=..\dist\drift_windows_amd64 /Q
+          options: /DMyAppVersion=${{ steps.version.outputs.version }} /DSourceDir=..\dist\drift_windows_amd64 /Q
 
       - name: Rename installer to include version
         shell: pwsh
