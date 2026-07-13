@@ -39,7 +39,7 @@ hidden unless --all is given. Use --branch to walk another branch's chain,
 changes of a single snapshot.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -172,7 +172,7 @@ changes of a single snapshot.`,
 
 			suffix := ""
 			if strings.HasPrefix(s.Message, porcelain.AutoSavePrefix) {
-				suffix = "    · dimmed"
+				suffix = "    . dimmed"
 			}
 			fmt.Printf("%s  %s  %-*s  %-*s  %-*s  %s%s\n",
 				s.ShortID(), timeStr,

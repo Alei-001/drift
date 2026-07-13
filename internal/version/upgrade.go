@@ -72,7 +72,11 @@ func Upgrade(ctx context.Context, currentVersion string, opt UpgradeOptions) (Re
 	}
 	defer os.Remove(archivePath)
 
-	// Optional checksum verification.
+	// Optional checksum verification. Fail-closed: when a checksums file
+	// is published but cannot be parsed or the hash does not match, abort
+	// the upgrade rather than silently proceeding. Relying on HTTPS alone
+	// is insufficient — a misconfigured release pipeline could ship a
+	// tampered asset over a valid TLS connection.
 	if cs, ok := findChecksumAsset(rel.Assets); ok {
 		csPath, derr := download(ctx, cs.BrowserDownloadURL, nil)
 		if derr != nil {
@@ -81,10 +85,10 @@ func Upgrade(ctx context.Context, currentVersion string, opt UpgradeOptions) (Re
 		defer os.Remove(csPath)
 		ok, verr := verifyChecksum(csPath, asset.Name, archivePath)
 		if verr != nil {
-			// Checksum file malformed: warn but proceed (HTTPS protects transport).
-			res.Message = "checksum file unreadable, skipping verification"
-		} else if !ok {
-			return res, &upgradeError{kind: "checksum", err: errors.New("checksum mismatch")}
+			return res, &upgradeError{kind: "checksum", err: fmt.Errorf("%w: checksum file unreadable: %v", ErrChecksumMismatch, verr)}
+		}
+		if !ok {
+			return res, &upgradeError{kind: "checksum", err: fmt.Errorf("%w: asset hash does not match published checksum", ErrChecksumMismatch)}
 		}
 	}
 

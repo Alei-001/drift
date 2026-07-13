@@ -38,6 +38,12 @@ func DiffWorkspaceVsSnapshot(ctx context.Context, workDir string, snapshot *core
 		if info.IsDir() {
 			return nil
 		}
+		// Skip symlinks: they are not tracked by snapshots, so a
+		// symlink would always appear as "added" in the diff. Skipping
+		// keeps the diff focused on real file changes.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 
 		snapEntry, exists := snapFiles[rel]
 		if !exists {

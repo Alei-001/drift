@@ -25,6 +25,15 @@ import (
 // (empty when no backup was needed, e.g. ErrNothingToSave). cfg may be nil
 // (core.DefaultConfig is used). The named return err is wrapped by a defer
 // so that on failure the backup ID (if any) is appended for rollback guidance.
+//
+// Rollback strategy: restore is not transactional across multiple files.
+// Per-file atomicity is provided by writeFileFromChunks (temp file + rename),
+// so a write failure never leaves a half-written file. When a restore fails
+// partway, restoreFilesToWorkspace skips the cleanup phase (deletion of
+// non-snapshot files) and updates the index to reflect only successfully
+// restored entries, so the workspace stays as consistent as possible. The
+// backup snapshot (when enabled) captures the pre-restore workspace state so
+// the user can manually roll back with `drift restore <backupID>`.
 func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, snapshotID core.SnapshotID, filePath string, noBackup bool, cfg *core.CoreConfig) (backupID string, err error) {
 	if cfg == nil {
 		cfg = &core.DefaultConfig().Core
@@ -73,6 +82,15 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 			return backupID, fmt.Errorf("read HEAD for update: %w", headErr)
 		}
 		if headRef.SymRef != "" {
+			// Save the previous branch ref so a HEAD-update failure can
+			// roll back the branch update. Without this, a SetRef("HEAD")
+			// failure would leave the branch pointing at the restored
+			// snapshot while HEAD still references the pre-restore tip,
+			// desynchronizing HEAD from its symbolic target.
+			oldBranchRef, oldBranchErr := store.GetRef(ctx, headRef.SymRef)
+			if oldBranchErr != nil {
+				return backupID, fmt.Errorf("read branch %s for rollback: %w", headRef.SymRef, oldBranchErr)
+			}
 			branchRef := &core.Reference{
 				Name:   headRef.SymRef,
 				Type:   core.RefTypeBranch,
@@ -83,7 +101,10 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 			}
 			headRef.Target = snapshotID.Hash
 			if err = store.SetRef(ctx, "HEAD", headRef); err != nil {
-				return backupID, fmt.Errorf("update HEAD: %w", err)
+				// Roll back the branch ref to its pre-restore value so
+				// HEAD and its symbolic target stay consistent.
+				_ = store.SetRef(ctx, headRef.SymRef, oldBranchRef)
+				return backupID, fmt.Errorf("update HEAD (rolled back branch %s): %w", headRef.SymRef, err)
 			}
 		} else {
 			headRef.Target = snapshotID.Hash
@@ -123,6 +144,16 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 				return backupID, fmt.Errorf("validate path %s: %w", entry.Path, err)
 			}
 			fullPath = safePath
+
+			// Refuse to restore entries recorded as symlinks: the
+			// snapshot schema cannot carry the symlink target, so
+			// restoring such an entry as a regular file would silently
+			// replace the user's symlink. Skip it instead so an explicit
+			// 'restore <file>' returns an error rather than corrupting
+			// the workspace.
+			if entry.Mode.IsSymlink() {
+				return backupID, fmt.Errorf("cannot restore %q: symlink entries are not restorable", entry.Path)
+			}
 
 			if entry.Mode.IsDir() {
 				if err := os.MkdirAll(fullPath, fsutil.DefaultDirPerm); err != nil {
@@ -217,6 +248,13 @@ func ComputeRestoreChanges(ctx context.Context, workDir string, cfg *core.CoreCo
 			return err
 		}
 		if info.IsDir() {
+			return nil
+		}
+		// Skip symlinks: snapshots never track them (see
+		// createSnapshotInLock), so they must not be reported as
+		// "deleted" by ComputeRestoreChanges — otherwise the caller
+		// might delete a user's symlink.
+		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
 		rel, relErr := pathutil.Rel(workDir, path)

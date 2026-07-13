@@ -7,6 +7,12 @@ import "errors"
 // fmt.Errorf("...: %w", ...) to attach context while preserving the
 // sentinel identity.
 var (
+	// ErrNotARepo is returned when an operation requires a drift
+	// repository but the target directory does not contain a .drift/
+	// directory. The CLI maps this to a dedicated exit code so scripts
+	// can branch on it without parsing the message.
+	ErrNotARepo = errors.New("not a drift repository")
+
 	// ErrNothingToSave is returned when a snapshot is requested but the
 	// workspace has no changes since the last snapshot.
 	ErrNothingToSave = errors.New("nothing to save")
@@ -53,4 +59,13 @@ var (
 	// ErrCannotRenameMain is returned when attempting to rename the 'main'
 	// branch, which is protected.
 	ErrCannotRenameMain = errors.New("cannot rename 'main'")
+
+	// ErrFileNotFound is returned when a file path is not found in a
+	// snapshot (e.g. 'drift cat <snapshot> <path>' where path is absent).
+	ErrFileNotFound = errors.New("file not found in snapshot")
+
+	// ErrLocked is returned by AcquireWorkspaceLock when the workspace
+	// lock is held by another live operation. Callers may test for it
+	// with errors.Is.
+	ErrLocked = errors.New("workspace is locked by another operation")
 )

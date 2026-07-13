@@ -18,12 +18,7 @@ var restoreCmd = &cobra.Command{
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		if len(args) < 1 {
-			reportFailed("Restore", "restore", "snapshot id required.", "use 'drift log' to list available snapshots.")
-			return ErrSilent
-		}
-
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -83,7 +78,7 @@ var restoreCmd = &cobra.Command{
 			if errors.Is(err, porcelain.ErrFileNotFound) {
 				hint = fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", args[0])
 			}
-			reportFailed("Restore", "restore", err.Error(), hint)
+			reportFailed("Restore", "restore", "restore failed.", hint)
 			return ErrSilent
 		}
 

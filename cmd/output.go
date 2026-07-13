@@ -18,6 +18,14 @@ import (
 // printing the error again.
 var ErrSilent = errors.New("silent error (already reported)")
 
+// silentWrap returns an error that wraps both ErrSilent and err, so
+// classifyError can still match the underlying sentinel (ErrNotARepo,
+// ErrNetwork, etc.) via errors.Is. Use this instead of returning bare
+// ErrSilent when the original error type matters for exit-code selection.
+func silentWrap(err error) error {
+	return fmt.Errorf("%w: %w", ErrSilent, err)
+}
+
 // -- Status line helpers --
 
 // statusOK prints ">>> <format> [ok]" to stdout.
@@ -55,7 +63,7 @@ func openProjectOrReport(action, command, cwd string) (storage.Storer, *core.Con
 	store, cfg, err := porcelain.OpenProject(cwd)
 	if err != nil {
 		reportFailed(action, command, "not a drift repository.", "use 'drift init' to create one.")
-		return nil, nil, ErrSilent
+		return nil, nil, silentWrap(err)
 	}
 	return store, cfg, nil
 }
@@ -142,25 +150,4 @@ func pluralFile(n int) string {
 // formatSize converts bytes to a human-readable string.
 func formatSize(size int64) string {
 	return format.Bytes(size)
-}
-
-func parseHexByte(s string) (byte, bool) {
-	if len(s) != 2 {
-		return 0, false
-	}
-	var b byte
-	for i := 0; i < 2; i++ {
-		c := s[i]
-		switch {
-		case c >= '0' && c <= '9':
-			b = b<<4 | (c - '0')
-		case c >= 'a' && c <= 'f':
-			b = b<<4 | (c - 'a' + 10)
-		case c >= 'A' && c <= 'F':
-			b = b<<4 | (c - 'A' + 10)
-		default:
-			return 0, false
-		}
-	}
-	return b, true
 }

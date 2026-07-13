@@ -112,6 +112,9 @@ func collectPullScope(ctx context.Context, rfs RemoteFS, branch string) ([]core.
 		snapIDs = ids
 		seenChunks := make(map[core.Hash]bool)
 		for _, id := range ids {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, nil, err
+			}
 			snap, err := readRemoteSnapshot(ctx, rfs, id)
 			if err != nil {
 				return nil, nil, nil, err
@@ -210,36 +213,45 @@ func walkRemoteSnapshotChain(ctx context.Context, rfs RemoteFS, start core.Snaps
 }
 
 // isAncestor returns true if ancestor is reachable from descendant by walking
-// the snapshot PrevID chain. Both snapshots must be available in the local
-// store. Returns false on any error or cycle.
-func isAncestor(ctx context.Context, store storage.Storer, descendant, ancestor core.Hash) bool {
+// the snapshot PrevID chain. Returns (false, nil) when ancestor is not
+// reachable (the full chain was walked without finding it). Returns
+// (false, err) when the chain cannot be fully walked — e.g. a snapshot in
+// the descendant's chain is missing from the local store, or the context
+// was cancelled. The caller should treat an error as "cannot determine
+// ancestry" and fall back to the diverged/force-push path rather than
+// silently assuming the ref is fast-forwardable.
+func isAncestor(ctx context.Context, store storage.Storer, descendant, ancestor core.Hash) (bool, error) {
 	if descendant.IsZero() || ancestor.IsZero() {
-		return false
+		return false, nil
 	}
 	if descendant == ancestor {
-		return true
+		return true, nil
 	}
 	cur := core.SnapshotID{Hash: descendant}
 	seen := make(map[core.Hash]bool)
 	for !cur.Hash.IsZero() {
 		if err := ctx.Err(); err != nil {
-			return false
+			return false, err
 		}
 		if seen[cur.Hash] {
 			break // cycle guard
 		}
 		seen[cur.Hash] = true
 		if cur.Hash == ancestor {
-			return true
+			return true, nil
 		}
 		snap, err := store.GetSnapshot(ctx, cur)
 		if err != nil {
-			break
+			// A missing or unreadable snapshot breaks the chain: we
+			// cannot determine whether ancestor is reachable. Surface
+			// the error so the caller can distinguish "definitely not
+			// an ancestor" from "cannot tell".
+			return false, fmt.Errorf("walk snapshot chain at %s: %w", cur.Hash.String(), err)
 		}
 		if snap.PrevID == nil {
 			break
 		}
 		cur = *snap.PrevID
 	}
-	return false
+	return false, nil
 }

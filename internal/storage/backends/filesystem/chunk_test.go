@@ -5,9 +5,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
+	"github.com/Alei-001/drift/internal/storage"
 	"github.com/zeebo/blake3"
 )
 
@@ -292,7 +294,65 @@ func TestGetChunk_LargeCompressed(t *testing.T) {
 		t.Fatalf("read header: %v", err)
 	}
 	f.Close()
-	if header[0]&chunkFlagCompressed == 0 {
+	if header[0]&storage.ChunkFlagCompressed == 0 {
 		t.Fatal("on-disk chunk should have compression flag set")
 	}
+}
+
+// TestPutChunk_Concurrent verifies that concurrent PutChunk calls do not
+// trigger data races in the shared zstd encoder or other FSStorage state.
+// It also exercises concurrent GetChunk (which uses the shared zstd
+// decoder) after all writes complete. Run with -race to catch races.
+func TestPutChunk_Concurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	fs, err := NewFSStorage(tmpDir)
+	if err != nil {
+		t.Fatalf("NewFSStorage: %v", err)
+	}
+	defer fs.Close()
+
+	const n = 128 // distinct chunks
+
+	// Pre-build distinct, compressible chunks so goroutines only exercise
+	// PutChunk (and the shared zstd encoder) without hash contention.
+	chunks := make([]*core.Chunk, n)
+	for i := 0; i < n; i++ {
+		data := bytes.Repeat([]byte{byte('A' + i%26)}, 128)
+		data = append(data, byte(i))
+		chunks[i] = makeChunk(data)
+	}
+
+	// Phase 1: concurrent PutChunk — exercises the zstd encoder mutex.
+	var wg sync.WaitGroup
+	for _, ch := range chunks {
+		wg.Add(1)
+		go func(c *core.Chunk) {
+			defer wg.Done()
+			if err := fs.PutChunk(context.Background(), c); err != nil {
+				t.Errorf("PutChunk: %v", err)
+			}
+		}(ch)
+	}
+	wg.Wait()
+
+	// Phase 2: concurrent GetChunk — exercises the zstd decoder mutex.
+	// Evict the cache first so every read hits disk and decompresses.
+	for _, ch := range chunks {
+		fs.chunkCache.Remove(ch.Hash)
+	}
+	for _, ch := range chunks {
+		wg.Add(1)
+		go func(c *core.Chunk) {
+			defer wg.Done()
+			got, err := fs.GetChunk(context.Background(), c.Hash)
+			if err != nil {
+				t.Errorf("GetChunk %x: %v", c.Hash[:8], err)
+				return
+			}
+			if !bytes.Equal(got.Data, c.Data) {
+				t.Errorf("chunk %x data mismatch", c.Hash[:8])
+			}
+		}(ch)
+	}
+	wg.Wait()
 }

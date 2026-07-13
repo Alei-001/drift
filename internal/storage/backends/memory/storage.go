@@ -1,6 +1,8 @@
 package memory
 
 import (
+	"sync"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/Alei-001/drift/internal/core"
@@ -11,9 +13,11 @@ import (
 var _ storage.Storer = (*MemoryStorage)(nil)
 
 // MemoryStorage implements storage.Storer entirely in memory.
-// It assumes single-threaded access: the porcelain workspace lock
-// guarantees that no two goroutines call its methods concurrently.
+// All methods are safe for concurrent use: a sync.RWMutex protects
+// every map and pointer field. Read operations acquire a read lock;
+// write operations acquire a write lock.
 type MemoryStorage struct {
+	mu        sync.RWMutex
 	chunks    map[string]*core.Chunk
 	snapshots map[string]*core.Snapshot
 	manifests map[string]*core.SnapshotManifest

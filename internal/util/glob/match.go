@@ -11,18 +11,27 @@ import (
 type Matcher struct {
 	pattern string
 	re      *regexp.Regexp
+	dirOnly bool
 }
 
 // Compile compiles a glob pattern into a reusable Matcher.
 // The pattern supports ** (recursive wildcard), * (single-level wildcard),
 // ? (single character), and [...] (character classes).
+// A trailing "/" marks the pattern as directory-only (gitignore semantics):
+// the slash is stripped and IsDirOnly returns true so callers can skip
+// non-directory entries.
 // The path passed to Matcher.Match must use forward slashes.
 func Compile(pattern string) (*Matcher, error) {
+	dirOnly := false
+	if strings.HasSuffix(pattern, "/") && len(pattern) > 1 {
+		dirOnly = true
+		pattern = pattern[:len(pattern)-1]
+	}
 	re, err := regexp.Compile("^" + globToRegex(pattern) + "$")
 	if err != nil {
 		return nil, err
 	}
-	return &Matcher{pattern: pattern, re: re}, nil
+	return &Matcher{pattern: pattern, re: re, dirOnly: dirOnly}, nil
 }
 
 // Match reports whether path matches the precompiled pattern.
@@ -32,8 +41,16 @@ func (m *Matcher) Match(path string) bool {
 }
 
 // Pattern returns the original glob pattern the Matcher was compiled from.
+// If the pattern had a trailing "/", it is stripped; use IsDirOnly to check.
 func (m *Matcher) Pattern() string {
 	return m.pattern
+}
+
+// IsDirOnly reports whether the pattern was suffixed with "/" (gitignore
+// directory-only semantics). Callers should skip non-directory entries when
+// this returns true.
+func (m *Matcher) IsDirOnly() bool {
+	return m.dirOnly
 }
 
 // Match reports whether path matches the glob pattern.
@@ -102,6 +119,9 @@ func globToRegex(pattern string) string {
 			if j < n {
 				// Translate the class to regex syntax. A leading '!' (glob
 				// negation) becomes '^'; a leading ']' is a literal member.
+				// Backslashes inside the class are escaped to avoid
+				// producing an invalid regex (e.g. [\] would close the
+				// class prematurely).
 				start := i + 1
 				if negated {
 					start++
@@ -110,7 +130,14 @@ func globToRegex(pattern string) string {
 				if negated {
 					sb.WriteByte('^')
 				}
-				sb.WriteString(pattern[start:j])
+				for k := start; k < j; k++ {
+					c := pattern[k]
+					if c == '\\' {
+						sb.WriteString("\\\\")
+					} else {
+						sb.WriteByte(c)
+					}
+				}
 				sb.WriteByte(']')
 				i = j + 1
 			} else {

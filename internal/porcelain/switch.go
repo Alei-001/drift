@@ -39,7 +39,7 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 	}
 
 	if create {
-		if err := createBranchNoLock(ctx, store, name); err != nil {
+		if _, err := createBranchNoLock(ctx, store, name); err != nil {
 			return "", "", 0, err
 		}
 	} else {
@@ -113,18 +113,13 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 		}
 	}
 
-	newHeadRef := &core.Reference{
-		Name:   "HEAD",
-		Type:   core.RefTypeHead,
-		SymRef: "heads/" + name,
-	}
-	if err := store.SetRef(ctx, "HEAD", newHeadRef); err != nil {
-		return "", "", 0, fmt.Errorf("update HEAD: %w", err)
-	}
-
-	// Restore target branch snapshot to workspace. Skip if target was empty
-	// (workspace already matches the inherited snapshot via auto-save, so
-	// restoring would be redundant).
+	// Restore target branch snapshot to workspace BEFORE moving HEAD so a
+	// restore failure leaves HEAD on the source branch. If restore fails
+	// partway the workspace may be partially modified, but the auto-save
+	// snapshot (if any) is already recorded on the source branch and the
+	// user can recover by re-running switch or restoring the auto-save.
+	// Skip if target was empty (workspace already matches the inherited
+	// snapshot via auto-save, so restoring would be redundant).
 	if !targetWasEmpty && !targetRef.Target.IsZero() {
 		targetSnap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: targetRef.Target})
 		if err != nil {
@@ -133,6 +128,19 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 		if err := restoreFilesToWorkspace(ctx, store, workDir, cfg.IgnoreFile, targetSnap); err != nil {
 			return "", "", 0, fmt.Errorf("restore workspace: %w", err)
 		}
+	}
+
+	// Move HEAD to the target branch only after the workspace has been
+	// restored. This is the transactional commit point: any earlier
+	// failure leaves HEAD pointing at the source branch, so the branch
+	// ref state stays consistent with whatever workspace state survived.
+	newHeadRef := &core.Reference{
+		Name:   "HEAD",
+		Type:   core.RefTypeHead,
+		SymRef: "heads/" + name,
+	}
+	if err := store.SetRef(ctx, "HEAD", newHeadRef); err != nil {
+		return "", "", 0, fmt.Errorf("update HEAD: %w", err)
 	}
 
 	var fromSnap, toSnap *core.Snapshot

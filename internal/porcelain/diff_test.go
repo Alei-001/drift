@@ -52,21 +52,21 @@ func TestResolveHeadSnapshot_MissingSnapshot(t *testing.T) {
 // stored snapshot, which is returned.
 func TestResolveHeadSnapshot_Success(t *testing.T) {
 	store := setupTestStore(t)
-	snapHash := core.Hash{0x42}
+	want := &core.Snapshot{Message: "test"}
+	want.ID = computeSnapshotID(want)
+	store.PutSnapshot(context.Background(), want)
 	store.SetRef(context.Background(), "HEAD", &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
-		Target: snapHash,
+		Target: want.ID.Hash,
 	})
-	want := &core.Snapshot{ID: core.SnapshotID{Hash: snapHash}, Message: "test"}
-	store.PutSnapshot(context.Background(), want)
 
 	got := ResolveHeadSnapshot(context.Background(), store)
 	if got == nil {
 		t.Fatal("expected non-nil snapshot")
 	}
-	if got.ID.Hash != snapHash {
-		t.Errorf("expected hash %x, got %x", snapHash, got.ID.Hash)
+	if got.ID.Hash != want.ID.Hash {
+		t.Errorf("expected hash %x, got %x", want.ID.Hash, got.ID.Hash)
 	}
 	if got.Message != "test" {
 		t.Errorf("expected message 'test', got %q", got.Message)

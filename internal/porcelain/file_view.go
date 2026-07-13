@@ -14,10 +14,7 @@ import (
 	"github.com/Alei-001/drift/internal/util/pathutil"
 )
 
-var (
-	ErrFileNotFound = errors.New("file not found in snapshot")
-	ErrInvalidPath  = errors.New("invalid file path")
-)
+var ErrInvalidPath = errors.New("invalid file path")
 
 // FileViewResult holds the content and metadata of a file read from a snapshot.
 type FileViewResult struct {

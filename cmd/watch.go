@@ -26,7 +26,7 @@ var watchOnCmd = &cobra.Command{
 	Long:  "Start a background daemon that watches the workspace for file changes and auto-saves snapshots at the configured interval. Only creates a snapshot when changes are detected.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -71,7 +71,7 @@ var watchOffCmd = &cobra.Command{
 	Long:  "Stop the running watch daemon. Reports the number of auto-saves created and snapshots pruned during the session.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -97,7 +97,7 @@ var watchStatusCmd = &cobra.Command{
 	Long:  "Show whether the watch daemon is running, paused, or inactive. When active, displays uptime, auto-save count, and last save summary.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -143,7 +143,7 @@ var watchDaemonCmd = &cobra.Command{
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -182,7 +182,7 @@ var watchPauseCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ var watchResumeCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}

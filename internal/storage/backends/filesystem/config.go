@@ -24,7 +24,7 @@ func (fs *FSStorage) GetConfig(ctx context.Context) (*core.Config, error) {
 		if os.IsNotExist(err) {
 			return core.DefaultConfig(), nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("read config: %w", mapOSError(err))
 	}
 	cfg := core.DefaultConfig()
 	if err := json.Unmarshal(data, cfg); err != nil {
@@ -43,5 +43,8 @@ func (fs *FSStorage) SetConfig(ctx context.Context, config *core.Config) error {
 		return err
 	}
 	path := filepath.Join(fs.root, ConfigFile)
-	return fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
+	if err := fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm); err != nil {
+		return fmt.Errorf("write config: %w", mapOSError(err))
+	}
+	return nil
 }

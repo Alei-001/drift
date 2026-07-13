@@ -106,6 +106,17 @@ func groupIntoHunks(script []editOp) []hunk {
 			}
 		}
 
+		// A pure insertion hunk at the beginning of the file
+		// (hunkStart==0, oldCount==0) uses oldStart=0 to match the
+		// unified diff convention where a 0-count range starts at
+		// line 0. Similarly for pure deletion (newCount==0).
+		if hunkStart == 0 && oldCount == 0 {
+			oldStart = 0
+		}
+		if hunkStart == 0 && newCount == 0 {
+			newStart = 0
+		}
+
 		hunks = append(hunks, hunk{
 			oldStart: oldStart,
 			oldCount: oldCount,

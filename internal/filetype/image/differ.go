@@ -55,8 +55,8 @@ func (e *ImageEngine) Diff(ctx context.Context, oldPath string, oldReader io.Rea
 			formatKeyOrUnknown(oldFormat), formatKeyOrUnknown(newFormat)), nil
 	}
 
-	oldW, oldH := decodeDimensions(oldHeader)
-	newW, newH := decodeDimensions(newHeader)
+	oldW, oldH := format.DecodeDimensions(oldHeader)
+	newW, newH := format.DecodeDimensions(newHeader)
 	if oldW != newW || oldH != newH {
 		return fmt.Sprintf("image dimensions changed: %dx%d -> %dx%d",
 			oldW, oldH, newW, newH), nil

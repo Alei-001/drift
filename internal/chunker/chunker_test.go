@@ -5,16 +5,29 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Alei-001/drift/internal/core"
 )
+
+// collectChunks runs c.Chunk on r and gathers all emitted chunks into a
+// slice. It is a test convenience for the streaming callback API.
+func collectChunks(t *testing.T, c Chunker, r *bytes.Reader) []*core.Chunk {
+	t.Helper()
+	var chunks []*core.Chunk
+	if err := c.Chunk(context.Background(), r, func(ch *core.Chunk) error {
+		chunks = append(chunks, ch)
+		return nil
+	}); err != nil {
+		t.Fatalf("Chunk failed: %v", err)
+	}
+	return chunks
+}
 
 func TestFastCDCChunker_ProducesChunks(t *testing.T) {
 	data := []byte(strings.Repeat("Hello, World! This is a test of content-defined chunking. ", 10000))
 	chunker := NewFastCDCChunker()
 
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("FastCDC Chunk failed: %v", err)
-	}
+	chunks := collectChunks(t, chunker, bytes.NewReader(data))
 
 	if len(chunks) == 0 {
 		t.Fatal("expected at least one chunk, got none")
@@ -44,10 +57,7 @@ func TestFixedChunker_CorrectChunkSize(t *testing.T) {
 	}
 	chunker := NewFixedChunker(chunkSize)
 
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("Fixed Chunk failed: %v", err)
-	}
+	chunks := collectChunks(t, chunker, bytes.NewReader(data))
 
 	if len(chunks) == 0 {
 		t.Fatal("expected at least one chunk, got none")
@@ -83,10 +93,7 @@ func TestFixedChunker_MinimumChunkSize(t *testing.T) {
 		data[i] = byte(i % 256)
 	}
 	chunker := NewFixedChunker(100)
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("Chunk failed: %v", err)
-	}
+	chunks := collectChunks(t, chunker, bytes.NewReader(data))
 	if len(chunks) < 2 {
 		t.Fatalf("expected at least 2 chunks for 12000 bytes with min 4096, got %d", len(chunks))
 	}
@@ -103,10 +110,7 @@ func TestRoundTrip_FixedChunker(t *testing.T) {
 	original := []byte("The quick brown fox jumps over the lazy dog. 1234567890!@#$%^&*()")
 	chunker := NewFixedChunker(16)
 
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader(original))
-	if err != nil {
-		t.Fatalf("Fixed Chunk failed: %v", err)
-	}
+	chunks := collectChunks(t, chunker, bytes.NewReader(original))
 
 	var reassembled []byte
 	for _, c := range chunks {
@@ -122,10 +126,7 @@ func TestRoundTrip_FastCDCChunker(t *testing.T) {
 	original := []byte(strings.Repeat("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", 1000))
 	chunker := NewFastCDCChunker()
 
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader(original))
-	if err != nil {
-		t.Fatalf("FastCDC Chunk failed: %v", err)
-	}
+	chunks := collectChunks(t, chunker, bytes.NewReader(original))
 
 	var reassembled []byte
 	for _, c := range chunks {
@@ -139,7 +140,11 @@ func TestRoundTrip_FastCDCChunker(t *testing.T) {
 
 func TestFastCDCChunker_EmptyData(t *testing.T) {
 	chunker := NewFastCDCChunker()
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader([]byte{}))
+	var chunks []*core.Chunk
+	err := chunker.Chunk(context.Background(), bytes.NewReader([]byte{}), func(c *core.Chunk) error {
+		chunks = append(chunks, c)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("FastCDC Chunk failed on empty data: %v", err)
 	}
@@ -150,7 +155,11 @@ func TestFastCDCChunker_EmptyData(t *testing.T) {
 
 func TestFixedChunker_EmptyData(t *testing.T) {
 	chunker := NewFixedChunker(1024)
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader([]byte{}))
+	var chunks []*core.Chunk
+	err := chunker.Chunk(context.Background(), bytes.NewReader([]byte{}), func(c *core.Chunk) error {
+		chunks = append(chunks, c)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Fixed Chunk failed on empty data: %v", err)
 	}
@@ -166,10 +175,7 @@ func TestFastCDCChunker_SingleByte(t *testing.T) {
 	data := []byte{0x42}
 	chunker := NewFastCDCChunker()
 
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("FastCDC Chunk failed on single byte: %v", err)
-	}
+	chunks := collectChunks(t, chunker, bytes.NewReader(data))
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk for single byte, got %d", len(chunks))
 	}
@@ -188,10 +194,7 @@ func TestFixedChunker_SingleByte(t *testing.T) {
 	data := []byte{0x42}
 	chunker := NewFixedChunker(4096)
 
-	chunks, err := chunker.Chunk(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("Fixed Chunk failed on single byte: %v", err)
-	}
+	chunks := collectChunks(t, chunker, bytes.NewReader(data))
 	if len(chunks) != 1 {
 		t.Fatalf("expected 1 chunk for single byte, got %d", len(chunks))
 	}

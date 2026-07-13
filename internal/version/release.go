@@ -52,12 +52,17 @@ func (e *upgradeError) Error() string {
 
 func (e *upgradeError) Unwrap() error { return e.err }
 
-// ErrNetwork, ErrNoRelease, ErrNoAsset are sentinel-like errors returned by
-// Upgrade. The CLI inspects them with errors.Is to tailor the user hint.
+// ErrNetwork, ErrNoRelease, ErrNoAsset, ErrChecksumMismatch are sentinel-like
+// errors returned by Upgrade. The CLI inspects them with errors.Is to tailor
+// the user hint. ErrChecksumMismatch is wrapped by the checksum verification
+// path both when the published checksum does not match the downloaded asset
+// and when the checksums file is malformed and cannot be parsed — both cases
+// mean verification failed and the upgrade must be aborted (fail-closed).
 var (
-	ErrNetwork   = errors.New("network error")
-	ErrNoRelease = errors.New("no release available")
-	ErrNoAsset   = errors.New("no matching release asset")
+	ErrNetwork          = errors.New("network error")
+	ErrNoRelease        = errors.New("no release available")
+	ErrNoAsset          = errors.New("no matching release asset")
+	ErrChecksumMismatch = errors.New("checksum verification failed")
 )
 
 // latestRelease fetches the latest release from the GitHub releases API.

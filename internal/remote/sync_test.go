@@ -10,6 +10,8 @@ import (
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/storage"
 	"github.com/Alei-001/drift/internal/storage/backends/memory"
+	"github.com/zeebo/blake3"
+	"google.golang.org/protobuf/proto"
 )
 
 // makeTestSnapshot builds a snapshot with one file entry referencing one chunk.
@@ -19,11 +21,7 @@ func makeTestSnapshot(t *testing.T, store storage.Storer, msg string, prevID *co
 	ctx := context.Background()
 
 	chunkData := []byte("hello world chunk data")
-	chunkHash := core.Hash{}
-	// Use a simple deterministic hash for testing.
-	for i, b := range chunkData {
-		chunkHash[i%32] ^= b
-	}
+	chunkHash := core.Hash(blake3.Sum256(chunkData))
 	chunk := &core.Chunk{
 		Hash:  chunkHash,
 		Size:  uint32(len(chunkData)),
@@ -51,10 +49,15 @@ func makeTestSnapshot(t *testing.T, store storage.Storer, msg string, prevID *co
 		TotalSize: int64(len(chunkData)),
 	}
 
-	// Assign snapshot ID = hash of message (deterministic for test).
-	for i, b := range []byte(msg) {
-		snap.ID.Hash[i%32] ^= b
+	// Compute the real snapshot ID = BLAKE3(proto without IdHash),
+	// matching porcelain.CreateSnapshot's ID computation so that
+	// pullSnapshot's integrity check passes.
+	snapProto := core.SnapshotToProto(snap, false)
+	marshaled, err := proto.Marshal(snapProto)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
 	}
+	snap.ID = core.SnapshotID{Hash: core.Hash(blake3.Sum256(marshaled))}
 	if err := store.PutSnapshot(ctx, snap); err != nil {
 		t.Fatalf("PutSnapshot: %v", err)
 	}
@@ -110,17 +113,17 @@ func TestPush_PushesSnapshotAndChunk(t *testing.T) {
 
 	// Verify snapshot exists on remote.
 	snapPath := snapshotRemotePath(snapID)
-	if _, err := rfs.Stat(snapPath); err != nil {
+	if _, err := rfs.Stat(context.Background(), snapPath); err != nil {
 		t.Errorf("remote snapshot not found: %v", err)
 	}
 	// Verify manifest exists on remote.
 	manifestPath := manifestRemotePath(snapID)
-	if _, err := rfs.Stat(manifestPath); err != nil {
+	if _, err := rfs.Stat(context.Background(), manifestPath); err != nil {
 		t.Errorf("remote manifest not found: %v", err)
 	}
 	// Verify chunk exists on remote.
 	chunkPath := chunkRemotePath(chunkHash)
-	if _, err := rfs.Stat(chunkPath); err != nil {
+	if _, err := rfs.Stat(context.Background(), chunkPath); err != nil {
 		t.Errorf("remote chunk not found: %v", err)
 	}
 }
@@ -297,7 +300,7 @@ func TestPush_FastForward(t *testing.T) {
 	}
 
 	// Verify remote ref now points to the child.
-	rc, err := rfs.Read(refRemotePath("heads/main"))
+	rc, err := rfs.Read(context.Background(), refRemotePath("heads/main"))
 	if err != nil {
 		t.Fatalf("read remote ref: %v", err)
 	}
@@ -417,12 +420,12 @@ func TestPush_BranchScoped(t *testing.T) {
 	}
 	// main's snapshot should NOT be on remote.
 	snap1Path := snapshotRemotePath(snapID1)
-	if _, err := rfs.Stat(snap1Path); err == nil {
+	if _, err := rfs.Stat(context.Background(), snap1Path); err == nil {
 		t.Error("main snapshot should not be on remote (branch-scoped push)")
 	}
 	// feature's snapshot SHOULD be on remote.
 	snap2Path := snapshotRemotePath(snapID2)
-	if _, err := rfs.Stat(snap2Path); err != nil {
+	if _, err := rfs.Stat(context.Background(), snap2Path); err != nil {
 		t.Error("feature snapshot should be on remote")
 	}
 }

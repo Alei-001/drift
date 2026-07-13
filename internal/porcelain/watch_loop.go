@@ -3,6 +3,7 @@ package porcelain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -127,6 +128,14 @@ func RunDaemonLoop(ctx context.Context, store storage.Storer, cwd string, interv
 			msg := AutoSavePrefix + " " + time.Now().Format("2006-01-02 15:04")
 			_, err = createSnapshotInLock(ctx, store, cwd, msg, "drift", cfg, false)
 			if err != nil {
+				// ErrNothingToSave is not a real error: the detect phase found
+				// changes but by the time the save ran, the index was already
+				// up to date (e.g. another process saved in between). Treat it
+				// as a no-op rather than logging an error.
+				if errors.Is(err, ErrNothingToSave) {
+					ReleaseWorkspaceLock(cwd)
+					continue
+				}
 				state.LastError = "save: " + err.Error()
 				slog.Error("auto-save failed", "error", err, "changes", fmt.Sprintf("+%d ~%d -%d",
 					len(changes.Added), len(changes.Modified), len(changes.Deleted)))
@@ -181,36 +190,13 @@ func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (in
 		return 0, nil
 	}
 
-	// Compute reachable snapshots from all branch/tag tips to avoid
-	// deleting snapshots that are still part of active history.
-	reachable := make(map[core.SnapshotID]bool)
-	// Collect roots: all heads/ and tags/ refs. If ListRefs fails, abort
-	// pruning entirely — deleting without reachability data risks
-	// severing the PrevID chain and corrupting branch history.
-	refs, err := store.ListRefs(ctx, "")
+	// Compute reachable snapshots from all branch/tag/detached-HEAD tips
+	// to avoid deleting snapshots that are still part of active history.
+	// This delegates to the same reachability primitive used by gc.go so
+	// the two code paths cannot diverge on what "reachable" means.
+	reachable, err := computeReachableSet(ctx, store)
 	if err != nil {
-		return 0, fmt.Errorf("list refs for reachability check: %w", err)
-	}
-	var queue []core.SnapshotID
-	for _, ref := range refs {
-		if !ref.Target.IsZero() {
-			queue = append(queue, core.SnapshotID{Hash: ref.Target})
-		}
-	}
-	// BFS from roots following PrevID
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-		sid := queue[0]
-		queue = queue[1:]
-		if reachable[sid] {
-			continue
-		}
-		reachable[sid] = true
-		if snap, err := store.GetSnapshot(ctx, sid); err == nil && snap.PrevID != nil {
-			queue = append(queue, *snap.PrevID)
-		}
+		return 0, fmt.Errorf("compute reachability for prune: %w", err)
 	}
 
 	sort.Slice(autoSnaps, func(i, j int) bool {
@@ -220,7 +206,7 @@ func pruneAutoSnapshots(ctx context.Context, store storage.Storer, keep int) (in
 	deleted := 0
 	var firstErr error
 	for i := keep; i < len(autoSnaps); i++ {
-		if reachable[autoSnaps[i].ID] {
+		if reachable[autoSnaps[i].ID.Hash] {
 			continue // skip snapshots still reachable from branch/tag tips
 		}
 		if err := store.DeleteSnapshot(ctx, autoSnaps[i].ID); err != nil {

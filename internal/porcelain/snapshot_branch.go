@@ -149,6 +149,11 @@ func CountSnapshotChanges(ctx context.Context, store storage.Storer, summary *co
 // back. If HEAD is detached, HEAD's own target is moved back. The workspace
 // files are not touched; the index is rebuilt from the previous snapshot so
 // that subsequent status/save operations reflect the new HEAD.
+//
+// Workspace sync: the on-disk files still reflect the undone snapshot. To
+// make the workspace match the new HEAD, run `drift restore <prevID>` after
+// a successful undo. Without this, `drift status` will report the workspace
+// as "dirty" (the files match the old HEAD, not the new one).
 func UndoLastSave(ctx context.Context, store storage.Storer, workDir string, cfg *core.CoreConfig) error {
 	if cfg == nil {
 		cfg = &core.DefaultConfig().Core

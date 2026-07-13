@@ -1,12 +1,7 @@
 package format
 
 import (
-	"bytes"
 	"fmt"
-	"image"
-	_ "image/gif"  // register GIF decoder for ImageDimensions
-	_ "image/jpeg" // register JPEG decoder for ImageDimensions
-	_ "image/png"  // register PNG decoder for ImageDimensions
 )
 
 const (
@@ -41,11 +36,12 @@ func bytesPositive(size uint64) string {
 }
 
 // ImageDimensions decodes image dimensions from data for common image formats
-// (PNG, JPEG, GIF). Returns empty string for non-image or undecodable data.
+// (PNG, JPEG, GIF, WebP, BMP, TIFF). Returns empty string for non-image or
+// undecodable data.
 func ImageDimensions(data []byte) string {
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
+	w, h := DecodeDimensions(data)
+	if w == 0 && h == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%dx%d", cfg.Width, cfg.Height)
+	return fmt.Sprintf("%dx%d", w, h)
 }

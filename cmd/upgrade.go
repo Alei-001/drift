@@ -122,6 +122,8 @@ func upgradeReportFailed(err error) {
 		hint = "no GitHub release has been published yet; see https://github.com/Alei-001/drift/releases."
 	case errors.Is(err, version.ErrNoAsset):
 		hint = "no prebuilt binary for this platform; build from source with 'go install github.com/Alei-001/drift/cmd/drift@latest'."
+	case errors.Is(err, version.ErrChecksumMismatch):
+		hint = "release asset failed checksum verification; the download may be corrupted or tampered with. Try again or download manually from https://github.com/Alei-001/drift/releases."
 	default:
 		hint = "see https://github.com/Alei-001/drift/releases for manual download."
 	}

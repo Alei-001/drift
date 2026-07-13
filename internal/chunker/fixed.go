@@ -38,15 +38,15 @@ func NewFixedChunker(chunkSize int) *FixedChunker {
 
 // Chunk splits r into consecutive fixed-size chunks. The final chunk may be
 // shorter than the chunk size if the input length is not a multiple of it.
-// Each chunk is BLAKE3-hashed. The context is checked before each read so a
-// cancelled context aborts the chunking loop promptly.
-func (f *FixedChunker) Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk, error) {
+// Each chunk is BLAKE3-hashed. fn is invoked for every emitted chunk; if fn
+// returns an error Chunk stops and returns it. The context is checked before
+// each read so a cancelled context aborts the chunking loop promptly.
+func (f *FixedChunker) Chunk(ctx context.Context, r io.Reader, fn func(*core.Chunk) error) error {
 	buf := make([]byte, f.chunkSize)
-	var chunks []*core.Chunk
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		n, err := io.ReadFull(r, buf)
 		if n == 0 && err == io.EOF {
@@ -66,15 +66,17 @@ func (f *FixedChunker) Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk, e
 				Data:  chunkData,
 				Flags: core.ChunkFlagNone,
 			}
-			chunks = append(chunks, chunk)
+			if err := fn(chunk); err != nil {
+				return err
+			}
 		}
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("fixed chunker: read error: %w", err)
+			return fmt.Errorf("fixed chunker: read error: %w", err)
 		}
 	}
 
-	return chunks, nil
+	return nil
 }

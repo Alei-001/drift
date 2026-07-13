@@ -12,9 +12,10 @@ import (
 )
 
 // CreateBranch creates a new branch pointing at the current HEAD snapshot.
-func CreateBranch(ctx context.Context, store storage.Storer, cwd, name string) error {
+// Returns the tip snapshot ID (zero if HEAD has no commits yet).
+func CreateBranch(ctx context.Context, store storage.Storer, cwd, name string) (core.SnapshotID, error) {
 	if err := AcquireWorkspaceLock(cwd); err != nil {
-		return fmt.Errorf("acquire workspace lock: %w", err)
+		return core.SnapshotID{}, fmt.Errorf("acquire workspace lock: %w", err)
 	}
 	defer ReleaseWorkspaceLock(cwd)
 	return createBranchNoLock(ctx, store, name)
@@ -23,36 +24,31 @@ func CreateBranch(ctx context.Context, store storage.Storer, cwd, name string) e
 // createBranchNoLock performs the branch creation without acquiring the
 // workspace lock. Callers already holding the lock (e.g. SwitchBranch) should
 // use this to avoid a non-re-entrant deadlock.
-func createBranchNoLock(ctx context.Context, store storage.Storer, name string) error {
+func createBranchNoLock(ctx context.Context, store storage.Storer, name string) (core.SnapshotID, error) {
 	if name == "" {
-		return fmt.Errorf("branch name is empty")
+		return core.SnapshotID{}, fmt.Errorf("branch name is empty")
 	}
 	if err := refname.Validate("heads/" + name); err != nil {
-		return fmt.Errorf("invalid branch name: %w", err)
+		return core.SnapshotID{}, fmt.Errorf("invalid branch name: %w", err)
 	}
 
 	if _, err := store.GetRef(ctx, "heads/"+name); err == nil {
-		return fmt.Errorf("branch '%s' already exists: %w", name, ErrBranchAlreadyExists)
+		return core.SnapshotID{}, fmt.Errorf("branch '%s' already exists: %w", name, ErrBranchAlreadyExists)
 	} else if !errors.Is(err, storage.ErrNotFound) {
-		return fmt.Errorf("check branch existence: %w", err)
+		return core.SnapshotID{}, fmt.Errorf("check branch existence: %w", err)
 	}
 
 	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
-		return fmt.Errorf("read HEAD: %w", err)
+		return core.SnapshotID{}, fmt.Errorf("read HEAD: %w", err)
 	}
 
 	// When HEAD's target is zero (a fresh project with no commits, or a
 	// detached HEAD pointing at nothing), the new branch is created empty.
-	// This is allowed: cmd/branch.go detects the zero target and prints
-	// "no commits yet" instead of a snapshot ID, so the user is informed
-	// rather than misled. Switching to such an empty branch from a detached
-	// HEAD is guarded by SwitchBranch to avoid severing history.
-	if headRef.Target.IsZero() {
-		// new branch will be empty; caller (cmd/branch.go) surfaces this
-	}
+	// The returned zero SnapshotID signals "no commits yet" to the caller.
+	tipID := core.SnapshotID{Hash: headRef.Target}
 
-	return store.SetRef(ctx, "heads/"+name, &core.Reference{
+	return tipID, store.SetRef(ctx, "heads/"+name, &core.Reference{
 		Type:   core.RefTypeBranch,
 		Name:   "heads/" + name,
 		Target: headRef.Target,
@@ -84,8 +80,10 @@ func ListBranches(ctx context.Context, store storage.Storer) ([]*core.Reference,
 //   - "main" (the default, protected branch)
 //   - the current branch (user must switch away first)
 //
-// Only the reference is removed; snapshots remain in storage and can be
-// reclaimed later by a future prune/GC command.
+// Only the reference is removed; snapshots remain in storage and become
+// unreachable if no other branch or tag references them. Run
+// `drift gc --dry-run` to review unreachable snapshots, then `drift gc` to
+// reclaim the disk space.
 func DeleteBranch(ctx context.Context, store storage.Storer, cwd, name string) error {
 	if err := AcquireWorkspaceLock(cwd); err != nil {
 		return fmt.Errorf("acquire workspace lock: %w", err)

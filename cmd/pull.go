@@ -30,7 +30,7 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 		branch, _ := cmd.Flags().GetString("branch")
 
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -43,8 +43,26 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 		if pullDryRun {
 			stats, err := porcelain.PullDryRun(ctx, store, cwd, remoteName, branch, pullAll)
 			if err != nil {
-				statusFailed("Pull", err.Error(), "check remote configuration and network connectivity")
+				reportFailed("Pull", "pull", "pull dry-run failed.", "check remote configuration and network connectivity")
 				return ErrSilent
+			}
+			if globalJSON {
+				return outputJSON(JSONEnvelope{
+					Command: "pull",
+					Status:  "ok",
+					Data: pullData{
+						Remote:            remoteName,
+						Branch:            branch,
+						All:               pullAll,
+						DryRun:            true,
+						SnapshotsUploaded: stats.SnapshotsUploaded,
+						SnapshotsSkipped:  stats.SnapshotsSkipped,
+						ChunksUploaded:    stats.ChunksUploaded,
+						ChunksSkipped:     stats.ChunksSkipped,
+						RefsUpdated:       stats.RefsUpdated,
+						RefsDiverged:      stats.RefsDiverged,
+					},
+				})
 			}
 			statusOK("Pull (dry run)")
 			fmt.Printf("  snapshots:  %d would download, %d already present\n", stats.SnapshotsUploaded, stats.SnapshotsSkipped)
@@ -55,10 +73,29 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 
 		result, err := porcelain.PullFromRemote(ctx, store, cwd, remoteName, branch, pullAll)
 		if err != nil {
-			statusFailed("Pull", err.Error(), "check remote configuration and network connectivity")
-			return ErrSilent
+			reportFailed("Pull", "pull", "pull failed.", "check remote configuration and network connectivity")
+			return silentWrap(err)
 		}
 		stats := result.Stats
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "pull",
+				Status:  "ok",
+				Data: pullData{
+					Remote:            remoteName,
+					Branch:            branch,
+					All:               pullAll,
+					SnapshotsUploaded: stats.SnapshotsUploaded,
+					SnapshotsSkipped:  stats.SnapshotsSkipped,
+					ChunksUploaded:    stats.ChunksUploaded,
+					ChunksSkipped:     stats.ChunksSkipped,
+					RefsUpdated:       stats.RefsUpdated,
+					RefsDiverged:      stats.RefsDiverged,
+					IndexRebuilt:      stats.IndexRebuilt,
+					BranchTipChanged:  strings.TrimPrefix(stats.BranchTipChanged, "heads/"),
+				},
+			})
+		}
 		statusOK("Pulling from '%s'", remoteName)
 		fmt.Printf("  snapshots:  %d downloaded, %d already present\n", stats.SnapshotsUploaded, stats.SnapshotsSkipped)
 		fmt.Printf("  chunks:     %d downloaded, %d already present\n", stats.ChunksUploaded, stats.ChunksSkipped)
@@ -92,4 +129,20 @@ func init() {
 	pullCmd.Flags().BoolVar(&pullDryRun, "dry-run", false, "show what would be pulled without downloading")
 	pullCmd.Flags().BoolVar(&pullRestore, "restore", false, "automatically restore working directory files after pull")
 	rootCmd.AddCommand(pullCmd)
+}
+
+// pullData is the JSON payload for a successful drift pull.
+type pullData struct {
+	Remote            string `json:"remote"`
+	Branch            string `json:"branch,omitempty"`
+	All               bool   `json:"all,omitempty"`
+	DryRun            bool   `json:"dry_run,omitempty"`
+	SnapshotsUploaded int    `json:"snapshots_downloaded"`
+	SnapshotsSkipped  int    `json:"snapshots_skipped"`
+	ChunksUploaded    int    `json:"chunks_downloaded"`
+	ChunksSkipped     int    `json:"chunks_skipped"`
+	RefsUpdated       int    `json:"refs_updated"`
+	RefsDiverged      int    `json:"refs_diverged"`
+	IndexRebuilt      bool   `json:"index_rebuilt,omitempty"`
+	BranchTipChanged  string `json:"branch_tip_changed,omitempty"`
 }

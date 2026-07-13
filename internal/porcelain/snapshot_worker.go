@@ -52,29 +52,28 @@ func processFileTask(ctx context.Context, store storage.Storer, task fileTask) (
 		return core.FileEntry{}, fmt.Errorf("seek %s: %w", task.wf.path, err)
 	}
 
-	chunks, err := chunkFile(ctx, task.wf.path, file, engine, task.wf.info.Size())
+	var chunkHashes []core.Hash
+	err = chunkFile(ctx, task.wf.path, file, engine, task.wf.info.Size(), func(c *core.Chunk) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		has, err := store.HasChunk(ctx, c.Hash)
+		if err != nil {
+			return fmt.Errorf("check chunk existence %s: %w", c.Hash.String(), err)
+		}
+		if !has {
+			if err := store.PutChunk(ctx, c); err != nil {
+				return fmt.Errorf("store chunk %s: %w", c.Hash.String(), err)
+			}
+		}
+		chunkHashes = append(chunkHashes, c.Hash)
+		return nil
+	})
 	if err != nil {
 		return core.FileEntry{}, fmt.Errorf("chunk file %s: %w", task.wf.path, err)
 	}
 
-	var chunkHashes []core.Hash
-	for _, c := range chunks {
-		if err := ctx.Err(); err != nil {
-			return core.FileEntry{}, err
-		}
-		has, err := store.HasChunk(ctx, c.Hash)
-		if err != nil {
-			return core.FileEntry{}, fmt.Errorf("check chunk existence %s: %w", c.Hash.String(), err)
-		}
-		if !has {
-			if err := store.PutChunk(ctx, c); err != nil {
-				return core.FileEntry{}, fmt.Errorf("store chunk %s: %w", c.Hash.String(), err)
-			}
-		}
-		chunkHashes = append(chunkHashes, c.Hash)
-	}
-
-	fileHash := computeFileHashFromChunks(chunks)
+	fileHash := computeFileHashFromHashes(chunkHashes)
 
 	var metadata *core.FileMetadata
 	if m := engine.Metadata(); m != nil {
@@ -124,6 +123,15 @@ func chunkFilesConcurrent(ctx context.Context, store storage.Storer, tasks []fil
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(t fileTask) {
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("panic in file task %s: %v", t.relPath, r)
+					}
+					mu.Unlock()
+				}
+			}()
 			defer wg.Done()
 			defer func() { <-sem }()
 

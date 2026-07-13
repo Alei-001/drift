@@ -61,7 +61,7 @@ func manifestID(m *core.SnapshotManifest) core.SnapshotID {
 // snapshotFromProto rebuilds a core.Snapshot from its protobuf wire form.
 // Delegates to core.SnapshotFromProto, which is shared with the remote sync
 // layer so both decode persisted snapshots identically.
-func snapshotFromProto(p *core.SnapshotProto) *core.Snapshot {
+func snapshotFromProto(p *core.SnapshotProto) (*core.Snapshot, error) {
 	return core.SnapshotFromProto(p)
 }
 

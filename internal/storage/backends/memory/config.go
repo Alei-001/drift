@@ -11,6 +11,8 @@ import (
 // match the filesystem backend's invariants (chunk size clamping and
 // field normalization).
 func (ms *MemoryStorage) GetConfig(ctx context.Context) (*core.Config, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 	if ms.config == nil {
 		return core.DefaultConfig(), nil
 	}
@@ -24,6 +26,8 @@ func (ms *MemoryStorage) GetConfig(ctx context.Context) (*core.Config, error) {
 
 // SetConfig stores the configuration.
 func (ms *MemoryStorage) SetConfig(ctx context.Context, config *core.Config) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
 	ms.config = cloneConfig(config)
 	return nil
 }

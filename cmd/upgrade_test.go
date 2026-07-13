@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -74,7 +75,7 @@ func TestRunUpgrade_Check_NoRelease_Human(t *testing.T) {
 
 	withGlobals(false, false, func() {
 		err := runUpgrade(nil, nil)
-		if err != ErrSilent {
+		if !errors.Is(err, ErrSilent) {
 			t.Errorf("expected ErrSilent, got %v", err)
 		}
 	})
@@ -106,7 +107,7 @@ func TestRunUpgrade_Check_NoRelease_JSON(t *testing.T) {
 	out := captureStdout(t, func() {
 		withGlobals(true, false, func() {
 			err := runUpgrade(nil, nil)
-			if err != ErrSilent {
+			if !errors.Is(err, ErrSilent) {
 				t.Errorf("expected ErrSilent, got %v", err)
 			}
 		})

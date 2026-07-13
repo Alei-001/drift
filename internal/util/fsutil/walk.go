@@ -27,6 +27,11 @@ func Walk(root, ignoreFile string, fn func(path string, info os.FileInfo) error)
 // re-checked between entries, causing the walk to stop descending
 // immediately. ignoreFile defaults to ".driftignore" when empty. Symbolic
 // links are not followed, and the .drift directory is always skipped.
+//
+// Nested ignore files in subdirectories are honored: a .driftignore in a
+// subdirectory adds rules scoped to that subtree, following gitignore
+// semantics. Patterns starting with "!" negate a previous match, and a
+// trailing "/" restricts a pattern to directories only.
 func WalkCtx(ctx context.Context, root, ignoreFile string, fn func(path string, info os.FileInfo) error) error {
 	if ignoreFile == "" {
 		ignoreFile = ".driftignore"
@@ -36,40 +41,32 @@ func WalkCtx(ctx context.Context, root, ignoreFile string, fn func(path string, 
 	if err != nil {
 		return err
 	}
-	matchers := make([]*glob.Matcher, 0, len(patterns))
-	for _, p := range patterns {
-		m, err := glob.Compile(p)
-		if err != nil {
-			slog.Warn("invalid ignore pattern", "pattern", p, "error", err)
-			continue
-		}
-		matchers = append(matchers, m)
-	}
+	stack := []ignoreLayer{{relDir: "", rules: compileIgnoreRules(patterns)}}
 	// Surface an already-cancelled context before touching the filesystem so
 	// callers do not pay for a WalkDir round-trip they never wanted.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			// Skip files we can't access (permission denied, broken symlink, etc.)
 			if os.IsPermission(err) || os.IsNotExist(err) {
 				return nil
 			}
 			return err
 		}
-
-		// Honor context cancellation between entries. Returning the ctx error
-		// here makes filepath.WalkDir stop descending immediately.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		rel, err := filepath.Rel(root, path)
+		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
+
+		// Pop ignore layers for directories we have left.
+		stack = popStaleLayers(stack, rel)
 
 		if isDriftDir(rel) {
 			if d.IsDir() {
@@ -78,7 +75,21 @@ func WalkCtx(ctx context.Context, root, ignoreFile string, fn func(path string, 
 			return nil
 		}
 
-		if isIgnored(rel, matchers) {
+		// For directories (other than root), check for a nested ignore file
+		// and push its rules onto the stack so they apply to the subtree.
+		if d.IsDir() && rel != "." {
+			nestedPath := filepath.Join(p, ignoreFile)
+			if _, statErr := os.Stat(nestedPath); statErr == nil {
+				np, readErr := ReadIgnoreFile(nestedPath)
+				if readErr != nil {
+					slog.Warn("read nested ignore file", "path", nestedPath, "error", readErr)
+				} else {
+					stack = append(stack, ignoreLayer{relDir: rel, rules: compileIgnoreRules(np)})
+				}
+			}
+		}
+
+		if isIgnored(rel, d.IsDir(), stack) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -89,12 +100,12 @@ func WalkCtx(ctx context.Context, root, ignoreFile string, fn func(path string, 
 		if err != nil {
 			return err
 		}
-		return fn(path, info)
+		return fn(p, info)
 	})
 }
 
 func isDriftDir(rel string) bool {
-	return rel == ".drift" || strings.HasPrefix(rel, ".drift"+string(filepath.Separator))
+	return rel == ".drift" || strings.HasPrefix(rel, ".drift/")
 }
 
 // ReadIgnoreFile reads an ignore file and returns the active pattern lines.
@@ -130,26 +141,97 @@ func ReadIgnoreFile(path string) ([]string, error) {
 	return patterns, scanner.Err()
 }
 
-// isIgnored reports whether rel matches any of the precompiled ignore
-// matchers. rel may use OS-native separators; it is normalized internally.
-// Because the matchers are already compiled, this function cannot fail and
-// is safe to call in a hot loop over many files.
-func isIgnored(rel string, matchers []*glob.Matcher) bool {
-	rel = filepath.ToSlash(rel)
-	base := path.Base(rel)
-	for _, m := range matchers {
-		p := m.Pattern()
-		// Anchored patterns (containing "/") must not match the bare
-		// basename: "/secret.txt" must only match "secret.txt" at the
-		// repository root, not "notes/secret.txt".
-		if !strings.Contains(p, "/") {
-			if m.Match(base) {
-				return true
+// ignoreRule pairs a compiled glob matcher with a negation flag. A negated
+// rule (pattern prefixed with "!") un-ignores a previously matched path,
+// following gitignore semantics.
+type ignoreRule struct {
+	matcher *glob.Matcher
+	negated bool
+}
+
+// compileIgnoreRule compiles a single pattern into an ignoreRule. A leading
+// "!" marks the rule as a negation (the "!" is stripped before compilation).
+func compileIgnoreRule(pattern string) (ignoreRule, error) {
+	negated := false
+	if strings.HasPrefix(pattern, "!") {
+		negated = true
+		pattern = pattern[1:]
+	}
+	m, err := glob.Compile(pattern)
+	if err != nil {
+		return ignoreRule{}, err
+	}
+	return ignoreRule{matcher: m, negated: negated}, nil
+}
+
+// compileIgnoreRules compiles a list of raw patterns into ignoreRules,
+// skipping invalid patterns with a warning.
+func compileIgnoreRules(patterns []string) []ignoreRule {
+	rules := make([]ignoreRule, 0, len(patterns))
+	for _, p := range patterns {
+		rule, err := compileIgnoreRule(p)
+		if err != nil {
+			slog.Warn("invalid ignore pattern", "pattern", p, "error", err)
+			continue
+		}
+		rules = append(rules, rule)
+	}
+	return rules
+}
+
+// ignoreLayer holds the ignore rules from a single .driftignore file, scoped
+// to the directory relDir (relative to the walk root, forward slashes).
+// The root layer has relDir "".
+type ignoreLayer struct {
+	relDir string
+	rules  []ignoreRule
+}
+
+// popStaleLayers removes layers from the top of the stack whose relDir is
+// not an ancestor of rel. The root layer (relDir "") is never popped.
+func popStaleLayers(stack []ignoreLayer, rel string) []ignoreLayer {
+	for len(stack) > 1 {
+		top := stack[len(stack)-1]
+		if rel == top.relDir || strings.HasPrefix(rel, top.relDir+"/") {
+			break
+		}
+		stack = stack[:len(stack)-1]
+	}
+	return stack
+}
+
+// isIgnored reports whether rel (forward slashes, relative to walk root)
+// is ignored by the stack of ignore layers. Rules are evaluated in order
+// across all layers; the last matching rule wins. Negated rules ("!" prefix)
+// un-ignore; directory-only rules (trailing "/") are skipped for files.
+func isIgnored(rel string, isDir bool, layers []ignoreLayer) bool {
+	ignored := false
+	for _, layer := range layers {
+		layerRel := rel
+		if layer.relDir != "" {
+			prefix := layer.relDir + "/"
+			if !strings.HasPrefix(rel, prefix) {
+				continue
+			}
+			layerRel = rel[len(prefix):]
+		}
+		base := path.Base(layerRel)
+		for _, rule := range layer.rules {
+			if rule.matcher.IsDirOnly() && !isDir {
+				continue
+			}
+			p := rule.matcher.Pattern()
+			matched := false
+			if !strings.Contains(p, "/") {
+				matched = rule.matcher.Match(base)
+			}
+			if !matched {
+				matched = rule.matcher.Match(layerRel)
+			}
+			if matched {
+				ignored = !rule.negated
 			}
 		}
-		if m.Match(rel) {
-			return true
-		}
 	}
-	return false
+	return ignored
 }

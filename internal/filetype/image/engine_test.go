@@ -12,6 +12,8 @@ import (
 	"image/png"
 	"strings"
 	"testing"
+
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // --- Test helpers for constructing minimal image byte streams ---
@@ -68,6 +70,14 @@ func makeGIF(width, height int) []byte {
 	return buf.Bytes()
 }
 
+// makeBMPHeader builds a minimal 54-byte BMP header with BITMAPINFOHEADER.
+func makeBMPHeader() []byte {
+	h := make([]byte, minBMPHeaderSize)
+	h[0], h[1] = 'B', 'M'
+	binary.LittleEndian.PutUint32(h[14:18], 40)
+	return h
+}
+
 // --- Detect tests ---
 
 func TestDetect_ByExtension(t *testing.T) {
@@ -110,7 +120,7 @@ func TestDetect_ByMagic(t *testing.T) {
 		{"GIF89a", []byte("GIF89a"), true},
 		{"GIF87a", []byte("GIF87a"), true},
 		{"WebP", append([]byte("RIFF\x00\x00\x00\x00"), []byte("WEBP")...), true},
-		{"BMP", []byte{'B', 'M', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00}, true},
+		{"BMP", makeBMPHeader(), true},
 		{"TIFF little-endian", []byte{'I', 'I', 0x2A, 0x00}, true},
 		{"TIFF big-endian", []byte{'M', 'M', 0x00, 0x2A}, true},
 		{"unknown", []byte("plain text"), false},
@@ -262,9 +272,9 @@ func TestPreview_GIF(t *testing.T) {
 
 func TestPreview_UnknownFormat(t *testing.T) {
 	engine := NewEngine()
-	// Magic bytes for BMP, but not decodable by image.DecodeConfig; should
+	// 54-byte BMP header (not decodable by image.DecodeConfig); should
 	// still produce a preview line with format name and size.
-	data := []byte{'B', 'M', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00}
+	data := makeBMPHeader()
 	preview, err := engine.Preview(data, int64(len(data)), nil, 10)
 	if err != nil {
 		t.Fatalf("Preview failed: %v", err)
@@ -295,7 +305,11 @@ func TestChunkerFor(t *testing.T) {
 	}
 	// Verify the chunker actually chunks data end-to-end.
 	data := bytes.Repeat([]byte("image-bytes-pattern-"), 20000)
-	chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
+	var chunks []*core.Chunk
+	err := c.Chunk(context.Background(), bytes.NewReader(data), func(ch *core.Chunk) error {
+		chunks = append(chunks, ch)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Chunk failed: %v", err)
 	}

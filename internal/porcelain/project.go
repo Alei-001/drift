@@ -105,7 +105,7 @@ func OpenProjectWithFactory(path string, factory StoreFactory) (storage.Storer, 
 	driftPath := filepath.Join(path, ".drift")
 
 	if _, err := os.Stat(driftPath); err != nil {
-		return nil, nil, fmt.Errorf("not a drift repository")
+		return nil, nil, fmt.Errorf("%w", ErrNotARepo)
 	}
 
 	store, err := factory(driftPath)

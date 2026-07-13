@@ -56,6 +56,13 @@ func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir stri
 		if info.IsDir() {
 			return nil
 		}
+		// Skip symlinks: they are not tracked by snapshots (see
+		// createSnapshotInLock), so reporting them as added would
+		// cause SwitchBranch --no-autosave and UndoLastSave to refuse
+		// an otherwise-clean workspace.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 		rel, err := pathutil.Rel(workDir, path)
 		if err != nil {
 			return err

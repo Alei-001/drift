@@ -58,8 +58,11 @@ func (fs *FSStorage) CompactChunks(ctx context.Context, reachable map[core.Hash]
 		if reachable[h] {
 			aliveLoose[h] = struct{}{}
 		} else {
-			if ch, gerr := fs.GetChunk(ctx, h); gerr == nil {
-				report.FreedBytes += int64(ch.Size)
+			// Use the on-disk (compressed) file size for FreedBytes, not
+			// the decompressed chunk size, so the report reflects actual
+			// disk space reclaimed.
+			if info, gerr := os.Stat(path); gerr == nil {
+				report.FreedBytes += info.Size()
 			}
 			report.LooseDeleted++
 			if !dryRun {
@@ -168,22 +171,7 @@ func (fs *FSStorage) createPack(ctx context.Context, hashes []core.Hash) error {
 		}
 
 		offset := int64(packData.Len())
-		flags := byte(0x00)
-		if chunk.Flags == core.ChunkFlagCompressed {
-			flags = chunkFlagCompressed
-		}
-
-		var payload []byte
-		if flags == chunkFlagCompressed {
-			compressed := fs.zstdEncoder.EncodeAll(chunk.Data, nil)
-			payload = make([]byte, 0, 1+len(compressed))
-			payload = append(payload, chunkFlagCompressed)
-			payload = append(payload, compressed...)
-		} else {
-			payload = make([]byte, 0, 1+len(chunk.Data))
-			payload = append(payload, 0x00)
-			payload = append(payload, chunk.Data...)
-		}
+		payload, flags := fs.buildChunkPayload(chunk.Data, chunk.Flags == core.ChunkFlagCompressed)
 		packData.Write(payload)
 
 		length := uint32(len(payload))
@@ -197,6 +185,7 @@ func (fs *FSStorage) createPack(ctx context.Context, hashes []core.Hash) error {
 
 	idx := &packIndex{name: name, entries: entries}
 	if err := fs.writePackIndex(name, idx); err != nil {
+		_ = os.Remove(packPath)
 		return fmt.Errorf("write pack index %s: %w", name, err)
 	}
 
@@ -252,22 +241,7 @@ func (fs *FSStorage) rewritePack(ctx context.Context, name string, reachable map
 		}
 
 		offset := int64(packData.Len())
-		flags := byte(0x00)
-		if chunk.Flags == core.ChunkFlagCompressed {
-			flags = chunkFlagCompressed
-		}
-
-		var payload []byte
-		if flags == chunkFlagCompressed {
-			compressed := fs.zstdEncoder.EncodeAll(chunk.Data, nil)
-			payload = make([]byte, 0, 1+len(compressed))
-			payload = append(payload, chunkFlagCompressed)
-			payload = append(payload, compressed...)
-		} else {
-			payload = make([]byte, 0, 1+len(chunk.Data))
-			payload = append(payload, 0x00)
-			payload = append(payload, chunk.Data...)
-		}
+		payload, flags := fs.buildChunkPayload(chunk.Data, chunk.Flags == core.ChunkFlagCompressed)
 		packData.Write(payload)
 
 		length := uint32(len(payload))
@@ -281,6 +255,7 @@ func (fs *FSStorage) rewritePack(ctx context.Context, name string, reachable map
 
 	newIdx := &packIndex{name: newName, entries: entries}
 	if err := fs.writePackIndex(newName, newIdx); err != nil {
+		_ = os.Remove(newPackPath)
 		return fmt.Errorf("write pack index %s: %w", newName, err)
 	}
 

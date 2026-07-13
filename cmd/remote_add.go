@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -18,7 +20,7 @@ var remoteAddCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -30,13 +32,31 @@ var remoteAddCmd = &cobra.Command{
 		password, _ := cmd.Flags().GetString("password")
 		noSavePassword, _ := cmd.Flags().GetBool("no-save-password")
 		options, _ := cmd.Flags().GetStringArray("option")
+		passwordStdin, _ := cmd.Flags().GetBool("password-stdin")
+
+		// When --password-stdin is set, read the password from os.Stdin
+		// (trimming trailing whitespace). This supports automation scripts
+		// and pipes; --password-stdin takes precedence over --password.
+		if passwordStdin {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("read password from stdin: %w", err)
+			}
+			password = strings.TrimSpace(string(data))
+		} else if password != "" {
+			// --password is visible in process listings (ps, Task Manager,
+			// /proc/<pid>/cmdline) to any local user. Warn so users opt
+			// into --password-stdin or interactive prompting instead.
+			fmt.Fprintln(os.Stderr, "warning: --password is visible in process listings; prefer --password-stdin for security")
+		}
 
 		// Parse --option key=value into Options map.
 		optMap := make(map[string]string)
 		for _, o := range options {
 			parts := strings.SplitN(o, "=", 2)
 			if len(parts) != 2 {
-				return fmt.Errorf("invalid --option %q (expected key=value)", o)
+				reportFailed("Remote add", "remote add", fmt.Sprintf("invalid --option %q (expected key=value).", o), "use --option key=value, repeatable.")
+				return ErrSilent
 			}
 			optMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 		}
@@ -45,7 +65,8 @@ var remoteAddCmd = &cobra.Command{
 		interactive := url == "" || user == ""
 		if interactive {
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				return fmt.Errorf("interactive mode requires a terminal; provide --url and --user via flags")
+				reportFailed("Remote add", "remote add", "interactive mode requires a terminal.", "provide --url and --user via flags.")
+				return ErrSilent
 			}
 			reader := bufio.NewReader(os.Stdin)
 			if remoteType == "" {
@@ -62,7 +83,8 @@ var remoteAddCmd = &cobra.Command{
 				line, _ = reader.ReadString('\n')
 				url = strings.TrimSpace(line)
 				if url == "" {
-					return fmt.Errorf("URL is required")
+					reportFailed("Remote add", "remote add", "URL is required.", "")
+					return ErrSilent
 				}
 			}
 			if user == "" {
@@ -70,7 +92,8 @@ var remoteAddCmd = &cobra.Command{
 				line, _ = reader.ReadString('\n')
 				user = strings.TrimSpace(line)
 				if user == "" {
-					return fmt.Errorf("username is required")
+					reportFailed("Remote add", "remote add", "username is required.", "")
+					return ErrSilent
 				}
 			}
 			if password == "" {
@@ -78,7 +101,8 @@ var remoteAddCmd = &cobra.Command{
 				passBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Println() // newline after password prompt
 				if err != nil {
-					return fmt.Errorf("read password: %w", err)
+					reportFailed("Remote add", "remote add", fmt.Sprintf("read password: %s.", err), "")
+					return ErrSilent
 				}
 				password = string(passBytes)
 			}
@@ -119,14 +143,17 @@ var remoteAddCmd = &cobra.Command{
 		// Save password to user-level credentials.json FIRST, so that if
 		// credential saving fails, the remote definition is not left
 		// orphaned (without credentials, push/pull would fail).
+		credentialsSaved := false
 		if password != "" && !noSavePassword {
 			host, err := remote.HostFromURL(url)
 			if err != nil {
-				return fmt.Errorf("parse URL for credentials: %w", err)
+				reportFailed("Remote add", "remote add", "could not parse URL for credentials.", "check that --url is a valid remote URL.")
+				return ErrSilent
 			}
 			cred, err := remote.LoadCredentials()
 			if err != nil {
-				return fmt.Errorf("load credentials: %w", err)
+				reportFailed("Remote add", "remote add", "could not load existing credentials.", "")
+				return ErrSilent
 			}
 			cred.AddOrUpdateCredential(remote.Credential{
 				Remote:   name,
@@ -135,8 +162,10 @@ var remoteAddCmd = &cobra.Command{
 				Password: password,
 			})
 			if err := remote.SaveCredentials(cred); err != nil {
-				return fmt.Errorf("save credentials: %w", err)
+				reportFailed("Remote add", "remote add", "could not save credentials.", "check that the user-level config directory is writable.")
+				return ErrSilent
 			}
+			credentialsSaved = true
 		}
 
 		// Now save the remote definition to remotes.json.
@@ -153,6 +182,20 @@ var remoteAddCmd = &cobra.Command{
 			return err
 		}
 
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "remote add",
+				Status:  "ok",
+				Data: remoteAddData{
+					Name:             cfg.Name,
+					Type:             cfg.Type,
+					URL:              cfg.URL,
+					User:             cfg.User,
+					CredentialsSaved: credentialsSaved,
+				},
+			})
+		}
+
 		if password != "" && !noSavePassword {
 			fmt.Printf("Remote %q added (credentials saved to user-level config).\n", name)
 		} else if password != "" && noSavePassword {
@@ -161,8 +204,8 @@ var remoteAddCmd = &cobra.Command{
 			fmt.Printf("Remote %q added.\n", name)
 		}
 
-		// Offer to test connection.
-		if interactive {
+		// Offer to test connection (interactive mode only, never in JSON mode).
+		if interactive && !globalJSON {
 			fmt.Print("Test connection now? [Y/n]: ")
 			reader := bufio.NewReader(os.Stdin)
 			line, _ := reader.ReadString('\n')
@@ -179,7 +222,7 @@ var remoteAddCmd = &cobra.Command{
 					return ErrSilent
 				}
 				defer rfs.Close()
-				if _, err := rfs.List("."); err != nil {
+				if _, err := rfs.List(context.Background(), "."); err != nil {
 					fmt.Fprintf(os.Stderr, "Connection failed: %v\n", err)
 					return ErrSilent
 				}
@@ -195,6 +238,16 @@ func init() {
 	remoteAddCmd.Flags().String("url", "", "remote URL")
 	remoteAddCmd.Flags().String("user", "", "username")
 	remoteAddCmd.Flags().String("password", "", "password (saved to user-level credentials.json)")
+	remoteAddCmd.Flags().Bool("password-stdin", false, "read password from standard input (for automation/scripts)")
 	remoteAddCmd.Flags().Bool("no-save-password", false, "do not save password (prompt on each push/pull)")
 	remoteAddCmd.Flags().StringArray("option", nil, "protocol-specific field (key=value, repeatable)")
+}
+
+// remoteAddData is the JSON payload for a successful drift remote add.
+type remoteAddData struct {
+	Name             string `json:"name"`
+	Type             string `json:"type"`
+	URL              string `json:"url"`
+	User             string `json:"user"`
+	CredentialsSaved bool   `json:"credentials_saved"`
 }

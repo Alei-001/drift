@@ -96,6 +96,10 @@ func (i Info) Platform() string {
 }
 
 // IsDevel reports whether the binary is an unreleased development build.
+// Only the literal "(devel)" placeholder or a Go pseudo-version of the form
+// "v0.0.0-<timestamp>-<hash>" (emitted by `go install` of a non-tagged
+// commit) is treated as development. A real release tagged "v0.0.0" is NOT
+// a development build.
 func (i Info) IsDevel() bool {
-	return i.Version == "(devel)" || strings.HasPrefix(i.Version, "v0.0.0")
+	return i.Version == "(devel)" || strings.HasPrefix(i.Version, "v0.0.0-")
 }

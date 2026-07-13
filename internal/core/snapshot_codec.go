@@ -1,5 +1,15 @@
 package core
 
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrCorrupted is returned when protobuf data fails a length or integrity
+// check during decoding. It indicates truncated or malformed hash fields
+// that would otherwise be silently zero-padded by BytesToHash.
+var ErrCorrupted = errors.New("drift: corrupted data")
+
 // SnapshotToProto converts a Snapshot to its protobuf representation.
 //
 // withIDHash controls whether the IdHash field is populated:
@@ -82,9 +92,20 @@ func fileEntryToProto(f *FileEntry) *FileEntryProto {
 // the inverse of SnapshotToProto and is shared between the storage layer
 // (GetSnapshot) and the remote sync layer (pull), so both decode persisted
 // snapshots identically.
-func SnapshotFromProto(p *SnapshotProto) *Snapshot {
+//
+// Hash fields (IdHash, PrevIdHash, ChunkHashes) are validated to be exactly
+// HashSize bytes when present. Truncated hashes return ErrCorrupted instead
+// of being silently zero-padded by BytesToHash, which would produce a
+// different hash and mask data corruption.
+func SnapshotFromProto(p *SnapshotProto) (*Snapshot, error) {
 	if p == nil {
-		return nil
+		return nil, nil
+	}
+	if len(p.IdHash) > 0 && len(p.IdHash) != HashSize {
+		return nil, fmt.Errorf("decode snapshot: IdHash length %d != %d: %w", len(p.IdHash), HashSize, ErrCorrupted)
+	}
+	if len(p.PrevIdHash) > 0 && len(p.PrevIdHash) != HashSize {
+		return nil, fmt.Errorf("decode snapshot: PrevIdHash length %d != %d: %w", len(p.PrevIdHash), HashSize, ErrCorrupted)
 	}
 	s := &Snapshot{
 		ID:        SnapshotID{Hash: bytesToHash(p.IdHash)},
@@ -106,6 +127,9 @@ func SnapshotFromProto(p *SnapshotProto) *Snapshot {
 			ModTime: fe.ModTime,
 		}
 		for _, ch := range fe.ChunkHashes {
+			if len(ch) != HashSize {
+				return nil, fmt.Errorf("decode snapshot: file %q chunk hash length %d != %d: %w", fe.Path, len(ch), HashSize, ErrCorrupted)
+			}
 			f.Chunks = append(f.Chunks, bytesToHash(ch))
 		}
 		if len(fe.FileHash) == HashSize {
@@ -125,12 +149,14 @@ func SnapshotFromProto(p *SnapshotProto) *Snapshot {
 		}
 		s.Files = append(s.Files, f)
 	}
-	return s
+	return s, nil
 }
 
-// BytesToHash copies a byte slice into a Hash. The caller must ensure len(b)
-// <= HashSize; extra bytes are truncated. Used when decoding protobuf
-// IdHash/PrevIdHash/ChunkHashes fields.
+// BytesToHash copies a byte slice into a Hash. If len(b) < HashSize the
+// remaining bytes are zero-filled; if len(b) > HashSize extra bytes are
+// truncated. Callers decoding untrusted data (e.g. from protobuf) MUST
+// validate len(b) == HashSize beforehand to avoid silently accepting a
+// truncated hash. See SnapshotFromProto for the validated usage.
 func BytesToHash(b []byte) Hash {
 	var h Hash
 	copy(h[:], b)

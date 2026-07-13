@@ -8,7 +8,14 @@ import (
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
+	"github.com/zeebo/blake3"
 )
+
+// hashOf returns the BLAKE3 hash of data, for building chunks that pass
+// PutChunk's content-hash validation in tests.
+func hashOf(data []byte) core.Hash {
+	return core.Hash(blake3.Sum256(data))
+}
 
 // TestCheckWithin_Inside verifies that a path inside baseDir is accepted.
 func TestCheckWithin_Inside(t *testing.T) {
@@ -107,10 +114,14 @@ func TestWriteFileFromChunks_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 
-	chunkA := &core.Chunk{Hash: core.Hash{0xA1}, Data: []byte("Hello, ")}
-	chunkB := &core.Chunk{Hash: core.Hash{0xA2}, Data: []byte("World!")}
-	store.PutChunk(ctx, chunkA)
-	store.PutChunk(ctx, chunkB)
+	chunkA := &core.Chunk{Hash: hashOf([]byte("Hello, ")), Data: []byte("Hello, ")}
+	chunkB := &core.Chunk{Hash: hashOf([]byte("World!")), Data: []byte("World!")}
+	if err := store.PutChunk(ctx, chunkA); err != nil {
+		t.Fatalf("PutChunk A: %v", err)
+	}
+	if err := store.PutChunk(ctx, chunkB); err != nil {
+		t.Fatalf("PutChunk B: %v", err)
+	}
 
 	dst := filepath.Join(dir, "out.txt")
 	if err := writeFileFromChunks(ctx, store, dst, []core.Hash{chunkA.Hash, chunkB.Hash}, 0644); err != nil {
@@ -139,8 +150,10 @@ func TestWriteFileFromChunks_MissingChunkCleansUp(t *testing.T) {
 	dir := t.TempDir()
 	ctx := context.Background()
 
-	chunkA := &core.Chunk{Hash: core.Hash{0xB1}, Data: []byte("partial ")}
-	store.PutChunk(ctx, chunkA)
+	chunkA := &core.Chunk{Hash: hashOf([]byte("partial ")), Data: []byte("partial ")}
+	if err := store.PutChunk(ctx, chunkA); err != nil {
+		t.Fatalf("PutChunk A: %v", err)
+	}
 	missingHash := core.Hash{0xB2} // never stored
 
 	dst := filepath.Join(dir, "out.txt")

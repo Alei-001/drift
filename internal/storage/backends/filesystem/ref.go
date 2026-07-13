@@ -42,7 +42,7 @@ func (fs *FSStorage) getRefRecursive(ctx context.Context, name string, depth int
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("get ref %q: %w", name, storage.ErrNotFound)
 		}
-		return nil, err
+		return nil, fmt.Errorf("read ref %q: %w", name, mapOSError(err))
 	}
 	content := strings.TrimSpace(string(data))
 
@@ -102,10 +102,16 @@ func (fs *FSStorage) SetRef(ctx context.Context, name string, ref *core.Referenc
 		if err := refname.Validate(symTarget); err != nil {
 			return err
 		}
-		return fsutil.WriteFileAtomic(path, []byte("ref: "+RefsDir+"/"+symTarget+"\n"), fsutil.DefaultFilePerm)
+		if err := fsutil.WriteFileAtomic(path, []byte("ref: "+RefsDir+"/"+symTarget+"\n"), fsutil.DefaultFilePerm); err != nil {
+			return fmt.Errorf("write ref %q: %w", name, mapOSError(err))
+		}
+		return nil
 	}
 	hexStr := ref.Target.FullString()
-	return fsutil.WriteFileAtomic(path, []byte(hexStr+"\n"), fsutil.DefaultFilePerm)
+	if err := fsutil.WriteFileAtomic(path, []byte(hexStr+"\n"), fsutil.DefaultFilePerm); err != nil {
+		return fmt.Errorf("write ref %q: %w", name, mapOSError(err))
+	}
+	return nil
 }
 
 func (fs *FSStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {
@@ -150,7 +156,7 @@ func (fs *FSStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Refer
 		if os.IsNotExist(err) {
 			return refs, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("list refs: %w", mapOSError(err))
 	}
 	return refs, nil
 }
@@ -164,7 +170,7 @@ func (fs *FSStorage) DeleteRef(ctx context.Context, name string) error {
 	}
 	path := filepath.Join(fs.root, RefsDir, name)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete ref %q: %w", name, err)
+		return fmt.Errorf("delete ref %q: %w", name, mapOSError(err))
 	}
 	return nil
 }

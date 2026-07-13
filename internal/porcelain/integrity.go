@@ -32,11 +32,12 @@ type ChunkRef struct {
 
 // IntegrityReport contains the results of a full repository integrity check.
 type IntegrityReport struct {
-	TotalBlocks     int
-	Corrupt         int
-	Missing         int
-	SnapshotCorrupt int
-	VerboseRefs     []ChunkRef // populated only when verbose=true
+	TotalBlocks        int
+	Corrupt            int
+	Missing            int
+	SnapshotCorrupt    int
+	FileHashMismatch   int
+	VerboseRefs        []ChunkRef // populated only when verbose=true
 }
 
 // VerifyIntegrity verifies the integrity of all chunks in the repository by
@@ -45,10 +46,12 @@ type IntegrityReport struct {
 // When filter is non-empty, only files matching the glob pattern are checked.
 // When verbose is true, per-chunk references are collected for detailed output.
 //
-// workDir is accepted for consistency with other porcelain functions that
-// operate on a workspace; the current verification logic does not require it.
+// workDir is accepted for API consistency with other porcelain functions that
+// operate on a workspace. The current verification logic is repository-wide and
+// does not constrain checks to workDir, but the parameter is retained so future
+// per-workspace scoping can be added without breaking callers.
 func VerifyIntegrity(ctx context.Context, store storage.Storer, workDir, filter string, verbose bool) (*IntegrityReport, error) {
-	_ = workDir
+	_ = workDir // reserved for future per-workspace verification scoping
 
 	var matcher *glob.Matcher
 	if filter != "" {
@@ -70,6 +73,7 @@ func VerifyIntegrity(ctx context.Context, store storage.Storer, workDir, filter 
 	hashSet := make(map[core.Hash]bool)
 	var refs []ChunkRef
 	snapshotCorrupt := 0
+	fileHashMismatch := 0
 	for _, snap := range snapshots {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -82,6 +86,14 @@ func VerifyIntegrity(ctx context.Context, store storage.Storer, workDir, filter 
 		for _, entry := range full.Files {
 			if matcher != nil && !matcher.Match(entry.Path) {
 				continue
+			}
+			// Verify the file-level hash: the entry.Hash must equal
+			// computeFileHashFromHashes(entry.Chunks). A mismatch means
+			// the recorded hash does not reflect the actual chunk list,
+			// which indicates corruption (either the hash or the chunk
+			// list was tampered with or written inconsistently).
+			if !entry.Hash.IsZero() && entry.Hash != computeFileHashFromHashes(entry.Chunks) {
+				fileHashMismatch++
 			}
 			for idx, hash := range entry.Chunks {
 				if hash.IsZero() {
@@ -103,8 +115,9 @@ func VerifyIntegrity(ctx context.Context, store storage.Storer, workDir, filter 
 	// Verify each unique chunk once; cache the result for verbose output.
 	results := make(map[core.Hash]ChunkStatus, len(hashSet))
 	report := &IntegrityReport{
-		TotalBlocks:     len(hashSet),
-		SnapshotCorrupt: snapshotCorrupt,
+		TotalBlocks:      len(hashSet),
+		SnapshotCorrupt:  snapshotCorrupt,
+		FileHashMismatch: fileHashMismatch,
 	}
 	for hash := range hashSet {
 		if err := ctx.Err(); err != nil {

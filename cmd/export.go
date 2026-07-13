@@ -26,7 +26,7 @@ drift-export-<short-id>.zip in the current directory.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -54,7 +54,7 @@ drift-export-<short-id>.zip in the current directory.`,
 
 		result, err := porcelain.ExportSnapshot(ctx, store, snapshot.ID, output)
 		if err != nil {
-			reportFailed("Export", "export", err.Error(), "")
+			reportFailed("Export", "export", "export failed.", "")
 			return ErrSilent
 		}
 

@@ -309,3 +309,53 @@ func TestReleaseWorkspaceLock_OwnershipCheck(t *testing.T) {
 		t.Logf("cleanup foreign lock: %v", err)
 	}
 }
+
+// TestAcquireWorkspaceLock_StaleLockAtomicReplace verifies that the
+// rename-based atomic replacement does not clobber a fresh (non-stale) lock.
+// Even though the replacement uses os.Rename (which unconditionally overwrites
+// the target), the stale-check gate ensures a fresh lock is never replaced:
+// AcquireWorkspaceLock must return ErrLocked and leave the lock file
+// unchanged.
+func TestAcquireWorkspaceLock_StaleLockAtomicReplace(t *testing.T) {
+	_, dir := setupLockedProject(t)
+	lockPath := filepath.Join(dir, ".drift", "workspace.lock")
+
+	// Write a fresh (non-stale) lock with the current process's PID and a
+	// current timestamp. isLockStale must report false for this lock.
+	fresh := workspaceLockData{
+		PID:       os.Getpid(),
+		Timestamp: time.Now().Unix(),
+	}
+	data, err := json.Marshal(&fresh)
+	if err != nil {
+		t.Fatalf("marshal fresh lock: %v", err)
+	}
+	if err := os.WriteFile(lockPath, data, 0644); err != nil {
+		t.Fatalf("write fresh lock: %v", err)
+	}
+
+	// Acquisition must fail: the lock is fresh, not stale. The rename-based
+	// replacement must NOT fire.
+	if err := AcquireWorkspaceLock(dir); !errors.Is(err, ErrLocked) {
+		t.Fatalf("expected ErrLocked for fresh lock, got %v", err)
+	}
+
+	// The fresh lock must not have been clobbered by a rename.
+	got, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("read lock after failed acquire: %v", err)
+	}
+	var after workspaceLockData
+	if err := json.Unmarshal(got, &after); err != nil {
+		t.Fatalf("unmarshal lock: %v", err)
+	}
+	if after.PID != fresh.PID || after.Timestamp != fresh.Timestamp {
+		t.Errorf("fresh lock was clobbered: got PID=%d TS=%d, want PID=%d TS=%d",
+			after.PID, after.Timestamp, fresh.PID, fresh.Timestamp)
+	}
+
+	// Clean up so the leftover lock does not affect other tests.
+	if err := os.Remove(lockPath); err != nil {
+		t.Logf("cleanup fresh lock: %v", err)
+	}
+}

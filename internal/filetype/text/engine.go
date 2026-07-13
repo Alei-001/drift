@@ -22,6 +22,15 @@ var textBasenames = map[string]bool{
 	".env": true, ".dockerignore": true,
 }
 
+// BOM signatures that identify text encodings. A file starting with any of
+// these byte sequences is text, even though plain text has no single unified
+// magic byte signature.
+var (
+	bomUTF8    = []byte{0xEF, 0xBB, 0xBF}
+	bomUTF16BE = []byte{0xFE, 0xFF}
+	bomUTF16LE = []byte{0xFF, 0xFE}
+)
+
 // TextEngine handles text files.
 type TextEngine struct{}
 
@@ -35,10 +44,19 @@ func (e *TextEngine) Name() string {
 	return "text"
 }
 
-// DetectByMagic checks file header signatures. Text has no unified magic
-// byte signature, so this always returns false.
+// DetectByMagic checks file header signatures. Plain text has no unified
+// magic byte signature, but files beginning with a Byte Order Mark (BOM) —
+// UTF-8 (EF BB BF), UTF-16 big-endian (FE FF), or UTF-16 little-endian
+// (FF FE) — are unambiguously text.
 func (e *TextEngine) DetectByMagic(header []byte) bool {
-	return false
+	return hasBOM(header)
+}
+
+// hasBOM reports whether header starts with a known BOM signature.
+func hasBOM(header []byte) bool {
+	return bytes.HasPrefix(header, bomUTF8) ||
+		bytes.HasPrefix(header, bomUTF16BE) ||
+		bytes.HasPrefix(header, bomUTF16LE)
 }
 
 // DetectByExtension checks if the path's extension or basename is a known
@@ -52,7 +70,7 @@ func (e *TextEngine) DetectByExtension(path string) bool {
 // DetectByHeuristic is the last-resort content sniffing used for
 // extensionless or unknown-extension files. A header is treated as text
 // only when ALL of the following hold:
-//   - it is non-empty,
+//   - it is non-empty and at least 4 bytes long,
 //   - it does not start with a known image/video magic signature,
 //   - it contains no NUL bytes (0x00),
 //   - its control-byte ratio is at most 10%.
@@ -63,8 +81,13 @@ func (e *TextEngine) DetectByExtension(path string) bool {
 // binary data that happens to omit 0x00 (e.g. byte sequences 1..255,
 // which are ~11% control bytes) while allowing text with occasional
 // control characters.
+//
+// Headers shorter than 4 bytes are too short for reliable heuristic
+// detection (a single 0xFF byte would pass the control-ratio check
+// because 0x80-0xFF are not counted as control bytes). Let the fallback
+// binary engine handle them instead.
 func (e *TextEngine) DetectByHeuristic(path string, header []byte) bool {
-	if len(header) == 0 {
+	if len(header) < 4 {
 		return false
 	}
 	if matchesBinaryMagic(header) {

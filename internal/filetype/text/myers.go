@@ -15,19 +15,18 @@ type editOp struct {
 	line   string
 }
 
-const maxDiffLines = 500000
+const maxDiffLines = 10000
 
 // myersDiff computes the edit script using the Myers diff algorithm with
 // Hirschberg's divide-and-conquer strategy for linear space. O(N*M) time,
-// O(N) space. Inputs exceeding maxDiffLines fall back to coarse prefix/suffix
-// diff to avoid excessive runtime. The context is checked before dispatching
-// so a cancelled caller aborts before the DP work begins.
+// O(N) space. Inputs with no common lines fall back to coarse prefix/suffix
+// diff to avoid unnecessary DP work. The context is checked before
+// dispatching so a cancelled caller aborts before the DP work begins.
+// Callers should enforce the maxDiffLines threshold before invoking
+// myersDiff; the coarse fallback here handles only the no-common-lines case.
 func myersDiff(ctx context.Context, a, b []string) ([]editOp, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	if len(a) > maxDiffLines || len(b) > maxDiffLines {
-		return coarseDiff(a, b), nil
 	}
 	if !hasCommonLines(a, b) {
 		return coarseDiff(a, b), nil

@@ -21,7 +21,7 @@ func (fs *FSStorage) GetIndex(ctx context.Context) (*core.Index, error) {
 		if os.IsNotExist(err) {
 			return &core.Index{}, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("open index: %w", mapOSError(err))
 	}
 	defer f.Close()
 	// Stream the index file through os.Open + io.ReadAll rather than
@@ -46,7 +46,10 @@ func (fs *FSStorage) SetIndex(ctx context.Context, index *core.Index) error {
 		return err
 	}
 	path := filepath.Join(fs.root, IndexFile)
-	return fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
+	if err := fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm); err != nil {
+		return fmt.Errorf("write index: %w", mapOSError(err))
+	}
+	return nil
 }
 
 // --- protobuf conversion helpers ---

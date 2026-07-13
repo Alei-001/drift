@@ -49,10 +49,61 @@ jobs:
           fi
 
       - name: Test
-        # TestAcquireWorkspaceLock_StaleLockToctouRace is flaky on Windows
-        # (TOCTOU race in concurrent lock acquisition, see AGENTS.md). Skip it
-        # to keep CI green; the lock logic is covered by other tests.
-        run: go test ./... -count=1 -skip TestAcquireWorkspaceLock_StaleLockToctouRace
+        # The previously-flaky TestAcquireWorkspaceLock_StaleLockToctouRace is
+        # now deterministic: lock.go uses O_CREATE|O_EXCL atomic create plus an
+        # in-process mutex (acquireLockMu) that serializes stale-lock
+        # replacement, so two goroutines cannot both steal the same lock. It
+        # runs on every platform without skipping.
+        run: go test ./... -count=1 -coverprofile=coverage.out
+
+      - name: Upload coverage
+        # Upload coverage from the Linux run only; other platforms still
+        # generate coverage.out (harmless) but a single upload avoids
+        # duplicate/merged reports. fail_ci_if_error is false so a missing
+        # CODECOV_TOKEN (e.g. on forks) never breaks the build.
+        uses: codecov/codecov-action@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+      - name: Test with race detector
+        # Race detector catches data races in concurrent code paths (worker
+        # pools, watch daemon, ref/lock handling). Run on all three target
+        # platforms so Windows/macOS-specific paths (file locks, fsnotify)
+        # are also exercised under -race. CGO is required; every runner ships
+        # a C compiler (gcc on Ubuntu, clang on macOS, mingw on Windows).
+        env:
+          CGO_ENABLED: 1
+        run: go test -race ./... -count=1
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: govulncheck
+        # Pin to the official action's v1 major tag instead of `go install
+        # ...@latest`, which floats to whatever is newest on each run and
+        # makes CI results non-reproducible. The action installs a vetted
+        # govulncheck binary tied to the v1 line.
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-input: stable
+          check-latest: true
 
   goreleaser-check:
     runs-on: ubuntu-latest
@@ -74,6 +125,12 @@ jobs:
           distribution: goreleaser
           version: latest
           args: check
+
+      - name: Install syft
+        # SBOM generation (see .goreleaser.yml `sboms:`) shells out to syft.
+        # Install it so the snapshot dry-run below exercises the real SBOM
+        # path rather than failing on a missing tool.
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
 
       - name: Dry-run release (snapshot)
         uses: goreleaser/goreleaser-action@v7

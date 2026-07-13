@@ -20,7 +20,7 @@ func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, 
 
 	if data, err := os.ReadFile(pidPath); err == nil {
 		pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-		if err == nil && processExists(pid) {
+		if err == nil && processExistsWithStartTime(pid, 0) {
 			return 0, fmt.Errorf("a watch daemon is already running (PID %d)", pid)
 		}
 		// Best-effort: the pid file points at a dead process; removal failure
@@ -161,7 +161,7 @@ func DaemonStatus(ctx context.Context, cwd string) (*WatchState, bool, error) {
 		return nil, false, nil
 	}
 
-	if !processExists(pid) {
+	if !processExistsWithStartTime(pid, 0) {
 		os.Remove(pidPath)
 		os.Remove(statePath)
 		return nil, false, nil

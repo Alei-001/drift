@@ -1,6 +1,13 @@
 package core
 
-// Default configuration values. Centralized here so that DefaultConfig(),
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
+
+// Default configuration values. Centralized here so that both DefaultConfig(),
 // storage-layer normalization, and downstream consumers (chunker, fsutil)
 // all reference the same source of truth instead of repeating magic literals.
 const (
@@ -36,13 +43,23 @@ type CoreConfig struct {
 	AutoSaveKeep     int    `json:"auto_save_keep"`
 }
 
+// ConfigVersion is the current on-disk config schema version. Bump when the
+// config struct gains a field that requires migration logic; loaders can then
+// branch on Version to apply transforms. Version 1 is the first versioned
+// schema; a missing version (zero value) is read as a legacy file.
+const ConfigVersion = 1
+
 type Config struct {
-	User UserConfig `json:"user"`
-	Core CoreConfig `json:"core"`
+	// Version is the schema version of the config file. Omitted from JSON
+	// when zero (legacy files) so existing config.json files load unchanged.
+	Version int        `json:"version,omitempty"`
+	User    UserConfig `json:"user"`
+	Core    CoreConfig `json:"core"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
+		Version: ConfigVersion,
 		Core: CoreConfig{
 			Compression:      true,
 			CompressionLevel: DefaultZstdLevel,
@@ -86,4 +103,62 @@ func (c *CoreConfig) ZstdLevel() int {
 		return MaxZstdLevel
 	}
 	return c.CompressionLevel
+}
+
+// Environment variables that override config file values at runtime. They take
+// precedence over the on-disk config.json so operators can tune drift per
+// environment (CI, containers) without editing the repo. Overrides are applied
+// during NormalizeConfig (see internal/storage/config_store.go) BEFORE
+// Normalize, so out-of-range values are clamped rather than left invalid.
+//
+// DRIFT_LOG_LEVEL is handled separately in internal/util/logutil/logutil.go.
+//
+// Note: DRIFT_CHUNK_MIN_SIZE has no target field — chunk sizes are
+// intentionally hardcoded (see cmd/config.go configFields comment) and are not
+// user-tunable, so no env override is wired for it.
+const (
+	envAutoSaveInterval = "DRIFT_AUTO_SAVE_INTERVAL"
+	envAutoSaveKeep     = "DRIFT_AUTO_SAVE_KEEP"
+	envZstdLevel        = "DRIFT_ZSTD_LEVEL"
+)
+
+// ApplyEnvOverrides replaces config fields with the corresponding DRIFT_*
+// environment variable when it is set to a parseable value. Unset or
+// unparseable values are ignored (the file value is kept) so a typo cannot
+// wipe a valid config. Out-of-range clamping is left to Normalize, which runs
+// immediately after this in NormalizeConfig.
+func (c *Config) ApplyEnvOverrides() {
+	if v := os.Getenv(envAutoSaveInterval); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Core.AutoSaveInterval = n
+		}
+	}
+	if v := os.Getenv(envAutoSaveKeep); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Core.AutoSaveKeep = n
+		}
+	}
+	if v := os.Getenv(envZstdLevel); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Core.CompressionLevel = n
+		}
+	}
+}
+
+// Validate checks semantic validity of the config AFTER Normalize has clamped
+// out-of-range-low values to defaults. It catches values that are syntactically
+// legal but operationally wrong — e.g. an IgnoreFile path containing ".."
+// (path-traversal risk) or an absurdly large AutoSaveKeep that would exhaust
+// disk. Validate is non-mutating; callers decide how to react
+// (NormalizeConfig logs a warning and keeps the clamped value rather than
+// failing the whole operation, since a clamped-but-suspicious value is usually
+// preferable to aborting a workspace command).
+func (c *Config) Validate() error {
+	if c.Core.IgnoreFile != "" && strings.Contains(c.Core.IgnoreFile, "..") {
+		return fmt.Errorf("ignore_file path contains '..': %s", c.Core.IgnoreFile)
+	}
+	if c.Core.AutoSaveKeep > 10000 {
+		return fmt.Errorf("auto_save_keep unreasonably large: %d", c.Core.AutoSaveKeep)
+	}
+	return nil
 }

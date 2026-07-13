@@ -177,12 +177,10 @@ func TestPreviewWithDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preview failed: %v", err)
 	}
-
-	// Expected form: "MP4 1920x1080 <size>".
+	// Expected form: "MP4 1920x1080 <size>" with byte suffix.
 	if !strings.HasPrefix(preview, "MP4 1920x1080 ") {
 		t.Errorf("Preview = %q, want prefix %q", preview, "MP4 1920x1080 ")
 	}
-	// Should include the human-readable size (in bytes for this small sample).
 	if !strings.HasSuffix(preview, " B") {
 		t.Errorf("Preview = %q, want suffix indicating byte size", preview)
 	}
@@ -190,14 +188,11 @@ func TestPreviewWithDimensions(t *testing.T) {
 
 func TestPreviewWithoutDimensions(t *testing.T) {
 	engine := NewEngine()
-	// AVI header: detectable as AVI but carries no parseable dimensions.
 	aviData := []byte("RIFF\x00\x00\x00\x00AVI LIST\x00\x00\x00\x00")
 	preview, err := engine.Preview(aviData, int64(len(aviData)), nil, 10)
 	if err != nil {
 		t.Fatalf("Preview failed: %v", err)
 	}
-
-	// Should start with format name and contain size, but no "WxH".
 	if !strings.HasPrefix(preview, "AVI ") {
 		t.Errorf("Preview = %q, want prefix %q", preview, "AVI ")
 	}
@@ -232,14 +227,22 @@ func TestPreviewWebMFormat(t *testing.T) {
 }
 
 func TestParseMP4DimensionsTruncated(t *testing.T) {
-	// A truncated tkhd payload should not panic and should report no dims.
 	if _, _, ok := parseTkhd([]byte{0, 0, 0}); ok {
-		t.Error("parseTkhd on truncated data returned ok, want false")
+		t.Error("parseTkhd truncated: want false")
 	}
-	// A moov box with no tkhd should yield no dimensions.
 	moovOnly := buildBox("moov", buildBox("trak", buildBox("mdia", []byte{})))
 	if _, _, ok := parseMP4Dimensions(moovOnly); ok {
-		t.Error("parseMP4Dimensions on moov without tkhd returned ok, want false")
+		t.Error("moov without tkhd: want false")
+	}
+	// Audio trak (0x0 dims) before video trak: skip audio, find video dims.
+	vTkhd := make([]byte, 84)
+	binary.BigEndian.PutUint32(vTkhd[76:80], 1280<<16)
+	binary.BigEndian.PutUint32(vTkhd[80:84], 720<<16)
+	audioTrak := buildBox("trak", buildBox("tkhd", make([]byte, 84)))
+	videoTrak := buildBox("trak", buildBox("tkhd", vTkhd))
+	moov := buildBox("moov", append(audioTrak, videoTrak...))
+	if w, h, ok := parseMP4Dimensions(moov); !ok || w != 1280 || h != 720 {
+		t.Errorf("audio+video = %dx%d ok=%v, want 1280x720", w, h, ok)
 	}
 }
 
@@ -263,8 +266,7 @@ func TestFormatBytes(t *testing.T) {
 	}
 }
 
-// countingReader tracks how many times Read is called. It always returns EOF
-// so it can stand in for a large file body without allocating any data.
+// countingReader always returns EOF, standing in for a large file body.
 type countingReader struct{ calls int }
 
 func (r *countingReader) Read(p []byte) (int, error) {
@@ -273,8 +275,8 @@ func (r *countingReader) Read(p []byte) (int, error) {
 }
 
 // TestPreviewLargeVideoMemoryConstant verifies that previewing a 500 MB video
-// keeps memory constant: the content reader must never be consumed. Only the
-// header (already extracted by the caller) is inspected.
+// keeps memory constant: the reader is never consumed and dimension parsing
+// is skipped for files larger than maxVideoPreviewSize.
 func TestPreviewLargeVideoMemoryConstant(t *testing.T) {
 	engine := NewEngine()
 	header := buildMP4WithDimensions(1920, 1080)
@@ -285,8 +287,12 @@ func TestPreviewLargeVideoMemoryConstant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preview failed: %v", err)
 	}
-	if !strings.HasPrefix(preview, "MP4 1920x1080 ") {
-		t.Errorf("Preview = %q, want prefix %q", preview, "MP4 1920x1080 ")
+	// Oversized files skip dimension parsing; only format + size is returned.
+	if !strings.HasPrefix(preview, "MP4 ") {
+		t.Errorf("Preview = %q, want prefix %q", preview, "MP4 ")
+	}
+	if strings.Contains(preview, "1920x1080") {
+		t.Errorf("Preview = %q, should not contain dimensions for oversized file", preview)
 	}
 	if body.calls != 0 {
 		t.Errorf("video preview read the body reader %d time(s); expected 0 reads so memory stays constant for a 500MB file", body.calls)

@@ -13,7 +13,10 @@ func TestFileMode_String(t *testing.T) {
 		{"dir", FileModeDir, "dir"},
 		{"symlink", FileModeSymlink, "symlink"},
 		{"unknown", FileMode(0), "unknown"},
-		{"unknown high bits", FileMode(0o010000), "unknown"},
+		{"unknown high bits", FileMode(0o060000), "unknown"},
+		{"device", FileModeDevice, "device"},
+		{"named-pipe", FileModeNamedPipe, "named-pipe"},
+		{"socket", FileModeSocket, "socket"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

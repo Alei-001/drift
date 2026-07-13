@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +26,7 @@ var branchListCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -91,7 +90,7 @@ var branchCreateCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -102,21 +101,18 @@ var branchCreateCmd = &cobra.Command{
 		defer store.Close()
 
 		name := args[0]
-		if err := porcelain.CreateBranch(ctx, store, cwd, name); err != nil {
+		tipID, err := porcelain.CreateBranch(ctx, store, cwd, name)
+		if err != nil {
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				reportFailed("Branch", "branch", fmt.Sprintf("'%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
-				return ErrSilent
+				return silentWrap(err)
 			}
-			reportFailed("Branch", "branch", err.Error(), "")
+			reportFailed("Branch", "branch", "could not create branch.", "")
 			return ErrSilent
 		}
 		sid := "no commits yet"
-		if headRef, err := store.GetRef(ctx, "HEAD"); err == nil && headRef != nil && !headRef.Target.IsZero() {
-			if snap, snapErr := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target}); snapErr == nil && snap != nil {
-				sid = snap.ShortID()
-			} else {
-				sid = headRef.Target.String()
-			}
+		if !tipID.Hash.IsZero() {
+			sid = tipID.Hash.String()
 		}
 		if !globalQuiet {
 			statusOK("Branch created")
@@ -135,7 +131,7 @@ var branchDeleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -155,9 +151,9 @@ var branchDeleteCmd = &cobra.Command{
 			case errors.Is(err, porcelain.ErrCannotDeleteMain):
 				reportFailed("Branch", "branch", fmt.Sprintf("cannot delete '%s'.", name), "'main' is the default branch and cannot be removed.")
 			default:
-				reportFailed("Branch", "branch", err.Error(), "")
+				reportFailed("Branch", "branch", "could not delete branch.", "")
 			}
-			return ErrSilent
+			return silentWrap(err)
 		}
 		if !globalQuiet {
 			statusOK("Branch deleted")
@@ -181,7 +177,7 @@ var branchRenameCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -216,9 +212,9 @@ var branchRenameCmd = &cobra.Command{
 			case errors.Is(err, porcelain.ErrCannotRenameMain):
 				reportFailed("Branch", "branch", fmt.Sprintf("cannot rename '%s'.", oldName), "'main' is the default branch and cannot be renamed.")
 			default:
-				reportFailed("Branch", "branch", err.Error(), "")
+				reportFailed("Branch", "branch", "could not rename branch.", "")
 			}
-			return ErrSilent
+			return silentWrap(err)
 		}
 		if !globalQuiet {
 			statusOK("Branch renamed")

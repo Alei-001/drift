@@ -36,7 +36,7 @@ func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("get snapshot %x: %w", id.Hash[:8], storage.ErrNotFound)
 		}
-		return nil, fmt.Errorf("open snapshot %x: %w", id.Hash[:8], err)
+		return nil, fmt.Errorf("open snapshot %x: %w", id.Hash[:8], mapOSError(err))
 	}
 	defer f.Close()
 	// google.golang.org/protobuf (v1.36.x) does not expose a reader-based
@@ -67,7 +67,11 @@ func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core
 		return nil, fmt.Errorf("snapshot %x integrity check failed: %w", id.Hash[:8], storage.ErrCorrupted)
 	}
 	p.IdHash = idHash
-	return snapshotFromProto(p), nil
+	snap, err := snapshotFromProto(p)
+	if err != nil {
+		return nil, fmt.Errorf("decode snapshot %x: %w", id.Hash[:8], err)
+	}
+	return snap, nil
 }
 
 // PutSnapshot writes a snapshot and its lightweight manifest to disk.
@@ -84,7 +88,7 @@ func (fs *FSStorage) PutSnapshot(ctx context.Context, snapshot *core.Snapshot) e
 		return err
 	}
 	if err := fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm); err != nil {
-		return err
+		return fmt.Errorf("write snapshot %x: %w", snapshot.ID.Hash[:8], mapOSError(err))
 	}
 	return fs.writeManifest(snapshot)
 }
@@ -102,7 +106,10 @@ func (fs *FSStorage) writeManifest(snapshot *core.Snapshot) error {
 	if err := os.MkdirAll(dir, fsutil.DefaultDirPerm); err != nil {
 		return err
 	}
-	return fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
+	if err := fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm); err != nil {
+		return fmt.Errorf("write manifest %x: %w", snapshot.ID.Hash[:8], mapOSError(err))
+	}
+	return nil
 }
 
 // DeleteSnapshot removes a snapshot and its manifest from disk. It is
@@ -110,12 +117,12 @@ func (fs *FSStorage) writeManifest(snapshot *core.Snapshot) error {
 func (fs *FSStorage) DeleteSnapshot(ctx context.Context, id core.SnapshotID) error {
 	path := fs.snapshotPath(id)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
+		return fmt.Errorf("delete snapshot %x: %w", id.Hash[:8], mapOSError(err))
 	}
 	// Best-effort manifest cleanup; a missing manifest is not an error.
 	mPath := fs.manifestPath(id)
 	if err := os.Remove(mPath); err != nil && !os.IsNotExist(err) {
-		return err
+		return fmt.Errorf("delete manifest %x: %w", id.Hash[:8], mapOSError(err))
 	}
 	return nil
 }

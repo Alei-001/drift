@@ -8,6 +8,13 @@ import (
 	sizefmt "github.com/Alei-001/drift/internal/util/format"
 )
 
+// maxVideoPreviewSize is the threshold above which dimension parsing is
+// skipped. Real-world MP4s often store the moov atom at the end of the
+// file, so for large files the header alone is insufficient to extract
+// dimensions. Only format detection (from the leading magic bytes) and
+// the caller-supplied size are used; the content reader is never consumed.
+const maxVideoPreviewSize = 100 * 1024 * 1024 // 100 MB
+
 // Preview returns a short, human-readable summary of a video file.
 // Format: "<FORMAT> <WxH> <SIZE>" when dimensions are available, otherwise
 // "<FORMAT> <SIZE>". Only MP4/MOV containers expose dimensions; for other
@@ -16,9 +23,8 @@ import (
 // Only the header is inspected (format detection and, for MP4, a best-effort
 // scan of the leading boxes for a tkhd) and size is taken from the caller.
 // The content reader is never read, so previewing a 500 MB video stays in
-// constant memory. Note that real-world MP4s often store the moov atom at
-// the end of the file, in which case dimensions cannot be extracted from the
-// header alone and the size-only form is returned.
+// constant memory. Files larger than maxVideoPreviewSize skip dimension
+// parsing entirely since the moov atom is unlikely to be in the header.
 func (e *VideoEngine) Preview(header []byte, size int64, reader io.Reader, maxLines int) (string, error) {
 	_ = reader
 	_ = maxLines
@@ -27,6 +33,13 @@ func (e *VideoEngine) Preview(header []byte, size int64, reader io.Reader, maxLi
 		format = "VIDEO"
 	}
 	sizeStr := sizefmt.Bytes(size)
+
+	// For oversized files, skip dimension parsing — the header is too small
+	// to contain the moov atom, and the reader is never consumed to keep
+	// memory constant.
+	if size > maxVideoPreviewSize {
+		return fmt.Sprintf("%s %s", format, sizeStr), nil
+	}
 
 	if format == "MP4" {
 		if w, h, ok := parseMP4Dimensions(header); ok && w > 0 && h > 0 {
@@ -37,8 +50,10 @@ func (e *VideoEngine) Preview(header []byte, size int64, reader io.Reader, maxLi
 }
 
 // parseMP4Dimensions walks the MP4 top-level box hierarchy looking for the
-// first tkhd box (moov -> trak -> tkhd) and reads its width/height fields.
-// Returns ok=false on any malformation; never panics on truncated data.
+// first tkhd box (moov -> trak -> tkhd) with non-zero dimensions and reads
+// its width/height fields. This skips audio tracks (which report 0x0) and
+// continues searching until a video track is found. Returns ok=false on
+// any malformation; never panics on truncated data.
 func parseMP4Dimensions(data []byte) (width, height int, ok bool) {
 	var dims struct{ w, h int }
 	found := walkBoxes(data, func(boxType string, payload []byte) bool {
@@ -53,7 +68,7 @@ func parseMP4Dimensions(data []byte) (width, height int, ok bool) {
 				if t2 != "tkhd" {
 					return false
 				}
-				if w, h, k := parseTkhd(p2); k {
+				if w, h, k := parseTkhd(p2); k && w > 0 && h > 0 {
 					dims.w, dims.h, ok = w, h, true
 					return true
 				}
@@ -96,7 +111,13 @@ func walkBoxes(data []byte, fn func(boxType string, payload []byte) bool) bool {
 			headerSize = 8
 		}
 
-		if size < headerSize || boxEnd > len(data) || boxEnd < offset {
+		// size==0 is a special ISO-BMFF sentinel meaning "box extends to
+		// end of file" (common in streaming MP4 mdat). It is not an actual
+		// size, so skip the headerSize sanity check for it.
+		if size != 0 && size < headerSize {
+			return false
+		}
+		if boxEnd > len(data) || boxEnd < offset {
 			return false
 		}
 		if fn(boxType, data[offset+headerSize:boxEnd]) {

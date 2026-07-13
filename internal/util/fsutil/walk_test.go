@@ -165,9 +165,9 @@ func TestReadIgnoreFileThenCompile(t *testing.T) {
 
 // TestIsIgnored_PrecompiledLargeScale simulates the original performance bug
 // scenario — 10,000 files visited against 20 patterns — and verifies that
-// isIgnored produces correct results using only the precompiled matchers.
+// isIgnored produces correct results using only the precompiled rules.
 //
-// The matchers slice is built once via readIgnorePatterns and reused across
+// The rules slice is built once via compileIgnoreRules and reused across
 // every file, so the regex compilation count is 20 (one per pattern) rather
 // than 200,000 (20 patterns × 10,000 files × 2 calls). Because isIgnored only
 // invokes Matcher.Match (never glob.Compile or glob.Match), no recompilation
@@ -186,15 +186,13 @@ func TestIsIgnored_PrecompiledLargeScale(t *testing.T) {
 		t.Fatalf("write .driftignore: %v", err)
 	}
 
-	matchers, err := compilePatterns(root, ".driftignore")
-	if err != nil {
-		t.Fatalf("readIgnorePatterns: %v", err)
+	rules := compileIgnoreRules(readPatternsOrFail(t, root, ".driftignore"))
+	if len(rules) != 20 {
+		t.Fatalf("expected 20 compiled rules, got %d", len(rules))
 	}
-	if len(matchers) != 20 {
-		t.Fatalf("expected 20 compiled matchers, got %d", len(matchers))
-	}
+	layers := []ignoreLayer{{relDir: "", rules: rules}}
 
-	// Reuse the same matchers slice across 10,000 files. isIgnored only
+	// Reuse the same layers slice across 10,000 files. isIgnored only
 	// calls Matcher.Match here — no recompilation.
 	ignoredCount := 0
 	for i := 0; i < 10000; i++ {
@@ -205,7 +203,7 @@ func TestIsIgnored_PrecompiledLargeScale(t *testing.T) {
 		} else {
 			rel = "notes/file" + strconv.Itoa(i) + ".txt"
 		}
-		if isIgnored(rel, matchers) {
+		if isIgnored(rel, false, layers) {
 			ignoredCount++
 		}
 	}
@@ -215,16 +213,16 @@ func TestIsIgnored_PrecompiledLargeScale(t *testing.T) {
 	}
 
 	// Anchored pattern: /secret.txt matches only the root file.
-	if !isIgnored("secret.txt", matchers) {
+	if !isIgnored("secret.txt", false, layers) {
 		t.Errorf("expected /secret.txt to match secret.txt at root")
 	}
-	if isIgnored("notes/secret.txt", matchers) {
+	if isIgnored("notes/secret.txt", false, layers) {
 		t.Errorf("expected /secret.txt to NOT match notes/secret.txt")
 	}
 }
 
 // BenchmarkIsIgnored_Precompiled measures the per-file cost of isIgnored using
-// the precompiled matchers. Combined with BenchmarkMatch_Precompiled in the
+// the precompiled rules. Combined with BenchmarkMatch_Precompiled in the
 // glob package this confirms the hot path performs no regex compilation.
 func BenchmarkIsIgnored_Precompiled(b *testing.B) {
 	patternLines := make([]string, 0, 20)
@@ -234,37 +232,141 @@ func BenchmarkIsIgnored_Precompiled(b *testing.B) {
 	patternLines = append(patternLines, "**/*.psd")
 	patternLines = append(patternLines, "/secret.txt")
 
-	matchers := make([]*glob.Matcher, 0, len(patternLines))
-	for _, p := range patternLines {
-		m, err := glob.Compile(p)
-		if err != nil {
-			b.Fatal(err)
-		}
-		matchers = append(matchers, m)
-	}
+	rules := compileIgnoreRules(patternLines)
+	layers := []ignoreLayer{{relDir: "", rules: rules}}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = isIgnored("notes/file.psd", matchers)
+		_ = isIgnored("notes/file.psd", false, layers)
 	}
 }
 
-func compilePatterns(root, ignoreFile string) ([]*glob.Matcher, error) {
+func readPatternsOrFail(t *testing.T, root, ignoreFile string) []string {
+	t.Helper()
 	patterns, err := ReadIgnoreFile(filepath.Join(root, ignoreFile))
 	if err != nil {
-		return nil, err
+		t.Fatalf("ReadIgnoreFile: %v", err)
 	}
-	if patterns == nil {
-		return nil, nil
-	}
-	var matchers []*glob.Matcher
-	for _, p := range patterns {
-		m, err := glob.Compile(p)
-		if err != nil {
-			return nil, err
+	return patterns
+}
+
+// walkAndCollect runs Walk on root and returns the sorted relative paths of
+// all tracked files (non-directories).
+func walkAndCollect(t *testing.T, root, ignoreFile string) []string {
+	t.Helper()
+	var tracked []string
+	err := Walk(root, ignoreFile, func(path string, info os.FileInfo) error {
+		if info.IsDir() {
+			return nil
 		}
-		matchers = append(matchers, m)
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		tracked = append(tracked, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
 	}
-	return matchers, nil
+	sort.Strings(tracked)
+	return tracked
+}
+
+// TestWalk_DirOnlyPattern verifies that a trailing "/" restricts a pattern
+// to directories: the directory is skipped but a file with the same basename
+// is still tracked.
+func TestWalk_DirOnlyPattern(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".driftignore"), []byte("logs/\n"), 0644); err != nil {
+		t.Fatalf("write .driftignore: %v", err)
+	}
+	// "logs" directory at root — should be ignored.
+	if err := os.MkdirAll(filepath.Join(root, "logs"), 0755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "logs", "debug.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatalf("write logs/debug.txt: %v", err)
+	}
+	// "logs" file in a subdirectory — should NOT be ignored (dirOnly).
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sub", "logs"), []byte("not a dir\n"), 0644); err != nil {
+		t.Fatalf("write sub/logs: %v", err)
+	}
+
+	tracked := walkAndCollect(t, root, ".driftignore")
+	want := []string{".driftignore", "sub/logs"}
+	if len(tracked) != len(want) {
+		t.Fatalf("tracked = %v, want %v", tracked, want)
+	}
+	for i := range want {
+		if tracked[i] != want[i] {
+			t.Errorf("tracked[%d] = %q, want %q", i, tracked[i], want[i])
+		}
+	}
+}
+
+// TestWalk_NegationPattern verifies that "!" un-ignores a previously matched
+// file, following gitignore last-match-wins semantics.
+func TestWalk_NegationPattern(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Join([]string{"*.tmp", "!important.tmp"}, "\n")
+	if err := os.WriteFile(filepath.Join(root, ".driftignore"), []byte(body), 0644); err != nil {
+		t.Fatalf("write .driftignore: %v", err)
+	}
+	for _, name := range []string{"a.tmp", "important.tmp", "b.tmp"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x\n"), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	tracked := walkAndCollect(t, root, ".driftignore")
+	want := []string{".driftignore", "important.tmp"}
+	if len(tracked) != len(want) {
+		t.Fatalf("tracked = %v, want %v", tracked, want)
+	}
+	for i := range want {
+		if tracked[i] != want[i] {
+			t.Errorf("tracked[%d] = %q, want %q", i, tracked[i], want[i])
+		}
+	}
+}
+
+// TestWalk_NestedIgnoreFile verifies that a .driftignore in a subdirectory
+// can un-ignore files ignored by the root .driftignore.
+func TestWalk_NestedIgnoreFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".driftignore"), []byte("*.txt\n"), 0644); err != nil {
+		t.Fatalf("write .driftignore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "top.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatalf("write top.txt: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	// Nested .driftignore un-ignores keep.txt but not drop.txt.
+	nestedBody := strings.Join([]string{"!keep.txt"}, "\n")
+	if err := os.WriteFile(filepath.Join(root, "sub", ".driftignore"), []byte(nestedBody), 0644); err != nil {
+		t.Fatalf("write sub/.driftignore: %v", err)
+	}
+	for _, name := range []string{"keep.txt", "drop.txt"} {
+		if err := os.WriteFile(filepath.Join(root, "sub", name), []byte("x\n"), 0644); err != nil {
+			t.Fatalf("write sub/%s: %v", name, err)
+		}
+	}
+
+	tracked := walkAndCollect(t, root, ".driftignore")
+	want := []string{".driftignore", "sub/.driftignore", "sub/keep.txt"}
+	if len(tracked) != len(want) {
+		t.Fatalf("tracked = %v, want %v", tracked, want)
+	}
+	for i := range want {
+		if tracked[i] != want[i] {
+			t.Errorf("tracked[%d] = %q, want %q", i, tracked[i], want[i])
+		}
+	}
 }

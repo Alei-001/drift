@@ -7,14 +7,19 @@ import (
 
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/storage"
+	"github.com/zeebo/blake3"
 )
 
 func TestPutChunkAndGetChunk(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
+	data := []byte("test data")
+	var hash core.Hash
+	sum := blake3.Sum256(data)
+	copy(hash[:], sum[:])
 	chunk := &core.Chunk{
-		Hash: core.Hash{0x01, 0x02},
-		Data: []byte("test data"),
+		Hash: hash,
+		Data: data,
 	}
 
 	if err := store.PutChunk(ctx, chunk); err != nil {
@@ -41,15 +46,17 @@ func TestGetChunk_NotFound(t *testing.T) {
 func TestHasChunk(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
-	hash := core.Hash{0x01}
+	ch := makeChunk([]byte("x"))
 
-	if ok, _ := store.HasChunk(ctx, hash); ok {
+	if ok, _ := store.HasChunk(ctx, ch.Hash); ok {
 		t.Error("expected HasChunk=false before PutChunk")
 	}
 
-	store.PutChunk(ctx, &core.Chunk{Hash: hash, Data: []byte("x")})
+	if err := store.PutChunk(ctx, ch); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
 
-	if ok, _ := store.HasChunk(ctx, hash); !ok {
+	if ok, _ := store.HasChunk(ctx, ch.Hash); !ok {
 		t.Error("expected HasChunk=true after PutChunk")
 	}
 }
@@ -58,14 +65,16 @@ func TestPutChunk_ClonesData(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
 	data := []byte("original")
-	chunk := &core.Chunk{Hash: core.Hash{0x01}, Data: data}
+	ch := makeChunk(data)
 
-	store.PutChunk(ctx, chunk)
+	if err := store.PutChunk(ctx, ch); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
 
 	// Mutate the original data — stored copy should be unaffected
 	data[0] = 'X'
 
-	got, _ := store.GetChunk(ctx, chunk.Hash)
+	got, _ := store.GetChunk(ctx, ch.Hash)
 	if string(got.Data) != "original" {
 		t.Errorf("data was not cloned: got %q", got.Data)
 	}
@@ -75,10 +84,11 @@ func TestPutSnapshotAndGetSnapshot(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
 	snap := &core.Snapshot{
-		ID:        core.SnapshotID{Hash: core.Hash{0xaa}},
 		Message:   "test snapshot",
 		Timestamp: 12345,
 	}
+	// Compute the content-derived ID so GetSnapshot's integrity check passes.
+	snap.ID = computeSnapshotID(snap)
 
 	if err := store.PutSnapshot(ctx, snap); err != nil {
 		t.Fatalf("PutSnapshot failed: %v", err)

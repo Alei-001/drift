@@ -14,10 +14,14 @@ import (
 // GetRef reads a reference. If the reference is a symbolic reference,
 // Target is resolved by recursively reading the referenced ref.
 func (ms *MemoryStorage) GetRef(ctx context.Context, name string) (*core.Reference, error) {
-	return ms.getRefRecursive(ctx, name, 0)
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+	return ms.getRefRecursiveLocked(ctx, name, 0)
 }
 
-func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth int) (*core.Reference, error) {
+// getRefRecursiveLocked resolves a reference, following symbolic refs.
+// The caller MUST hold ms.mu (read or write lock).
+func (ms *MemoryStorage) getRefRecursiveLocked(ctx context.Context, name string, depth int) (*core.Reference, error) {
 	if depth > storage.MaxSymRefDepth {
 		return nil, fmt.Errorf("symref recursion limit exceeded at %q: %w", name, storage.ErrInvalidRef)
 	}
@@ -29,7 +33,7 @@ func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth
 		return nil, fmt.Errorf("get ref %q: %w", name, storage.ErrNotFound)
 	}
 	if ref.SymRef != "" {
-		target, err := ms.getRefRecursive(ctx, ref.SymRef, depth+1)
+		target, err := ms.getRefRecursiveLocked(ctx, ref.SymRef, depth+1)
 		if err != nil {
 			return nil, fmt.Errorf("resolve symref %q: %w", ref.SymRef, err)
 		}
@@ -49,6 +53,8 @@ func (ms *MemoryStorage) getRefRecursive(ctx context.Context, name string, depth
 
 // SetRef writes a reference.
 func (ms *MemoryStorage) SetRef(ctx context.Context, name string, ref *core.Reference) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
 	if err := refname.Validate(name); err != nil {
 		return fmt.Errorf("validate ref %q: %w", name, err)
 	}
@@ -69,13 +75,16 @@ func (ms *MemoryStorage) SetRef(ctx context.Context, name string, ref *core.Refe
 // ListRefs lists all references matching the given prefix.
 // HEAD is excluded to match the filesystem backend, which only walks the
 // refs/ directory (HEAD lives at the repository root, outside refs/).
-// Each ref is resolved via GetRef so symrefs have their Target populated
-// and Type derived from the name, matching the filesystem backend.
+// Each ref is resolved via getRefRecursiveLocked so symrefs have their
+// Target populated and Type derived from the name, matching the
+// filesystem backend.
 //
-// Only ErrNotFound errors from GetRef are skipped (e.g. dangling symref);
-// other errors are propagated so callers can distinguish I/O failures from
-// missing refs.
+// Only ErrNotFound errors from resolution are skipped (e.g. dangling
+// symref); other errors are propagated so callers can distinguish I/O
+// failures from missing refs.
 func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.Reference, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 	var refs []*core.Reference
 	for name := range ms.refs {
 		if err := ctx.Err(); err != nil {
@@ -87,7 +96,7 @@ func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.R
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		ref, err := ms.GetRef(ctx, name)
+		ref, err := ms.getRefRecursiveLocked(ctx, name, 0)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
 				continue
@@ -101,6 +110,8 @@ func (ms *MemoryStorage) ListRefs(ctx context.Context, prefix string) ([]*core.R
 
 // DeleteRef removes a reference.
 func (ms *MemoryStorage) DeleteRef(ctx context.Context, name string) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
 	if err := refname.Validate(name); err != nil {
 		return fmt.Errorf("validate ref %q: %w", name, err)
 	}

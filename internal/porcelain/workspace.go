@@ -47,7 +47,18 @@ func writeFileFromChunks(ctx context.Context, store storage.Storer, path string,
 	if err = f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	if err = os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	// fsync parent directory to ensure the rename is persisted to disk,
+	// mirroring fsutil.WriteFileAtomic. Best-effort: on platforms where
+	// opening a directory fails (e.g. Windows), the error is silently
+	// ignored.
+	if d, openErr := os.Open(filepath.Dir(path)); openErr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 // resolveSecurePath validates that writing to relPath inside absWorkDir
@@ -131,6 +142,18 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 			continue
 		}
 
+		// Skip entries that are recorded as symlinks in the snapshot.
+		// The current snapshot schema cannot store a symlink's target,
+		// so a symlink entry would carry the target's chunks while
+		// wearing a symlink mode — restoring it as a regular file would
+		// silently replace the user's symlink. Historical snapshots
+		// created before this guard may still contain such entries; we
+		// skip them rather than risk silent corruption.
+		if entry.Mode.IsSymlink() {
+			snapFiles[entry.Path] = true
+			continue
+		}
+
 		safePath, err := resolveSecurePath(absWorkDir, entry.Path)
 		if err != nil {
 			failedSet[entry.Path] = true
@@ -195,6 +218,13 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 			if info.IsDir() {
 				return nil
 			}
+			// Preserve symlinks during cleanup. Snapshots never track
+			// symlinks (see createSnapshotInLock), so a symlink would
+			// always be absent from snapFiles and would otherwise be
+			// deleted, silently destroying user data.
+			if info.Mode()&os.ModeSymlink != 0 {
+				return nil
+			}
 			rel, err := filepath.Rel(workDir, path)
 			if err != nil {
 				return nil
@@ -208,6 +238,34 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 			}
 			return nil
 		})
+		// Remove empty directories left behind by the file cleanup
+		// above. Walk visits directories top-down, so collect them and
+		// process in reverse order (deepest first) so that removing a
+		// file makes its parent eligible for removal in the same pass.
+		// workDir itself is never removed.
+		if cleanErr == nil {
+			absWorkDir, _ := filepath.Abs(workDir)
+			var dirs []string
+			_ = filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
+				if err != nil || !d.IsDir() {
+					return nil
+				}
+				if path == absWorkDir || path == workDir {
+					return nil
+				}
+				dirs = append(dirs, path)
+				return nil
+			})
+			for i := len(dirs) - 1; i >= 0; i-- {
+				if err := ctx.Err(); err != nil {
+					cleanErr = err
+					break
+				}
+				// os.Remove on a non-empty directory returns an error,
+				// which we ignore: only empty directories are removed.
+				_ = os.Remove(dirs[i])
+			}
+		}
 	}
 	// Don't early-return on cleanup error; update the index first so
 	// the workspace state is consistent, then report the cleanup failure.

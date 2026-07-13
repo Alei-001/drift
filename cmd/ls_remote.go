@@ -17,15 +17,30 @@ var lsRemoteCmd = &cobra.Command{
 		remoteName := args[0]
 
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
 
 		refs, err := porcelain.LsRemote(ctx, cwd, remoteName)
 		if err != nil {
-			statusFailed("Ls-remote", err.Error(), "check remote configuration and network connectivity")
+			reportFailed("Ls-remote", "ls-remote", "could not list remote refs.", "check remote configuration and network connectivity")
 			return ErrSilent
+		}
+
+		if globalJSON {
+			refList := make([]lsRemoteRef, 0, len(refs))
+			for _, r := range refs {
+				refList = append(refList, lsRemoteRef{
+					Name:   r.Name,
+					Target: r.Target.FullString(),
+				})
+			}
+			return outputJSON(JSONEnvelope{
+				Command: "ls-remote",
+				Status:  "ok",
+				Data:    lsRemoteData{Refs: refList},
+			})
 		}
 
 		if len(refs) == 0 {
@@ -42,4 +57,15 @@ var lsRemoteCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(lsRemoteCmd)
+}
+
+// lsRemoteData is the JSON payload for a successful drift ls-remote.
+type lsRemoteData struct {
+	Refs []lsRemoteRef `json:"refs"`
+}
+
+// lsRemoteRef is a single reference entry in the ls-remote JSON output.
+type lsRemoteRef struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
 }

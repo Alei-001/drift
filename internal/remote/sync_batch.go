@@ -2,11 +2,13 @@ package remote
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"path"
 
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/storage"
-	"github.com/Alei-001/drift/internal/storage/backends/filesystem"
 )
 
 // listRemoteChunkHashes lists the remote chunks directory for the given
@@ -17,10 +19,10 @@ import (
 //
 // If a prefix directory does not exist on the remote (os.ErrNotExist),
 // it is treated as empty — all chunks in that prefix are considered
-// missing and will be uploaded. Other List errors are also treated as
-// empty for that prefix (conservative: will attempt upload, which either
-// succeeds or returns a clear error).
-func listRemoteChunkHashes(ctx context.Context, rfs RemoteFS, chunkHashes []core.Hash) map[core.Hash]bool {
+// missing and will be uploaded. Other List errors (network, auth, etc.)
+// are returned immediately so the caller can surface them rather than
+// silently proceeding with an incomplete existence set.
+func listRemoteChunkHashes(ctx context.Context, rfs RemoteFS, chunkHashes []core.Hash) (map[core.Hash]bool, error) {
 	prefixes := make(map[string]bool)
 	for _, h := range chunkHashes {
 		hex := h.FullString()
@@ -30,12 +32,20 @@ func listRemoteChunkHashes(ctx context.Context, rfs RemoteFS, chunkHashes []core
 	existing := make(map[core.Hash]bool)
 	for prefix := range prefixes {
 		if err := ctx.Err(); err != nil {
-			break
+			return nil, err
 		}
-		dirPath := path.Join(filesystem.ChunksDir, prefix)
-		entries, err := rfs.List(dirPath)
+		dirPath := path.Join(storage.ChunksDir, prefix)
+		entries, err := rfs.List(ctx, dirPath)
 		if err != nil {
-			continue
+			// Directory not existing on the remote is normal — it means
+			// no chunks with that prefix have been uploaded yet.
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			// Other errors (network, auth, permission) must not be
+			// silently swallowed: they indicate a real problem that
+			// would cause the sync to proceed with incorrect state.
+			return nil, fmt.Errorf("list remote chunks/%s: %w", prefix, err)
 		}
 		for _, e := range entries {
 			if e.IsDir {
@@ -54,21 +64,23 @@ func listRemoteChunkHashes(ctx context.Context, rfs RemoteFS, chunkHashes []core
 			existing[h] = true
 		}
 	}
-	return existing
+	return existing, nil
 }
 
 // listLocalChunkHashes returns a set of chunk hashes that exist in the
 // local store. This is a single ListChunks call instead of N per-chunk
 // HasChunk calls, significantly reducing I/O for pull operations with
-// many chunks.
-func listLocalChunkHashes(ctx context.Context, store storage.Storer) map[core.Hash]bool {
+// many chunks. A ListChunks failure is returned rather than silently
+// producing an empty set, which would cause pull to re-download every
+// chunk and could mask a real storage problem.
+func listLocalChunkHashes(ctx context.Context, store storage.Storer) (map[core.Hash]bool, error) {
 	existing := make(map[core.Hash]bool)
 	hashes, err := store.ListChunks(ctx)
 	if err != nil {
-		return existing
+		return nil, fmt.Errorf("list local chunks: %w", err)
 	}
 	for _, h := range hashes {
 		existing[h] = true
 	}
-	return existing
+	return existing, nil
 }

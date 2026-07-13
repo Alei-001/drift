@@ -5,28 +5,40 @@ import (
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
+	"github.com/zeebo/blake3"
 )
+
+// makeChunk creates a Chunk whose Hash is the BLAKE3 of data, matching
+// the hash validation enforced by PutChunk.
+func makeChunk(data []byte) *core.Chunk {
+	var hash core.Hash
+	sum := blake3.Sum256(data)
+	copy(hash[:], sum[:])
+	return &core.Chunk{Hash: hash, Size: uint32(len(data)), Data: data}
+}
 
 func TestDeleteChunk_Idempotent(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
-	hash := core.Hash{0x01}
+	ch := makeChunk([]byte("x"))
 
 	// Deleting a non-existent chunk should not error.
-	if err := store.DeleteChunk(ctx, hash); err != nil {
+	if err := store.DeleteChunk(ctx, ch.Hash); err != nil {
 		t.Errorf("DeleteChunk on missing chunk returned error: %v", err)
 	}
 
 	// Add the chunk and delete it twice.
-	store.PutChunk(ctx, &core.Chunk{Hash: hash, Data: []byte("x")})
-	if err := store.DeleteChunk(ctx, hash); err != nil {
+	if err := store.PutChunk(ctx, ch); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
+	if err := store.DeleteChunk(ctx, ch.Hash); err != nil {
 		t.Errorf("DeleteChunk returned error: %v", err)
 	}
-	if err := store.DeleteChunk(ctx, hash); err != nil {
+	if err := store.DeleteChunk(ctx, ch.Hash); err != nil {
 		t.Errorf("second DeleteChunk returned error: %v", err)
 	}
 
-	if ok, _ := store.HasChunk(ctx, hash); ok {
+	if ok, _ := store.HasChunk(ctx, ch.Hash); ok {
 		t.Error("expected HasChunk=false after delete")
 	}
 }
@@ -45,9 +57,15 @@ func TestListChunks_Empty(t *testing.T) {
 func TestListChunks_Multiple(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
-	hashes := []core.Hash{{0x01}, {0x02}, {0x03}}
-	for _, h := range hashes {
-		store.PutChunk(ctx, &core.Chunk{Hash: h, Data: []byte{0}})
+	chunks := []*core.Chunk{
+		makeChunk([]byte("chunk-a")),
+		makeChunk([]byte("chunk-b")),
+		makeChunk([]byte("chunk-c")),
+	}
+	for _, ch := range chunks {
+		if err := store.PutChunk(ctx, ch); err != nil {
+			t.Fatalf("PutChunk: %v", err)
+		}
 	}
 	got, err := store.ListChunks(ctx)
 	if err != nil {
@@ -62,41 +80,51 @@ func TestListChunks_Multiple(t *testing.T) {
 	for _, h := range got {
 		gotMap[h.FullString()] = true
 	}
-	for _, h := range hashes {
-		if !gotMap[h.FullString()] {
-			t.Errorf("expected hash %s in ListChunks result", h.FullString())
+	for _, ch := range chunks {
+		if !gotMap[ch.Hash.FullString()] {
+			t.Errorf("expected hash %s in ListChunks result", ch.Hash.FullString())
 		}
 	}
 }
 
-func TestPutChunk_Overwrite(t *testing.T) {
+// TestPutChunk_Idempotent verifies that storing the same chunk twice does
+// not error and the data is consistent. (With hash validation, two different
+// data values cannot share the same hash, so "overwrite with different data"
+// is no longer a valid scenario.)
+func TestPutChunk_Idempotent(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
-	hash := core.Hash{0x01}
+	ch := makeChunk([]byte("idempotent data"))
 
-	store.PutChunk(ctx, &core.Chunk{Hash: hash, Data: []byte("original")})
-	store.PutChunk(ctx, &core.Chunk{Hash: hash, Data: []byte("replaced")})
+	if err := store.PutChunk(ctx, ch); err != nil {
+		t.Fatalf("first PutChunk: %v", err)
+	}
+	if err := store.PutChunk(ctx, ch); err != nil {
+		t.Fatalf("second PutChunk: %v", err)
+	}
 
-	got, err := store.GetChunk(ctx, hash)
+	got, err := store.GetChunk(ctx, ch.Hash)
 	if err != nil {
 		t.Fatalf("GetChunk failed: %v", err)
 	}
-	if string(got.Data) != "replaced" {
-		t.Errorf("Data: got %q, want %q (overwrite)", got.Data, "replaced")
+	if string(got.Data) != "idempotent data" {
+		t.Errorf("Data: got %q, want %q", got.Data, "idempotent data")
 	}
 }
 
 func TestHasChunk_AfterDelete(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
-	hash := core.Hash{0x01}
-	store.PutChunk(ctx, &core.Chunk{Hash: hash, Data: []byte("x")})
+	ch := makeChunk([]byte("x"))
+	if err := store.PutChunk(ctx, ch); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
 
-	if ok, _ := store.HasChunk(ctx, hash); !ok {
+	if ok, _ := store.HasChunk(ctx, ch.Hash); !ok {
 		t.Error("expected HasChunk=true before delete")
 	}
-	store.DeleteChunk(ctx, hash)
-	if ok, _ := store.HasChunk(ctx, hash); ok {
+	store.DeleteChunk(ctx, ch.Hash)
+	if ok, _ := store.HasChunk(ctx, ch.Hash); ok {
 		t.Error("expected HasChunk=false after delete")
 	}
 }
@@ -104,14 +132,29 @@ func TestHasChunk_AfterDelete(t *testing.T) {
 func TestGetChunk_ReturnsClone(t *testing.T) {
 	store := NewMemoryStorage()
 	ctx := context.Background()
-	hash := core.Hash{0x01}
-	store.PutChunk(ctx, &core.Chunk{Hash: hash, Data: []byte("original")})
+	ch := makeChunk([]byte("original"))
+	if err := store.PutChunk(ctx, ch); err != nil {
+		t.Fatalf("PutChunk: %v", err)
+	}
 
-	got1, _ := store.GetChunk(ctx, hash)
+	got1, _ := store.GetChunk(ctx, ch.Hash)
 	got1.Data[0] = 'X'
 
-	got2, _ := store.GetChunk(ctx, hash)
+	got2, _ := store.GetChunk(ctx, ch.Hash)
 	if string(got2.Data) != "original" {
 		t.Errorf("mutating first GetChunk result affected stored data: got %q", got2.Data)
+	}
+}
+
+// TestPutChunk_HashMismatch verifies that PutChunk rejects a chunk whose
+// Hash does not match the BLAKE3 of its Data.
+func TestPutChunk_HashMismatch(t *testing.T) {
+	store := NewMemoryStorage()
+	ctx := context.Background()
+	ch := &core.Chunk{Hash: core.Hash{0x01}, Data: []byte("mismatch")}
+
+	err := store.PutChunk(ctx, ch)
+	if err == nil {
+		t.Fatal("expected error for hash mismatch, got nil")
 	}
 }

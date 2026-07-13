@@ -39,10 +39,14 @@ func ComputeFileHash(filePath string) (core.Hash, error) {
 		return core.Hash{}, fmt.Errorf("seek %s: %w", filePath, err)
 	}
 
-	chunks, err := chunkFile(context.Background(), filePath, file, engine, info.Size())
+	var chunkHashes []core.Hash
+	err = chunkFile(context.Background(), filePath, file, engine, info.Size(), func(c *core.Chunk) error {
+		chunkHashes = append(chunkHashes, c.Hash)
+		return nil
+	})
 	if err != nil {
 		return core.Hash{}, fmt.Errorf("chunk file %s: %w", filePath, err)
 	}
 
-	return computeFileHashFromChunks(chunks), nil
+	return computeFileHashFromHashes(chunkHashes), nil
 }

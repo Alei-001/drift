@@ -13,6 +13,11 @@ import (
 // here — it lives in the user-level credentials.json, matched by remote name.
 // Protocol-specific fields (SMB domain, S3 region/bucket, SFTP key path, etc.)
 // go in Options so adding a new protocol never changes this struct.
+//
+// The "_password" key in Options is a runtime-only convention: the caller
+// (resolveRemoteConfig) injects the password from credentials.json into
+// Options["_password"] before passing the config to a ProtocolFactory.
+// It must never be persisted to remotes.json or included in log output.
 type RemoteConfig struct {
 	Name    string            `json:"name"`
 	Type    string            `json:"type"` // "webdav" | "smb" | future

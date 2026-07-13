@@ -27,7 +27,7 @@ func init() {
 
 func runGC(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	cwd, err := getCwd(cmd)
+	cwd, err := getCwd()
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func runGC(cmd *cobra.Command, args []string) error {
 
 	report, err := porcelain.CollectGarbage(ctx, store, cwd, gcDryRun, gcKeepAuto)
 	if err != nil {
-		reportFailed("GC", "gc", err.Error(), "")
+		reportFailed("GC", "gc", "garbage collection failed.", "")
 		return ErrSilent
 	}
 

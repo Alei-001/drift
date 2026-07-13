@@ -25,7 +25,7 @@ var tagListCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -83,13 +83,13 @@ var tagListCmd = &cobra.Command{
 
 // tagAddCmd tags an existing snapshot with a name.
 var tagAddCmd = &cobra.Command{
-	Use:   "add <name> <version>",
+	Use:   "add <name> [<version>]",
 	Short: "Tag an existing snapshot",
-	Long:  "Tag an existing snapshot with a human-readable name. The tag can later be used as tag:<name> in show, diff, and restore commands.",
-	Args:  cobra.ExactArgs(2),
+	Long:  "Tag an existing snapshot with a human-readable name. The tag can later be used as tag:<name> in show, diff, and restore commands. If no version is given, tags the current HEAD.",
+	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -100,7 +100,10 @@ var tagAddCmd = &cobra.Command{
 		defer store.Close()
 
 		name := args[0]
-		version := args[1]
+		version := "head"
+		if len(args) > 1 {
+			version = args[1]
+		}
 		snap := resolveSnapshot(ctx, store, version)
 		if snap == nil {
 			reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.")
@@ -113,9 +116,9 @@ var tagAddCmd = &cobra.Command{
 			case errors.Is(err, porcelain.ErrSnapshotNotFound):
 				reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.")
 			default:
-				reportFailed("Tag", "tag", err.Error(), "")
+				reportFailed("Tag", "tag", "could not create tag.", "")
 			}
-			return ErrSilent
+			return silentWrap(err)
 		}
 		if !globalQuiet {
 			statusOK("Tag added")
@@ -133,7 +136,7 @@ var tagDeleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -168,7 +171,7 @@ var tagRenameCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -187,9 +190,9 @@ var tagRenameCmd = &cobra.Command{
 			case errors.Is(err, porcelain.ErrTagAlreadyExists):
 				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' already exists.", newName), fmt.Sprintf("use 'drift tag delete %s' first, or pick another name.", newName))
 			default:
-				reportFailed("Tag", "tag", err.Error(), "")
+				reportFailed("Tag", "tag", "could not rename tag.", "")
 			}
-			return ErrSilent
+			return silentWrap(err)
 		}
 		if !globalQuiet {
 			statusOK("Tag renamed")

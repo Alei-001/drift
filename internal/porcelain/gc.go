@@ -27,9 +27,15 @@ type GCReport struct {
 	PacksRewritten   int
 }
 
-// collectRoots gathers the target hashes of all branch and tag references.
-// References with a zero target (e.g. a freshly initialized branch with no
-// commits) are skipped.
+// collectRoots gathers the target hashes of all branch and tag references,
+// plus the HEAD ref when it is detached (SymRef == "" with a non-zero
+// Target). References with a zero target (e.g. a freshly initialized branch
+// with no commits) are skipped.
+//
+// The detached-HEAD case is essential: when HEAD points directly at a
+// snapshot (rather than symbolically at a branch), that snapshot is a root
+// even if no branch or tag references it. Without this, GC would collect a
+// snapshot the user is actively viewing, severing the only reference to it.
 func collectRoots(ctx context.Context, store storage.Storer) ([]core.Hash, error) {
 	var roots []core.Hash
 	for _, prefix := range []string{"heads/", "tags/"} {
@@ -44,17 +50,25 @@ func collectRoots(ctx context.Context, store storage.Storer) ([]core.Hash, error
 			roots = append(roots, ref.Target)
 		}
 	}
+	// A detached HEAD (SymRef == "") with a non-zero target is itself a
+	// root: the snapshot it points at may not be referenced by any branch
+	// or tag, so without this it would be incorrectly collected.
+	headRef, err := store.GetRef(ctx, "HEAD")
+	if err == nil && headRef.SymRef == "" && !headRef.Target.IsZero() {
+		roots = append(roots, headRef.Target)
+	}
 	return roots, nil
 }
 
-// computeReachability performs a BFS from all branch and tag references to
-// determine which snapshots are reachable. It returns the visited set (which
-// doubles as the reachability set — a hash is reachable iff it was enqueued)
-// and the full list of stored snapshots.
-func computeReachability(ctx context.Context, store storage.Storer) (map[core.Hash]bool, []*core.SnapshotSummary, error) {
+// computeReachableSet returns the set of snapshot hashes reachable from all
+// branch, tag, and detached-HEAD references by following PrevID pointers
+// backwards. It is the shared reachability primitive used by both
+// CollectGarbage (via computeReachability) and pruneAutoSnapshots, so the two
+// code paths cannot diverge on what "reachable" means.
+func computeReachableSet(ctx context.Context, store storage.Storer) (map[core.Hash]bool, error) {
 	roots, err := collectRoots(ctx, store)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	visited := make(map[core.Hash]bool)
@@ -69,7 +83,7 @@ func computeReachability(ctx context.Context, store storage.Storer) (map[core.Ha
 
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		h := queue[0]
 		queue = queue[1:]
@@ -83,8 +97,61 @@ func computeReachability(ctx context.Context, store storage.Storer) (map[core.Ha
 			if errors.Is(err, storage.ErrNotFound) {
 				continue
 			}
-			return nil, nil, fmt.Errorf("get snapshot %s: %w", h.FullString(), err)
+			return nil, fmt.Errorf("get snapshot %s: %w", h.FullString(), err)
 		}
+
+		if snap.PrevID != nil && !snap.PrevID.Hash.IsZero() && !visited[snap.PrevID.Hash] {
+			visited[snap.PrevID.Hash] = true
+			queue = append(queue, snap.PrevID.Hash)
+		}
+	}
+
+	return visited, nil
+}
+
+// computeReachability performs a BFS from all branch and tag references to
+// determine which snapshots are reachable. It returns the visited set (which
+// doubles as the reachability set — a hash is reachable iff it was enqueued),
+// the full list of stored snapshots, and a cache of the full Snapshot objects
+// fetched during the BFS (keyed by hash). The cache lets callers like
+// CollectGarbage avoid a second round of GetSnapshot calls when collecting
+// reachable chunks.
+func computeReachability(ctx context.Context, store storage.Storer) (map[core.Hash]bool, []*core.SnapshotSummary, map[core.Hash]*core.Snapshot, error) {
+	roots, err := collectRoots(ctx, store)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	visited := make(map[core.Hash]bool)
+	snapCache := make(map[core.Hash]*core.Snapshot)
+	queue := make([]core.Hash, 0, len(roots))
+
+	for _, h := range roots {
+		if !h.IsZero() && !visited[h] {
+			visited[h] = true
+			queue = append(queue, h)
+		}
+	}
+
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, nil, err
+		}
+		h := queue[0]
+		queue = queue[1:]
+
+		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: h})
+		if err != nil {
+			// Snapshot referenced by a ref but missing from storage: skip
+			// it but continue traversing the rest of the graph. Only
+			// ErrNotFound is skippable; any other error (e.g. corruption
+			// or an I/O failure) must propagate so the caller can decide.
+			if errors.Is(err, storage.ErrNotFound) {
+				continue
+			}
+			return nil, nil, nil, fmt.Errorf("get snapshot %s: %w", h.FullString(), err)
+		}
+		snapCache[h] = snap
 
 		if snap.PrevID != nil && !snap.PrevID.Hash.IsZero() && !visited[snap.PrevID.Hash] {
 			visited[snap.PrevID.Hash] = true
@@ -94,10 +161,10 @@ func computeReachability(ctx context.Context, store storage.Storer) (map[core.Ha
 
 	allSnapshots, err := store.ListSnapshots(ctx, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list snapshots: %w", err)
+		return nil, nil, nil, fmt.Errorf("list snapshots: %w", err)
 	}
 
-	return visited, allSnapshots, nil
+	return visited, allSnapshots, snapCache, nil
 }
 
 // CollectGarbage removes snapshots and chunks that are no longer reachable
@@ -122,7 +189,7 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 
 	var report GCReport
 
-	reachable, allSnapshots, err := computeReachability(ctx, store)
+	reachable, allSnapshots, snapCache, err := computeReachability(ctx, store)
 	if err != nil {
 		return report, err
 	}
@@ -157,17 +224,27 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 	}
 
 	// --- Unreferenced chunks ---
+	// Read chunk lists from the snapshot cache populated during BFS when
+	// possible, falling back to GetSnapshot only for snapshots that were
+	// not visited during BFS (e.g. kept-auto snapshots that are
+	// unreachable but preserved by --keep-auto).
 	reachableChunks := make(map[core.Hash]bool)
 	for _, snap := range allSnapshots {
 		if err := ctx.Err(); err != nil {
-			return GCReport{}, err
+			return report, err
 		}
 		if !reachable[snap.ID.Hash] && !keptAuto[snap.ID.Hash] {
 			continue
 		}
-		full, err := store.GetSnapshot(ctx, snap.ID)
-		if err != nil {
-			continue
+		var full *core.Snapshot
+		if cached, ok := snapCache[snap.ID.Hash]; ok {
+			full = cached
+		} else {
+			f, err := store.GetSnapshot(ctx, snap.ID)
+			if err != nil {
+				continue
+			}
+			full = f
 		}
 		for _, f := range full.Files {
 			for _, c := range f.Chunks {
@@ -269,9 +346,16 @@ func CountUnreachableSnapshots(ctx context.Context, store storage.Storer, workDi
 	}
 	defer ReleaseWorkspaceLock(workDir)
 
-	reachable, allSnapshots, err := computeReachability(ctx, store)
+	// CountUnreachableSnapshots only needs the reachable set and the full
+	// snapshot list, not the snapshot cache, so it uses the lighter
+	// computeReachableSet directly.
+	reachable, err := computeReachableSet(ctx, store)
 	if err != nil {
 		return 0, err
+	}
+	allSnapshots, err := store.ListSnapshots(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("list snapshots: %w", err)
 	}
 
 	count := 0

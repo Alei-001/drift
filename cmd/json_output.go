@@ -12,7 +12,8 @@ import (
 // matching the design's "hint": null example, rather than being omitted.
 type JSONEnvelope struct {
 	Command string      `json:"command"`
-	Status  string      `json:"status"` // ok / failed / warning / active
+	Status  string      `json:"status"`          // ok / failed / warning / active
+	Error   string      `json:"error,omitempty"` // error message when status == "failed"
 	Data    interface{} `json:"data,omitempty"`
 	Hint    *string     `json:"hint"`
 }
@@ -48,7 +49,7 @@ func hintPtr(s string) *string {
 // is the JSON "command" field value (e.g. "save").
 func reportFailed(action, command, errMsg, hint string) {
 	if globalJSON {
-		_ = outputJSON(JSONEnvelope{Command: command, Status: "failed", Hint: hintPtr(hint)})
+		_ = outputJSON(JSONEnvelope{Command: command, Status: "failed", Error: errMsg, Hint: hintPtr(hint)})
 		return
 	}
 	statusFailed(action, errMsg, hint)

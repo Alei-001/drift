@@ -9,11 +9,12 @@ import (
 	"github.com/zeebo/blake3"
 )
 
-// TestComputeFileHashFromChunks_Empty verifies that hashing zero chunks
-// produces the BLAKE3 hash of the empty byte sequence. This is the baseline
-// identity: hashing no chunk hashes yields the same result as hashing "".
-func TestComputeFileHashFromChunks_Empty(t *testing.T) {
-	got := computeFileHashFromChunks(nil)
+// TestComputeFileHashFromHashes_Empty verifies that hashing zero chunk
+// hashes produces the BLAKE3 hash of the empty byte sequence. This is the
+// baseline identity: hashing no chunk hashes yields the same result as
+// hashing "".
+func TestComputeFileHashFromHashes_Empty(t *testing.T) {
+	got := computeFileHashFromHashes(nil)
 	var want core.Hash
 	h := blake3.New()
 	copy(want[:], h.Sum(nil))
@@ -22,46 +23,46 @@ func TestComputeFileHashFromChunks_Empty(t *testing.T) {
 	}
 }
 
-// TestComputeFileHashFromChunks_Deterministic verifies that the same chunk
-// list always yields the same file hash.
-func TestComputeFileHashFromChunks_Deterministic(t *testing.T) {
-	chunks := []*core.Chunk{
-		{Hash: core.Hash{0x01}},
-		{Hash: core.Hash{0x02}},
-		{Hash: core.Hash{0x03}},
+// TestComputeFileHashFromHashes_Deterministic verifies that the same chunk
+// hash list always yields the same file hash.
+func TestComputeFileHashFromHashes_Deterministic(t *testing.T) {
+	hashes := []core.Hash{
+		{0x01},
+		{0x02},
+		{0x03},
 	}
-	a := computeFileHashFromChunks(chunks)
-	b := computeFileHashFromChunks(chunks)
+	a := computeFileHashFromHashes(hashes)
+	b := computeFileHashFromHashes(hashes)
 	if a != b {
 		t.Errorf("expected deterministic hash, got %x and %x", a, b)
 	}
 }
 
-// TestComputeFileHashFromChunks_OrderMatters verifies that the chunk hash
+// TestComputeFileHashFromHashes_OrderMatters verifies that the chunk hash
 // order affects the file hash. The file hash is computed by hashing the
-// concatenation of chunk hashes in order, so reordering chunks must produce
-// a different file hash.
-func TestComputeFileHashFromChunks_OrderMatters(t *testing.T) {
-	c1 := []*core.Chunk{{Hash: core.Hash{0x01}}, {Hash: core.Hash{0x02}}}
-	c2 := []*core.Chunk{{Hash: core.Hash{0x02}}, {Hash: core.Hash{0x01}}}
-	if computeFileHashFromChunks(c1) == computeFileHashFromChunks(c2) {
+// concatenation of chunk hashes in order, so reordering must produce a
+// different file hash.
+func TestComputeFileHashFromHashes_OrderMatters(t *testing.T) {
+	c1 := []core.Hash{{0x01}, {0x02}}
+	c2 := []core.Hash{{0x02}, {0x01}}
+	if computeFileHashFromHashes(c1) == computeFileHashFromHashes(c2) {
 		t.Error("expected different hashes for different chunk order")
 	}
 }
 
-// TestComputeFileHashFromChunks_MatchesConcat verifies the hash matches the
+// TestComputeFileHashFromHashes_MatchesConcat verifies the hash matches the
 // BLAKE3 of the concatenated chunk-hash bytes. This pins the wire format so
 // accidental changes to the hashing scheme are caught.
-func TestComputeFileHashFromChunks_MatchesConcat(t *testing.T) {
-	chunks := []*core.Chunk{
-		{Hash: core.Hash{0xAB}},
-		{Hash: core.Hash{0xCD}},
+func TestComputeFileHashFromHashes_MatchesConcat(t *testing.T) {
+	hashes := []core.Hash{
+		{0xAB},
+		{0xCD},
 	}
-	got := computeFileHashFromChunks(chunks)
+	got := computeFileHashFromHashes(hashes)
 
 	h := blake3.New()
-	h.Write(chunks[0].Hash[:])
-	h.Write(chunks[1].Hash[:])
+	h.Write(hashes[0][:])
+	h.Write(hashes[1][:])
 	var want core.Hash
 	copy(want[:], h.Sum(nil))
 	if got != want {
@@ -74,14 +75,28 @@ func TestComputeFileHashFromChunks_MatchesConcat(t *testing.T) {
 // OOM: the old code appended all chunk data into a single []byte before
 // counting, which would OOM on large files (e.g. 200 MB text).
 func TestCountFileLines(t *testing.T) {
-	hash1 := core.Hash{0x01}
-	hash2 := core.Hash{0x02}
-	hash3 := core.Hash{0x03}
+	data1 := []byte("line1\nline2\n")
+	data2 := []byte("line3\nline4")
+	data3 := []byte("line5\nline6\nline7\n")
+
+	var hash1, hash2, hash3 core.Hash
+	sum1 := blake3.Sum256(data1)
+	sum2 := blake3.Sum256(data2)
+	sum3 := blake3.Sum256(data3)
+	copy(hash1[:], sum1[:])
+	copy(hash2[:], sum2[:])
+	copy(hash3[:], sum3[:])
 
 	store := memory.NewMemoryStorage()
-	store.PutChunk(context.Background(), &core.Chunk{Hash: hash1, Data: []byte("line1\nline2\n")})        // 2 newlines
-	store.PutChunk(context.Background(), &core.Chunk{Hash: hash2, Data: []byte("line3\nline4")})          // 1 newline
-	store.PutChunk(context.Background(), &core.Chunk{Hash: hash3, Data: []byte("line5\nline6\nline7\n")}) // 3 newlines
+	if err := store.PutChunk(context.Background(), &core.Chunk{Hash: hash1, Data: data1}); err != nil {
+		t.Fatalf("PutChunk 1: %v", err)
+	}
+	if err := store.PutChunk(context.Background(), &core.Chunk{Hash: hash2, Data: data2}); err != nil {
+		t.Fatalf("PutChunk 2: %v", err)
+	}
+	if err := store.PutChunk(context.Background(), &core.Chunk{Hash: hash3, Data: data3}); err != nil {
+		t.Fatalf("PutChunk 3: %v", err)
+	}
 
 	entry := core.FileEntry{
 		Chunks: []core.Hash{hash1, hash2, hash3},

@@ -17,7 +17,7 @@ var initCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Honor the global -C/--cwd option so 'drift -C <path> init' works
 		// the same as 'drift init <path>'. cli-design.md documents both.
-		base, err := getCwd(cmd)
+		base, err := getCwd()
 		if err != nil {
 			return err
 		}

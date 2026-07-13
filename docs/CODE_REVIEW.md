@@ -30,7 +30,7 @@
 | **并发 bug** | race condition、deadlock、锁不可重入导致的死锁 | `SwitchBranch` 调 `AcquireWorkspaceLock` 二次加锁 |
 | **资源 bug** | 文件句柄/goroutine/锁未释放 | `os.Open` 后未 `defer f.Close()` |
 | **安全 bug** | 路径穿越、命令注入、未校验的用户输入 | 用户路径未过 `pathutil.RelToWorkDir` |
-| **规范 bug** | 违反 AGENTS.md / CODE_STANDARDS.md 的**明文规则** | 文件超过 300 行、用 `%v` 包装 error |
+| **规范 bug** | 违反 AGENTS.md / CODE_STANDARDS.md 的**明文规则** | 文件超过 500 行、用 `%v` 包装 error |
 | **数据完整性 bug** | 哈希校验缺失、原子写入缺失、半写状态 | `PutChunk` 未走 `WriteFileAtomic` |
 | **架构 bug** | 违反 [architecture.md](architecture.md) 的设计契约：分层错误、循环依赖、跨层调用、抽象错位 | porcelain 直接操作存储细节而非通过 `Storer` 接口；filetype 反向依赖 porcelain |
 
@@ -43,7 +43,7 @@
 - **过度防御**：为不可能的分支添加错误处理（违反 YAGNI）
 - **抽象建议**：可以提取公共函数但没有重复三次以上
 - **未实现功能**：roadmap 中的未来项（如 `LogsDir` 未启用），属于"未完成"而非"bug"
-- **测试覆盖率不足**：除非有明文规则要求（如"导出函数必须有测试"），否则不算 bug
+- **测试覆盖率不足**：对普通代码不算 bug；但对安全/并发/数据完整性关键函数（如 `VerifyIntegrity`、`PutChunk`、`AcquireWorkspaceLock`、GC reachability）的测试缺失视为质量问题（P2）
 - **依赖版本升级**：除非有已知安全公告
 - **TODO/FIXME 注释**：存在 TODO 不算 bug，除非该 TODO 指向已违约的契约
 
@@ -63,7 +63,7 @@
 |------|------|---------|------|
 | **P0 阻断** | 数据损坏、安全漏洞、生产环境崩溃 | 必须立即修复，优先于一切任务 | 哈希校验缺失、路径穿越、`PutChunk` 非原子写 |
 | **P1 严重** | 功能错误、契约违反、并发死锁 | 当前会话内修复 | sentinel error 用字符串匹配、锁不可重入死锁 |
-| **P2 一般** | 规范违反、防御性缺失、资源泄漏风险 | 批量修复，不阻塞主任务 | 文件超 300 行、未 `defer` 立即调用 |
+| **P2 一般** | 规范违反、防御性缺失、资源泄漏风险 | 批量修复，不阻塞主任务 | 文件超 500 行、未 `defer` 立即调用 |
 | **P3 提示** | 风格、命名、注释完整性 | 仅记录不修复，除非用户要求 | 函数命名"不够精确"、注释"可以更清楚" |
 
 **架构 bug 单独分级**：架构 bug 不按 P0-P3 分级，而是按 §4.4 架构修复流程处理。架构 bug 的优先级至少等同于 P1 —— 不得以"打补丁先绕过"为由拖延。
@@ -148,7 +148,7 @@
 - [ ] `go build ./...` exit 0
 - [ ] `go test ./...` exit 0（已知的 Windows flaky 测试除外，见 AGENTS.md）
 - [ ] `go vet ./...` exit 0
-- [ ] 修复涉及的所有文件 ≤ 300 行（规范要求）
+- [ ] 修复涉及的所有文件 ≤ 500 行（规范要求）
 - [ ] 所有修复都符合 §4 修复标准
 
 ### 5.2 单个 bug 的修复终止

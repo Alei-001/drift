@@ -15,7 +15,7 @@ var statusCmd = &cobra.Command{
 	Long:  "Show changes since the last save. Lists all added, modified, and deleted files in the working tree.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -32,7 +32,7 @@ var statusCmd = &cobra.Command{
 
 		changes, err := porcelain.DetectChanges(ctx, store, cwd, &cfg.Core)
 		if err != nil {
-			reportFailed("Status", "status", err.Error(), "")
+			reportFailed("Status", "status", "could not get status.", "")
 			return ErrSilent
 		}
 

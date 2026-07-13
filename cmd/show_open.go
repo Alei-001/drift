@@ -14,7 +14,7 @@ import (
 // Preview-related constants for openExternal.
 const (
 	// previewDirPerm is the permission bits for the drift-previews temp dir.
-	previewDirPerm os.FileMode = 0755
+	previewDirPerm os.FileMode = 0700
 	// previewViewerTimeout bounds how long the system viewer may hold the
 	// temp file open before it is forcibly killed and the file removed.
 	previewViewerTimeout = 30 * time.Minute

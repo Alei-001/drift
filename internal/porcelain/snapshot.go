@@ -74,6 +74,15 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		if info.IsDir() {
 			return nil
 		}
+		// Skip symlinks: they cannot be represented as a regular
+		// FileEntry (the proto schema has no symlink-target field) and
+		// following them via os.Open would chunk the target's content
+		// while recording the symlink's mode, producing an inconsistent
+		// entry that restore would write back as a regular file. Skipping
+		// preserves the symlink in the workspace without tracking it.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 		workspaceFiles = append(workspaceFiles, workspaceFile{path: path, info: info})
 		return nil
 	})
@@ -101,6 +110,17 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	// First pass: separate unchanged (fast path) from changed files.
 	// Unchanged files are identified by matching ModTime + Size against
 	// the old index; their entries are copied without re-chunking.
+	//
+	// Security note: this fast path is a performance optimization, NOT a
+	// security guarantee. It trusts (mtime, size) as a proxy for "content
+	// unchanged". An adversary who can forge mtime (e.g. touch -t) and
+	// preserve size could trick CreateSnapshot into reusing stale chunks.
+	// Drift assumes the workspace is not under active adversarial
+	// tampering between snapshots; verified content integrity would
+	// require re-reading every file, defeating the purpose of the index.
+	// The merge phase below still re-chunks any file whose mtime or size
+	// differs, and the resulting FileEntry.Hash is compared against the
+	// old index hash to detect real content changes.
 	entryMap := make(map[string]core.FileEntry, len(workspaceFiles))
 	var orderedPaths []string
 	var tasks []fileTask
@@ -223,12 +243,28 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		Type:   core.RefTypeBranch,
 		Target: snap.ID.Hash,
 	}
+	// Save the previous branch ref so SetIndex failure can roll back the
+	// SetRef below. Without this, a SetIndex error would leave the branch
+	// pointing at the new snapshot while the index still reflects the old
+	// workspace state, making the next save link to the wrong parent.
+	oldBranchRef, oldBranchErr := store.GetRef(ctx, symRef)
+	if oldBranchErr != nil && !errors.Is(oldBranchErr, storage.ErrNotFound) {
+		return nil, fmt.Errorf("read previous branch ref: %w", oldBranchErr)
+	}
 	if err := store.SetRef(ctx, symRef, branchRef); err != nil {
 		return nil, fmt.Errorf("update branch: %w", err)
 	}
 
 	if err := store.SetIndex(ctx, newIndex); err != nil {
-		return nil, fmt.Errorf("update index: %w", err)
+		// Roll back the branch ref to its pre-save value. If the branch
+		// did not exist before (oldBranchErr == ErrNotFound), delete the
+		// ref we just created; otherwise restore the previous value.
+		if errors.Is(oldBranchErr, storage.ErrNotFound) {
+			_ = store.DeleteRef(ctx, symRef)
+		} else {
+			_ = store.SetRef(ctx, symRef, oldBranchRef)
+		}
+		return nil, fmt.Errorf("update index (rolled back branch ref): %w", err)
 	}
 
 	slog.Info("snapshot created", "id", snap.ShortID(), "branch", symRef, "files", len(snap.Files), "size", snap.TotalSize, "message", message)

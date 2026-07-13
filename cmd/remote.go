@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -24,7 +25,7 @@ var remoteListCmd = &cobra.Command{
 	Short: "List all configured remotes",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -32,13 +33,29 @@ var remoteListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		sort.Slice(rf.Remotes, func(i, j int) bool {
+			return rf.Remotes[i].Name < rf.Remotes[j].Name
+		})
+		if globalJSON {
+			entries := make([]remoteListEntry, 0, len(rf.Remotes))
+			for _, r := range rf.Remotes {
+				entries = append(entries, remoteListEntry{
+					Name: r.Name,
+					Type: r.Type,
+					URL:  r.URL,
+					User: r.User,
+				})
+			}
+			return outputJSON(JSONEnvelope{
+				Command: "remote list",
+				Status:  "ok",
+				Data:    remoteListData{Remotes: entries},
+			})
+		}
 		if len(rf.Remotes) == 0 {
 			fmt.Println("(no remotes configured)")
 			return nil
 		}
-		sort.Slice(rf.Remotes, func(i, j int) bool {
-			return rf.Remotes[i].Name < rf.Remotes[j].Name
-		})
 		for _, r := range rf.Remotes {
 			fmt.Printf("%s\t%s\t%s\n", r.Name, r.Type, r.URL)
 		}
@@ -54,7 +71,7 @@ var remoteRemoveCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -69,6 +86,13 @@ var remoteRemoveCmd = &cobra.Command{
 		if err := saveRemotes(cwd, rf); err != nil {
 			return err
 		}
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "remote remove",
+				Status:  "ok",
+				Data:    remoteRemoveData{Name: name},
+			})
+		}
 		fmt.Printf("Remote %q removed. Credentials preserved in user-level config.\n", name)
 		return nil
 	},
@@ -82,7 +106,7 @@ var remoteSetURLCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, newURL := args[0], args[1]
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -102,9 +126,16 @@ var remoteSetURLCmd = &cobra.Command{
 		if err := saveRemotes(cwd, rf); err != nil {
 			return err
 		}
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "remote set-url",
+				Status:  "ok",
+				Data:    remoteSetURLData{Name: name, URL: newURL},
+			})
+		}
 		fmt.Printf("Remote %q URL updated to %s\n", name, newURL)
 		if oldHost != newHost && oldHost != "" && newHost != "" {
-			fmt.Fprintf(os.Stderr, "warning: host changed (%s → %s); password may need reconfiguring.\n", oldHost, newHost)
+			fmt.Fprintf(os.Stderr, "warning: host changed (%s -> %s); password may need reconfiguring.\n", oldHost, newHost)
 		}
 		return nil
 	},
@@ -117,24 +148,31 @@ var remoteTestCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
 		cfg, err := resolveRemote(cwd, name)
 		if err != nil {
-			statusFailed("Remote test", err.Error(), "use 'drift remote list' to see configured remotes, or 'drift remote add' to configure one.")
+			reportFailed("Remote test", "remote test", "could not resolve remote.", "use 'drift remote list' to see configured remotes, or 'drift remote add' to configure one.")
 			return ErrSilent
 		}
 		rfs, err := remote.NewRemoteFS(cfg)
 		if err != nil {
-			statusFailed("Remote test", fmt.Sprintf("create remote client: %v", err), "check the remote URL and protocol type.")
+			reportFailed("Remote test", "remote test", "could not create remote client.", "check the remote URL and protocol type.")
 			return ErrSilent
 		}
 		defer rfs.Close()
-		if _, err := rfs.List("."); err != nil {
-			statusFailed("Remote test", err.Error(), "check URL, credentials, and network connectivity")
+		if _, err := rfs.List(context.Background(), "."); err != nil {
+			reportFailed("Remote test", "remote test", "remote is not reachable.", "check URL, credentials, and network connectivity")
 			return ErrSilent
+		}
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "remote test",
+				Status:  "ok",
+				Data:    remoteTestData{Name: name, Reachable: true},
+			})
 		}
 		statusOK("Remote %q reachable", name)
 		return nil
@@ -148,7 +186,7 @@ var remoteRenameCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		oldName, newName := args[0], args[1]
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -171,6 +209,13 @@ var remoteRenameCmd = &cobra.Command{
 		if err := saveRemotes(cwd, rf); err != nil {
 			return err
 		}
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "remote rename",
+				Status:  "ok",
+				Data:    remoteRenameData{OldName: oldName, NewName: newName},
+			})
+		}
 		fmt.Printf("Remote %q renamed to %q\n", oldName, newName)
 		return nil
 	},
@@ -183,7 +228,7 @@ var remoteShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -196,14 +241,31 @@ var remoteShowCmd = &cobra.Command{
 			reportFailed("Remote show", "remote show", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.")
 			return ErrSilent
 		}
-		fmt.Printf("  name:     %s\n", cfg.Name)
-		fmt.Printf("  type:     %s\n", cfg.Type)
-		fmt.Printf("  url:      %s\n", cfg.URL)
-		fmt.Printf("  user:     %s\n", cfg.User)
+		opts := make(map[string]string)
 		for k, v := range cfg.Options {
 			if k == "_password" {
 				continue
 			}
+			opts[k] = v
+		}
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "remote show",
+				Status:  "ok",
+				Data: remoteShowData{
+					Name:    cfg.Name,
+					Type:    cfg.Type,
+					URL:     cfg.URL,
+					User:    cfg.User,
+					Options: opts,
+				},
+			})
+		}
+		fmt.Printf("  name:     %s\n", cfg.Name)
+		fmt.Printf("  type:     %s\n", cfg.Type)
+		fmt.Printf("  url:      %s\n", cfg.URL)
+		fmt.Printf("  user:     %s\n", cfg.User)
+		for k, v := range opts {
 			fmt.Printf("  option:   %s=%s\n", k, v)
 		}
 		return nil
@@ -277,4 +339,51 @@ func init() {
 	remoteCmd.AddCommand(remoteRenameCmd)
 	remoteCmd.AddCommand(remoteShowCmd)
 	rootCmd.AddCommand(remoteCmd)
+}
+
+// --- JSON data types for remote subcommands ---
+
+// remoteListData is the JSON payload for a successful drift remote list.
+type remoteListData struct {
+	Remotes []remoteListEntry `json:"remotes"`
+}
+
+// remoteListEntry is a single remote in the remote list JSON output.
+type remoteListEntry struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	URL  string `json:"url"`
+	User string `json:"user"`
+}
+
+// remoteRemoveData is the JSON payload for a successful drift remote remove.
+type remoteRemoveData struct {
+	Name string `json:"name"`
+}
+
+// remoteSetURLData is the JSON payload for a successful drift remote set-url.
+type remoteSetURLData struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// remoteTestData is the JSON payload for a successful drift remote test.
+type remoteTestData struct {
+	Name      string `json:"name"`
+	Reachable bool   `json:"reachable"`
+}
+
+// remoteRenameData is the JSON payload for a successful drift remote rename.
+type remoteRenameData struct {
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
+}
+
+// remoteShowData is the JSON payload for a successful drift remote show.
+type remoteShowData struct {
+	Name    string            `json:"name"`
+	Type    string            `json:"type"`
+	URL     string            `json:"url"`
+	User    string            `json:"user"`
+	Options map[string]string `json:"options"`
 }

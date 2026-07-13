@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -125,7 +126,10 @@ func (s *SMBFS) resolve(p string) string {
 }
 
 // Stat returns metadata for a remote path.
-func (s *SMBFS) Stat(p string) (*RemoteInfo, error) {
+func (s *SMBFS) Stat(ctx context.Context, p string) (*RemoteInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	info, err := s.share.Stat(s.resolve(p))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -150,7 +154,10 @@ func (r *smbReadCloser) Read(p []byte) (int, error) { return r.file.Read(p) }
 func (r *smbReadCloser) Close() error               { return r.file.Close() }
 
 // Read opens a remote file for streaming. The caller must close the reader.
-func (s *SMBFS) Read(p string) (io.ReadCloser, error) {
+func (s *SMBFS) Read(ctx context.Context, p string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f, err := s.share.Open(s.resolve(p))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -161,32 +168,69 @@ func (s *SMBFS) Read(p string) (io.ReadCloser, error) {
 	return &smbReadCloser{file: f}, nil
 }
 
-// Write uploads a file, creating parent directories as needed.
-func (s *SMBFS) Write(p string, r io.Reader) error {
-	resolved := s.resolve(p)
-	// Ensure parent directory exists.
+// mkdirParents ensures the parent directory of resolved exists. It stats
+// first so the common "already exists" case avoids relying on MkdirAll's
+// EEXIST, which is filesystem-dependent.
+func (s *SMBFS) mkdirParents(ctx context.Context, resolved string) error {
 	parent := path.Dir(resolved)
-	if parent != "/" && parent != "." {
-		if err := s.share.MkdirAll(parent, 0o755); err != nil {
-			// MkdirAll may return EEXIST; ignore that case.
-			if !os.IsExist(err) {
-				return fmt.Errorf("mkdir parent %q: %w", parent, err)
-			}
+	if parent == "/" || parent == "." {
+		return nil
+	}
+	if info, err := s.share.Stat(parent); err == nil && info.IsDir() {
+		return nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("stat parent %q: %w", parent, err)
+	}
+	if err := s.share.MkdirAll(parent, 0o755); err != nil {
+		if !os.IsExist(err) {
+			return fmt.Errorf("mkdir parent %q: %w", parent, err)
 		}
 	}
-	f, err := s.share.Create(resolved)
-	if err != nil {
-		return fmt.Errorf("create %q: %w", p, err)
+	return nil
+}
+
+// Write uploads a file atomically: it first writes to <path>.partial, then
+// removes the target and renames the partial onto it. This prevents a
+// network interruption from leaving a half-written object on the remote.
+// go-smb2's Rename does not support overwrite, so the target is removed
+// first (a missing target is not an error).
+func (s *SMBFS) Write(ctx context.Context, p string, r io.Reader) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	defer f.Close()
+	resolved := s.resolve(p)
+	if err := s.mkdirParents(ctx, resolved); err != nil {
+		return err
+	}
+	partial := resolved + ".partial"
+	f, err := s.share.Create(partial)
+	if err != nil {
+		return fmt.Errorf("create partial %q: %w", p, err)
+	}
 	if _, err := io.Copy(f, r); err != nil {
-		return fmt.Errorf("write data %q: %w", p, err)
+		f.Close()
+		_ = s.share.Remove(partial)
+		return fmt.Errorf("write partial data %q: %w", p, err)
+	}
+	if err := f.Close(); err != nil {
+		_ = s.share.Remove(partial)
+		return fmt.Errorf("close partial %q: %w", p, err)
+	}
+	// go-smb2 Rename does not overwrite; remove the target first. A missing
+	// target is the common case and is silently ignored.
+	_ = s.share.Remove(resolved)
+	if err := s.share.Rename(partial, resolved); err != nil {
+		_ = s.share.Remove(partial)
+		return fmt.Errorf("rename partial to %q: %w", p, err)
 	}
 	return nil
 }
 
 // Remove deletes a remote file. A missing file is not an error.
-func (s *SMBFS) Remove(p string) error {
+func (s *SMBFS) Remove(ctx context.Context, p string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := s.share.Remove(s.resolve(p)); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -197,8 +241,12 @@ func (s *SMBFS) Remove(p string) error {
 }
 
 // List enumerates entries directly under a directory path (non-recursive).
-func (s *SMBFS) List(p string) ([]RemoteInfo, error) {
-	infos, err := s.share.ReadDir(s.resolve(p))
+func (s *SMBFS) List(ctx context.Context, p string) ([]RemoteInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	basePath := s.resolve(p)
+	infos, err := s.share.ReadDir(basePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []RemoteInfo{}, nil
@@ -206,7 +254,6 @@ func (s *SMBFS) List(p string) ([]RemoteInfo, error) {
 		return nil, fmt.Errorf("list %q: %w", p, err)
 	}
 	result := make([]RemoteInfo, 0, len(infos))
-	basePath := s.resolve(p)
 	for _, info := range infos {
 		childPath := path.Join(basePath, info.Name())
 		result = append(result, RemoteInfo{
@@ -220,7 +267,10 @@ func (s *SMBFS) List(p string) ([]RemoteInfo, error) {
 }
 
 // MkdirAll creates a directory tree.
-func (s *SMBFS) MkdirAll(p string) error {
+func (s *SMBFS) MkdirAll(ctx context.Context, p string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := s.share.MkdirAll(s.resolve(p), 0o755); err != nil {
 		if !os.IsExist(err) {
 			return fmt.Errorf("mkdirall %q: %w", p, err)
@@ -229,24 +279,28 @@ func (s *SMBFS) MkdirAll(p string) error {
 	return nil
 }
 
-// Close releases the SMB session and TCP connection.
+// Close releases the SMB session and TCP connection. The share is unmounted
+// and the session logged off in order; conn.Close is called last and its
+// error is ignored because Logoff typically closes the underlying transport,
+// making a subsequent conn.Close return a benign "closed" error.
 func (s *SMBFS) Close() error {
 	var errs []error
 	if s.share != nil {
-		// Share.Umount is not exposed; session.Logoff closes everything.
+		if err := s.share.Umount(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if s.session != nil {
 		if err := s.session.Logoff(); err != nil {
 			errs = append(errs, err)
 		}
 	}
+	// conn.Close after Logoff usually returns a "closed" error; ignore it.
 	if s.conn != nil {
-		if err := s.conn.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		_ = s.conn.Close()
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("smb close: %v", errs[0])
+		return fmt.Errorf("smb close: %w", errs[0])
 	}
 	return nil
 }

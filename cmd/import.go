@@ -22,7 +22,7 @@ After importing, run 'drift save' to record the change as a new snapshot.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -41,7 +41,7 @@ After importing, run 'drift save' to record the change as a new snapshot.`,
 			if errors.Is(err, porcelain.ErrFileNotFound) {
 				hint = fmt.Sprintf("use 'drift show branch:%s' to list files in this branch.", branchName)
 			}
-			reportFailed("Import", "import", err.Error(), hint)
+			reportFailed("Import", "import", "import failed.", hint)
 			return ErrSilent
 		}
 

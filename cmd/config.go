@@ -69,7 +69,7 @@ func init() {
 }
 
 func runConfigList(cmd *cobra.Command, args []string) error {
-	cwd, err := getCwd(cmd)
+	cwd, err := getCwd()
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 		reportFailed("Config", "config", fmt.Sprintf("unknown config key '%s'.", key), "use 'drift config list' to see available keys.")
 		return ErrSilent
 	}
-	cwd, err := getCwd(cmd)
+	cwd, err := getCwd()
 	if err != nil {
 		return err
 	}
@@ -164,7 +164,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := cmd.Context()
-	cwd, err := getCwd(cmd)
+	cwd, err := getCwd()
 	if err != nil {
 		return err
 	}

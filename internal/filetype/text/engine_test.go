@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Alei-001/drift/internal/core"
 )
 
 // --- Detect tests ---
@@ -74,19 +76,27 @@ func TestDetect_ByBasename(t *testing.T) {
 
 func TestDetect_ByMagic(t *testing.T) {
 	engine := NewEngine()
-	// Text has no magic bytes, so DetectByMagic always returns false.
+	// Plain text has no magic bytes, but BOM signatures are detected.
 	tests := []struct {
 		name   string
 		header []byte
+		want   bool
 	}{
-		{"plain text", []byte("hello world")},
-		{"empty", []byte{}},
-		{"png magic", []byte{0x89, 'P', 'N', 'G'}},
+		{"plain text", []byte("hello world"), false},
+		{"empty", []byte{}, false},
+		{"png magic", []byte{0x89, 'P', 'N', 'G'}, false},
+		{"utf8 bom", []byte{0xEF, 0xBB, 0xBF, 'h', 'i'}, true},
+		{"utf16 be bom", []byte{0xFE, 0xFF, 0x00, 'A'}, true},
+		{"utf16 le bom", []byte{0xFF, 0xFE, 'A', 0x00}, true},
+		{"bom only utf8", []byte{0xEF, 0xBB, 0xBF}, true},
+		{"bom only utf16be", []byte{0xFE, 0xFF}, true},
+		{"bom only utf16le", []byte{0xFF, 0xFE}, true},
+		{"not bom ff fe x", []byte{0xFF, 0xFE, 0x00, 0x00}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := engine.DetectByMagic(tc.header); got != false {
-				t.Errorf("DetectByMagic(%s) = %v, want false", tc.name, got)
+			if got := engine.DetectByMagic(tc.header); got != tc.want {
+				t.Errorf("DetectByMagic(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
 	}
@@ -383,8 +393,10 @@ func TestDiff_UnifiedFormatHeader(t *testing.T) {
 
 func TestDiff_100KLinesCompletelyDifferent(t *testing.T) {
 	engine := NewEngine()
-	// Two 100K-line files with no common lines — must not OOM.
-	// Uses linear-space Hirschberg via hasCommonLines fast path.
+	// Two 100K-line files with no common lines — exceeds maxDiffLines, so
+	// the diff falls back to a "files differ" message instead of running
+	// the full Myers DP. This verifies the large-file fallback keeps memory
+	// and time bounded.
 	const N = 100000
 	oldLines := make([]string, N)
 	newLines := make([]string, N)
@@ -402,12 +414,12 @@ func TestDiff_100KLinesCompletelyDifferent(t *testing.T) {
 	if diff == "" {
 		t.Error("expected non-empty diff for completely different files")
 	}
-	// Should be all deletions and insertions, no matches
-	if !strings.Contains(diff, "-old_0") {
-		t.Error("expected diff to contain -old_0")
+	// Oversized inputs produce a "files differ" stub, not a detailed diff.
+	if !strings.Contains(diff, "files differ") {
+		t.Errorf("expected 'files differ' in diff for oversized input, got %q", diff)
 	}
-	if !strings.Contains(diff, "+new_0") {
-		t.Error("expected diff to contain +new_0")
+	if strings.Contains(diff, "-old_0") {
+		t.Error("expected no detailed diff lines for oversized input")
 	}
 }
 
@@ -533,7 +545,11 @@ func TestChunkerFor_MediumFile(t *testing.T) {
 		t.Fatal("expected non-nil chunker for 200KB text file, got nil")
 	}
 	data := bytes.Repeat([]byte("text content line here\n"), 10000)
-	chunks, err := c.Chunk(context.Background(), bytes.NewReader(data))
+	var chunks []*core.Chunk
+	err := c.Chunk(context.Background(), bytes.NewReader(data), func(ch *core.Chunk) error {
+		chunks = append(chunks, ch)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("Chunk failed: %v", err)
 	}

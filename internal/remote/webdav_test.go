@@ -49,14 +49,15 @@ func TestWebDAV_BasicCRUD(t *testing.T) {
 		t.Fatalf("NewWebDAVFS: %v", err)
 	}
 	defer rfs.Close()
+	ctx := context.Background()
 
 	// Write a file.
-	if err := rfs.Write("testdir/hello.txt", strings.NewReader("hello webdav")); err != nil {
+	if err := rfs.Write(ctx, "testdir/hello.txt", strings.NewReader("hello webdav")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
 	// Stat it.
-	info, err := rfs.Stat("testdir/hello.txt")
+	info, err := rfs.Stat(ctx, "testdir/hello.txt")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestWebDAV_BasicCRUD(t *testing.T) {
 	}
 
 	// Read it back.
-	rc, err := rfs.Read("testdir/hello.txt")
+	rc, err := rfs.Read(ctx, "testdir/hello.txt")
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestWebDAV_BasicCRUD(t *testing.T) {
 	}
 
 	// List the directory.
-	entries, err := rfs.List("testdir")
+	entries, err := rfs.List(ctx, "testdir")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -88,11 +89,11 @@ func TestWebDAV_BasicCRUD(t *testing.T) {
 	}
 
 	// Remove it.
-	if err := rfs.Remove("testdir/hello.txt"); err != nil {
+	if err := rfs.Remove(ctx, "testdir/hello.txt"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 	// Stat should now return ErrNotExist.
-	_, err = rfs.Stat("testdir/hello.txt")
+	_, err = rfs.Stat(ctx, "testdir/hello.txt")
 	if err == nil || !strings.Contains(err.Error(), "not exist") {
 		t.Errorf("expected ErrNotExist after remove, got %v", err)
 	}

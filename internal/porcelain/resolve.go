@@ -56,25 +56,22 @@ func ResolveSnapshotRef(ctx context.Context, store storage.Storer, id string) (*
 // resolveHead resolves the HEAD reference to a snapshot, following symbolic
 // references. Returns ErrSnapshotNotFound when HEAD is missing or points to
 // nothing.
+//
+// store.GetRef already resolves symref chains recursively (see the
+// filesystem and memory backends), so the returned headRef.Target is the
+// final snapshot hash. The previous redundant second GetRef call has been
+// removed.
 func resolveHead(ctx context.Context, store storage.Storer) (*core.Snapshot, error) {
 	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("read HEAD: %w", ErrSnapshotNotFound)
 	}
-	target := headRef.Target
-	if headRef.SymRef != "" {
-		branchRef, err := store.GetRef(ctx, headRef.SymRef)
-		if err != nil {
-			return nil, fmt.Errorf("read HEAD symref %q: %w", headRef.SymRef, ErrSnapshotNotFound)
-		}
-		target = branchRef.Target
-	}
-	if target.IsZero() {
+	if headRef.Target.IsZero() {
 		return nil, fmt.Errorf("HEAD points at nothing: %w", ErrSnapshotNotFound)
 	}
-	snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: target})
+	snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
 	if err != nil {
-		return nil, fmt.Errorf("load HEAD snapshot %s: %w", target, ErrSnapshotNotFound)
+		return nil, fmt.Errorf("load HEAD snapshot %s: %w", headRef.Target, ErrSnapshotNotFound)
 	}
 	return snap, nil
 }

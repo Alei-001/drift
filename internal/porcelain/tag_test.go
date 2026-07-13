@@ -8,19 +8,25 @@ import (
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
+	"github.com/zeebo/blake3"
+	"google.golang.org/protobuf/proto"
 )
 
 // putTestSnapshot stores a minimal snapshot in the memory backend for tag
-// tests that need a valid snapshot ID to point at.
+// tests that need a valid snapshot ID to point at. The ID is computed from
+// the snapshot content (BLAKE3 of marshaled proto with IdHash omitted) so
+// that GetSnapshot's integrity check passes when AddTag verifies existence.
 func putTestSnapshot(t *testing.T, store interface {
 	PutSnapshot(context.Context, *core.Snapshot) error
 }) core.SnapshotID {
 	t.Helper()
 	snap := &core.Snapshot{
-		ID:        core.SnapshotID{Hash: core.Hash{0xAA, 0xBB}},
 		Message:   "test snapshot",
 		Timestamp: 1700000000,
 	}
+	p := core.SnapshotToProto(snap, false)
+	marshaled, _ := proto.Marshal(p)
+	snap.ID = core.SnapshotID{Hash: core.Hash(blake3.Sum256(marshaled))}
 	if err := store.PutSnapshot(context.Background(), snap); err != nil {
 		t.Fatalf("PutSnapshot: %v", err)
 	}
@@ -325,10 +331,12 @@ func TestAddTag_ConcurrentSameName(t *testing.T) {
 
 	snap1 := putTestSnapshot(t, store)
 	snap2 := &core.Snapshot{
-		ID:        core.SnapshotID{Hash: core.Hash{0x22}},
 		Message:   "second snapshot",
 		Timestamp: 1700000001,
 	}
+	p2 := core.SnapshotToProto(snap2, false)
+	marshaled2, _ := proto.Marshal(p2)
+	snap2.ID = core.SnapshotID{Hash: core.Hash(blake3.Sum256(marshaled2))}
 	if err := store.PutSnapshot(context.Background(), snap2); err != nil {
 		t.Fatalf("PutSnapshot snap2: %v", err)
 	}

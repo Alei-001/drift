@@ -99,13 +99,13 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 
 	rfs, err := remote.NewRemoteFS(rCfg)
 	if err != nil {
-		return nil, fmt.Errorf("create remote client: %w", err)
+		return nil, fmt.Errorf("%w: create remote client: %w", remote.ErrNetwork, err)
 	}
 	defer rfs.Close()
 
 	stats, err := remote.Pull(ctx, store, rfs, "")
 	if err != nil {
-		return nil, fmt.Errorf("pull: %w", err)
+		return nil, fmt.Errorf("%w: pull: %w", remote.ErrNetwork, err)
 	}
 
 	branchName := "main"

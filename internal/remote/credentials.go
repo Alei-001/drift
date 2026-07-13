@@ -12,13 +12,25 @@ import (
 
 // credentialFilePerm is the file mode for credentials.json. 0600 ensures
 // only the owner can read the file, which is critical since it contains
-// plaintext passwords (v1; a credential-helper backend may follow in v2).
+// plaintext passwords.
+//
+// Security note: credentials are currently stored in plaintext. This is
+// acceptable for v1 (matching git's credential-store approach), but a
+// future version should integrate with the OS keyring / secret store
+// (e.g. keyring-go, dbus Secret Service, Windows Credential Manager)
+// to avoid leaving passwords readable on disk. Until then, the 0600
+// permission is the only protection — do not weaken it.
+//
+// Callers must never include Password in error messages or log output.
 const credentialFilePerm = 0o600
 
 // Credential is a remote-name → password entry. Using the remote name as
 // the key (rather than host+user) avoids collisions when the same host+user
 // is used with different passwords for different remotes (e.g. work vs
 // personal projects on the same NAS).
+//
+// Password is stored in plaintext in credentials.json (protected only by
+// 0600 file permissions). See credentialFilePerm for the keyring roadmap.
 type Credential struct {
 	Remote   string `json:"remote"`
 	Host     string `json:"host"`
@@ -26,8 +38,12 @@ type Credential struct {
 	Password string `json:"password"`
 }
 
-// CredentialsFile is the on-disk format of credentials.json.
+// CredentialsFile is the on-disk format of credentials.json. The Version
+// field supports future format migrations; the current on-disk version is 1.
+// A missing version (zero value) indicates a legacy file written before the
+// field was introduced and is read as-is.
 type CredentialsFile struct {
+	Version     int          `json:"version,omitempty"`
 	Credentials []Credential `json:"credentials"`
 }
 

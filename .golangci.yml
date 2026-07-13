@@ -1,0 +1,88 @@
+# golangci-lint configuration for drift.
+# Tuned for the project's conventions (see docs/CODE_STANDARDS.md):
+#   - file size ≤ 300 lines (AGENTS.md rule 9), function cyclomatic complexity ≤ 15 (gocyclo)
+#   - error wrapping with %w (errorlint)
+#   - ctx.Err() in long-running loops (guarded by tests, not lint)
+#   - no testify/gomega (testify is disabled)
+#   - comma-ok type assertions enforced (forcetypeassert)
+#   - package boundaries enforced (depguard): remote must not import the
+#     filesystem backend; it uses shared constants from storage/layout.go
+#     and storage/chunk_format.go instead.
+run:
+  timeout: 5m
+  go: "1.25"
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck          # unchecked errors
+    - errorlint         # %w vs %v, sentinel comparison
+    - gocritic          # common mistakes
+    - govet             # go vet
+    - ineffassign       # ineffectual assignments
+    - revive            # style (acronyms, receiver names, etc.)
+    - staticcheck       # comprehensive checks
+    - unused            # unused code
+    - misspell          # spelling
+    - unconvert         # unnecessary conversions
+    - prealloc          # slice preallocation
+    - unparam           # unused function parameters
+    - nilerr            # nil error check issues
+    - bodyclose         # http response body close
+    - gosec             # security scanning
+    - depguard          # package boundary enforcement
+    - forcetypeassert   # require comma-ok type assertions (AGENTS.md rule 6)
+    - gocyclo           # cyclomatic complexity (function-level)
+    - dupl              # duplicate code detection
+    - goconst           # repeated literal detection
+    - exhaustive        # switch exhaustiveness on enums
+
+linters-settings:
+  errorlint:
+    errorf: true        # require %w for wrapping
+    asserts: true       # require errors.Is for sentinel comparison
+    comparison: true    # require errors.Is for direct comparison
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+  revive:
+    severity: warning
+    rules:
+      - name: initialisms
+        arguments: ["ID", "URL", "HTTP", "FS", "MIME", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTPS", "IP", "JSON", "LHS", "QPS", "RAM", "RHS", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "UID", "UUID", "URI", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS"]
+
+  gocyclo:
+    # Flag functions whose cyclomatic complexity exceeds this threshold.
+    # 15 keeps functions focused; the project also caps file length at 300
+    # lines (AGENTS.md rule 9; see docs/CODE_STANDARDS.md).
+    min-complexity: 15
+  depguard:
+    rules:
+      # Enforce the AGENTS.md layer boundary: the remote sync package must
+      # NOT import storage/backends/filesystem. It depends only on storage
+      # (interface + shared layout/chunk-format constants) and core.
+      no-filesystem-in-remote:
+        files:
+          - "**/internal/remote/**/*.go"
+        deny:
+          - pkg: "github.com/Alei-001/drift/internal/storage/backends/filesystem"
+            desc: "remote must not import the filesystem backend; use shared constants from storage/layout.go and storage/chunk_format.go instead"
+
+issues:
+  exclude-rules:
+    # Generated protobuf code is exempt from all style rules.
+    - path: \.pb\.go$
+      linters: [all]
+    # Test files may use strings.Contains on errors (per AGENTS.md).
+    - path: _test\.go$
+      linters: [errorlint]
+      text: "type assertion"
+    # Init files use Register which triggers the global state warning.
+    - path: internal/filetype/init\.go|internal/remote/.*\.go
+      linters: [gocritic]
+      text: "wrapperFunc|globalState"
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  fix: false

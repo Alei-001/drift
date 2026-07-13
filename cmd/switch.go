@@ -21,7 +21,7 @@ var switchCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -37,7 +37,7 @@ var switchCmd = &cobra.Command{
 		if err != nil {
 			if errors.Is(err, porcelain.ErrUncommittedChanges) {
 				reportFailed("Switch", "switch", "--no-autosave requires a clean working tree.", "use 'drift save' first, or drop --no-autosave to auto-save.")
-				return ErrSilent
+				return silentWrap(err)
 			}
 			if errors.Is(err, porcelain.ErrBranchNotFound) {
 				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch list' to list existing branches.")
@@ -45,9 +45,9 @@ var switchCmd = &cobra.Command{
 			}
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
-				return ErrSilent
+				return silentWrap(err)
 			}
-			reportFailed("Switch", "switch", err.Error(), "")
+			reportFailed("Switch", "switch", "could not switch branch.", "")
 			return ErrSilent
 		}
 

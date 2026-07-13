@@ -53,8 +53,9 @@ Define sentinel errors in the package that owns the concept:
 
 | Package | Sentinel errors |
 |---------|----------------|
-| `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
-| `internal/porcelain/` | `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrLocked`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain` |
+| `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrPermission`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
+| `internal/porcelain/` | `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrTagNotFound`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain`, `ErrAmbiguousID`, `ErrCannotUndo`, `ErrUncommittedChanges` |
+| `internal/version/` | `ErrNetwork`, `ErrNoRelease`, `ErrNoAsset` |
 
 Message format: either prefixed (`drift: not found`, storage/) or plain (`nothing to save`, porcelain/). Be consistent within a package.
 
@@ -189,7 +190,9 @@ Prefer `internal/storage/backends/memory.MemoryStorage` over temp directories fo
 
 ### 6.1 File size
 
-Aim for ≤ 300 lines per file. Split by concern when exceeding this.
+Aim for ≤ 500 lines per file and ≤ 80 lines per function. Split by concern when
+exceeding these limits; do not force splits that fragment a single coherent
+responsibility (e.g., splitting one I/O module into many tiny files).
 
 ### 6.2 Package layout
 
@@ -205,18 +208,23 @@ internal/             — business implementation (not importable externally)
       memory/         — in-memory implementation (for tests)
     refname/          — reference name validation
     stream/           — chunk streaming helpers
+  remote/             — remote sync (WebDAV/SMB); depends on storage + core only,
+                       NEVER imports storage/backends/filesystem (uses shared
+                       constants from storage/layout.go + storage/chunk_format.go)
   chunker/            — content-defined chunking strategies
   filetype/           — engine interface, registry
     text/             — text engine (detection, diff, preview)
     image/            — image engine
     video/            — video engine
     binary/           — binary fallback engine
+  version/            — build-time version metadata + self-upgrade (GitHub Releases)
   util/               — generic utilities
     cache/            — LRU cache wrapper
     fsutil/           — filesystem helpers (atomic writes, walk)
-    glob/             — glob pattern matching
+    glob/             — glob pattern matching (.driftignore patterns)
     pathutil/         — cross-platform path normalization
     format/           — size/dimension formatting
+    logutil/          — slog file logger initialization (.drift/logs/drift.log)
 ```
 
 The `internal/` boundary enforces the layer order: external projects cannot
@@ -305,3 +313,4 @@ for _, item := range items {
 | Date | Change |
 |------|--------|
 | 2026-07-02 | Initial version — codifies review findings and existing conventions |
+| 2026-07-13 | Synced sentinel errors with AGENTS.md (added ErrPermission, ErrTagNotFound, ErrAmbiguousID, ErrCannotUndo, ErrUncommittedChanges, version/ package); added remote/ and version/ packages to layout |

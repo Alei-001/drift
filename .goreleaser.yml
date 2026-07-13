@@ -14,9 +14,10 @@ version: 2
 
 project_name: drift
 
-before:
-  hooks:
-    - go mod tidy
+# No before-hooks: `go mod tidy` was removed because the release build should
+# not mutate go.sum. The repo is expected to be tidy (CI enforces this via
+# `go build`/`go vet`); running tidy during release risks network-dependent
+# failures and non-reproducible archives.
 
 builds:
   - id: drift
@@ -84,6 +85,19 @@ checksum:
   # Suffix `_checksums.txt` is matched by internal/version/findChecksumAsset.
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
   algorithm: sha256
+
+# SBOM (Software Bill of Materials) for each archive, generated via syft in
+# CycloneDX format. Consumers and compliance tooling can inspect the full
+# dependency tree of every release artifact. syft must be on PATH; the CI
+# goreleaser-check job installs it before the snapshot dry-run.
+#
+# Note on signing: artifact/checksum signing is intentionally omitted here.
+# GoReleaser's `signs:` block requires a signing key/cert available in the
+# release workflow (e.g. GPG_FINGERPRINT or a cosign key secret). Adding it
+# without those secrets would break the snapshot dry-run, so it is deferred
+# until the release pipeline has a key-provisioning step.
+sboms:
+  - artifacts: archive
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
@@ -28,9 +30,26 @@ The current branch after clone is the remote's HEAD branch.`,
 		remoteType, _ := cmd.Flags().GetString("type")
 		user, _ := cmd.Flags().GetString("user")
 		password, _ := cmd.Flags().GetString("password")
+		passwordStdin, _ := cmd.Flags().GetBool("password-stdin")
+
+		// When --password-stdin is set, read the password from os.Stdin
+		// (trimming trailing whitespace). This supports automation scripts
+		// and pipes; --password-stdin takes precedence over --password.
+		if passwordStdin {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("read password from stdin: %w", err)
+			}
+			password = strings.TrimSpace(string(data))
+		} else if password != "" {
+			// --password is visible in process listings (ps, Task Manager,
+			// /proc/<pid>/cmdline) to any local user. Warn so users opt
+			// into --password-stdin or interactive prompting instead.
+			fmt.Fprintln(os.Stderr, "warning: --password is visible in process listings; prefer --password-stdin for security")
+		}
 
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -44,8 +63,24 @@ The current branch after clone is the remote's HEAD branch.`,
 			Password:   password,
 		})
 		if err != nil {
-			statusFailed("Clone", err.Error(), "check the remote URL and network connectivity")
-			return ErrSilent
+			reportFailed("Clone", "clone", "clone failed.", "check the remote URL and network connectivity")
+			return silentWrap(err)
+		}
+
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "clone",
+				Status:  "ok",
+				Data: cloneData{
+					Dir:              result.Dir,
+					RemoteURL:        url,
+					Branch:           result.Branch,
+					Snapshots:        result.Snapshots,
+					Branches:         result.Branches,
+					Tags:             result.Tags,
+					CredentialsSaved: result.CredentialsSaved,
+				},
+			})
 		}
 
 		statusOK("Cloned into '%s'", result.Dir)
@@ -64,5 +99,17 @@ func init() {
 	cloneCmd.Flags().String("type", "webdav", "protocol type (webdav|smb)")
 	cloneCmd.Flags().String("user", "", "remote username")
 	cloneCmd.Flags().String("password", "", "remote password")
+	cloneCmd.Flags().Bool("password-stdin", false, "read password from standard input (for automation/scripts)")
 	rootCmd.AddCommand(cloneCmd)
+}
+
+// cloneData is the JSON payload for a successful drift clone.
+type cloneData struct {
+	Dir              string `json:"dir"`
+	RemoteURL        string `json:"remote_url"`
+	Branch           string `json:"branch"`
+	Snapshots        int    `json:"snapshots"`
+	Branches         int    `json:"branches"`
+	Tags             int    `json:"tags"`
+	CredentialsSaved bool   `json:"credentials_saved"`
 }

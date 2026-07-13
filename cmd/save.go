@@ -22,7 +22,7 @@ var saveCmd = &cobra.Command{
 	Long:  "Save a snapshot of the current workspace. All changes (added, modified, deleted files) are captured automatically; there is no staging area. The optional -m flag sets a message; when omitted a default 'snapshot <timestamp>' message is used. The --tag flag (repeatable) attaches one or more tag names to the new snapshot.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}

@@ -1069,6 +1069,8 @@ Error: pattern '*.tmp' not found.
   hint: use 'drift ignore list' to see current rules.
 ```
 
+`.driftignore` 不会在 `drift init` 时自动创建，首次 `drift ignore add` 时生成。支持的 glob 模式：`*`（单层通配）、`**`（递归通配）、`?`（单字符）、`[...]`（字符类）、`/` 前缀（锚定根目录）、`#`（注释）。不含 `/` 的模式按 basename 匹配（任意层级生效），含 `/` 的模式按相对路径匹配。完整语法见 `docs/architecture.md` §7.3。
+
 ---
 
 ### `drift watch`

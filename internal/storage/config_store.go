@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/Alei-001/drift/internal/core"
 )
@@ -20,10 +21,22 @@ type ConfigStorer interface {
 }
 
 // NormalizeConfig applies shared invariants to a loaded config so both
-// backends observe identical field semantics. It runs the core-level
-// Normalize (empty/zero fields→defaults). Both the filesystem and memory
-// backends call this from GetConfig so the logic lives in one place rather
-// than being duplicated per backend.
+// backends observe identical field semantics. It runs three phases:
+//  1. ApplyEnvOverrides — DRIFT_* environment variables replace the file
+//     values (runtime overrides for CI/containers).
+//  2. Normalize — empty/zero/out-of-range fields are clamped to defaults,
+//     including any values supplied via env overrides in the previous step.
+//  3. Validate — semantic sanity check; on failure a warning is logged
+//     (slog.Warn) and the clamped value is kept. Failing the whole operation
+//     for a suspicious-but-clamped value would be more disruptive than the
+//     misconfiguration itself.
+//
+// Both the filesystem and memory backends call this from GetConfig so the
+// logic lives in one place rather than being duplicated per backend.
 func NormalizeConfig(cfg *core.Config) {
+	cfg.ApplyEnvOverrides()
 	cfg.Core.Normalize()
+	if err := cfg.Validate(); err != nil {
+		slog.Warn("invalid config field", "error", err)
+	}
 }

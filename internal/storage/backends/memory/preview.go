@@ -10,6 +10,8 @@ import (
 
 // GetPreview is a noop stub (Phase 1).
 func (ms *MemoryStorage) GetPreview(ctx context.Context, hash core.Hash, size int) ([]byte, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 	return nil, fmt.Errorf("get preview %s: %w", hash.FullString(), storage.ErrNotFound)
 }
 

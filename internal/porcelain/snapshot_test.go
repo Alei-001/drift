@@ -299,7 +299,10 @@ func (nilChunkerEngine) Metadata() *core.FileMetadata                          {
 // memory. Before the fix, a 500 MB video would be fully buffered.
 func TestChunkFile_NilChunkerLargeFile(t *testing.T) {
 	largeSize := int64(128 * 1024) // 128 KB, above the 64 KB threshold
-	_, err := chunkFile(context.Background(), "bigfile.bin", bytes.NewReader([]byte("x")), nilChunkerEngine{}, largeSize)
+	err := chunkFile(context.Background(), "bigfile.bin", bytes.NewReader([]byte("x")), nilChunkerEngine{}, largeSize, func(*core.Chunk) error {
+		t.Fatal("callback should not be invoked for oversized nil-chunker file")
+		return nil
+	})
 	if err == nil {
 		t.Fatal("expected error for large file with nil chunker, got nil")
 	}
@@ -312,7 +315,11 @@ func TestChunkFile_NilChunkerLargeFile(t *testing.T) {
 // still work through the nil-chunker whole-file path.
 func TestChunkFile_NilChunkerSmallFile(t *testing.T) {
 	data := []byte("hello\nworld\n")
-	chunks, err := chunkFile(context.Background(), "small.txt", bytes.NewReader(data), nilChunkerEngine{}, int64(len(data)))
+	var chunks []*core.Chunk
+	err := chunkFile(context.Background(), "small.txt", bytes.NewReader(data), nilChunkerEngine{}, int64(len(data)), func(c *core.Chunk) error {
+		chunks = append(chunks, c)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("unexpected error for small file: %v", err)
 	}

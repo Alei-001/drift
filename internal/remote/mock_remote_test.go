@@ -2,6 +2,7 @@ package remote
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -62,7 +63,10 @@ func (m *MockRemoteFS) ensureParents(p string) {
 }
 
 // Stat returns metadata for a remote path.
-func (m *MockRemoteFS) Stat(path string) (*RemoteInfo, error) {
+func (m *MockRemoteFS) Stat(ctx context.Context, path string) (*RemoteInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p := m.normalize(path)
@@ -76,7 +80,10 @@ func (m *MockRemoteFS) Stat(path string) (*RemoteInfo, error) {
 }
 
 // Read opens a remote file for reading.
-func (m *MockRemoteFS) Read(path string) (io.ReadCloser, error) {
+func (m *MockRemoteFS) Read(ctx context.Context, path string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p := m.normalize(path)
@@ -88,7 +95,10 @@ func (m *MockRemoteFS) Read(path string) (io.ReadCloser, error) {
 }
 
 // Write uploads a file, creating parent directories as needed.
-func (m *MockRemoteFS) Write(path string, r io.Reader) error {
+func (m *MockRemoteFS) Write(ctx context.Context, path string, r io.Reader) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("read upload: %w", err)
@@ -102,7 +112,10 @@ func (m *MockRemoteFS) Write(path string, r io.Reader) error {
 }
 
 // Remove deletes a remote file. A missing file is not an error.
-func (m *MockRemoteFS) Remove(path string) error {
+func (m *MockRemoteFS) Remove(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p := m.normalize(path)
@@ -111,7 +124,10 @@ func (m *MockRemoteFS) Remove(path string) error {
 }
 
 // List enumerates entries directly under a directory path (non-recursive).
-func (m *MockRemoteFS) List(path string) ([]RemoteInfo, error) {
+func (m *MockRemoteFS) List(ctx context.Context, path string) ([]RemoteInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p := m.normalize(path)
@@ -166,7 +182,10 @@ func (m *MockRemoteFS) List(path string) ([]RemoteInfo, error) {
 }
 
 // MkdirAll creates a directory tree.
-func (m *MockRemoteFS) MkdirAll(path string) error {
+func (m *MockRemoteFS) MkdirAll(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p := m.normalize(path)

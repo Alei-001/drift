@@ -27,7 +27,7 @@ config is per-repo behavior that each machine may customize independently.`,
 		branch, _ := cmd.Flags().GetString("branch")
 
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -41,8 +41,25 @@ config is per-repo behavior that each machine may customize independently.`,
 		if pushDryRun {
 			stats, err := porcelain.PushDryRun(ctx, store, cwd, remoteName, branch, pushAll)
 			if err != nil {
-				statusFailed("Push", err.Error(), "check remote configuration and network connectivity")
+				reportFailed("Push", "push", "push dry-run failed.", "check remote configuration and network connectivity")
 				return ErrSilent
+			}
+			if globalJSON {
+				return outputJSON(JSONEnvelope{
+					Command: "push",
+					Status:  "ok",
+					Data: pushData{
+						Remote:            remoteName,
+						Branch:            branch,
+						All:               pushAll,
+						DryRun:            true,
+						SnapshotsUploaded: stats.SnapshotsUploaded,
+						SnapshotsSkipped:  stats.SnapshotsSkipped,
+						ChunksUploaded:    stats.ChunksUploaded,
+						ChunksSkipped:     stats.ChunksSkipped,
+						RefsUpdated:       stats.RefsUpdated,
+					},
+				})
 			}
 			statusOK("Push (dry run)")
 			fmt.Printf("  snapshots:  %d would upload, %d already present\n", stats.SnapshotsUploaded, stats.SnapshotsSkipped)
@@ -53,10 +70,27 @@ config is per-repo behavior that each machine may customize independently.`,
 
 		result, err := porcelain.PushToRemote(ctx, store, cwd, remoteName, branch, pushAll)
 		if err != nil {
-			statusFailed("Push", err.Error(), "check remote configuration and network connectivity")
-			return ErrSilent
+			reportFailed("Push", "push", "push failed.", "check remote configuration and network connectivity")
+			return silentWrap(err)
 		}
 		stats := result.Stats
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "push",
+				Status:  "ok",
+				Data: pushData{
+					Remote:            remoteName,
+					Branch:            branch,
+					All:               pushAll,
+					SnapshotsUploaded: stats.SnapshotsUploaded,
+					SnapshotsSkipped:  stats.SnapshotsSkipped,
+					ManifestsUploaded: stats.ManifestsUploaded,
+					ChunksUploaded:    stats.ChunksUploaded,
+					ChunksSkipped:     stats.ChunksSkipped,
+					RefsUpdated:       stats.RefsUpdated,
+				},
+			})
+		}
 		statusOK("Pushing to '%s'", remoteName)
 		fmt.Printf("  snapshots:  %d uploaded, %d already present\n", stats.SnapshotsUploaded, stats.SnapshotsSkipped)
 		fmt.Printf("  manifests:  %d uploaded\n", stats.ManifestsUploaded)
@@ -71,4 +105,18 @@ func init() {
 	pushCmd.Flags().BoolVar(&pushAll, "all", false, "push all branches")
 	pushCmd.Flags().BoolVar(&pushDryRun, "dry-run", false, "show what would be pushed without uploading")
 	rootCmd.AddCommand(pushCmd)
+}
+
+// pushData is the JSON payload for a successful drift push.
+type pushData struct {
+	Remote            string `json:"remote"`
+	Branch            string `json:"branch,omitempty"`
+	All               bool   `json:"all,omitempty"`
+	DryRun            bool   `json:"dry_run,omitempty"`
+	SnapshotsUploaded int    `json:"snapshots_uploaded"`
+	SnapshotsSkipped  int    `json:"snapshots_skipped"`
+	ManifestsUploaded int    `json:"manifests_uploaded,omitempty"`
+	ChunksUploaded    int    `json:"chunks_uploaded"`
+	ChunksSkipped     int    `json:"chunks_skipped"`
+	RefsUpdated       int    `json:"refs_updated"`
 }

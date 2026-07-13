@@ -23,9 +23,15 @@ func isVersionRef(s string) bool {
 	if s == "head" {
 		return true
 	}
-	return strings.HasPrefix(s, "id:") ||
+	if strings.HasPrefix(s, "id:") ||
 		strings.HasPrefix(s, "tag:") ||
-		strings.HasPrefix(s, "branch:")
+		strings.HasPrefix(s, "branch:") {
+		return true
+	}
+	// A bare name without "." or "/" (or "\" on Windows) is treated as a
+	// branch ref (e.g. "main", "develop"). Paths like "README.md" or
+	// "src/foo.go" are left for file resolution.
+	return !strings.ContainsAny(s, "./\\")
 }
 
 // Layout constants for showFileList output.
@@ -51,7 +57,7 @@ var showCmd = &cobra.Command{
 	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}

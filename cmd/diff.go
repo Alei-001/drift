@@ -26,7 +26,7 @@ var diffCmd = &cobra.Command{
 	Args: cobra.MaximumNArgs(4),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}

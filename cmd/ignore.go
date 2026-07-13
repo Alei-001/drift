@@ -23,7 +23,7 @@ var ignoreListCmd = &cobra.Command{
 	Long:  "List all patterns currently in .driftignore.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ var ignoreAddCmd = &cobra.Command{
 	Long:  "Add one or more patterns to .driftignore. Duplicates are skipped.",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ var ignoreRemoveCmd = &cobra.Command{
 	Long:  "Remove a single pattern from .driftignore.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}

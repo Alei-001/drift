@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,11 +14,6 @@ import (
 	"github.com/Alei-001/drift/internal/storage"
 	"github.com/Alei-001/drift/internal/util/fsutil"
 	"github.com/zeebo/blake3"
-)
-
-const (
-	chunkHeaderSize          = 1
-	chunkFlagCompressed byte = 0x01
 )
 
 func (fs *FSStorage) chunksDir() string {
@@ -36,7 +32,7 @@ func (fs *FSStorage) HasChunk(ctx context.Context, hash core.Hash) (bool, error)
 		return true, nil
 	}
 	if !os.IsNotExist(err) {
-		return false, fmt.Errorf("stat chunk %x: %w", hash[:8], err)
+		return false, fmt.Errorf("stat chunk %x: %w", hash[:8], mapOSError(err))
 	}
 
 	packNames, err := fs.listPackNames()
@@ -65,19 +61,16 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 	if err == nil {
 		defer f.Close()
 
-		header := make([]byte, chunkHeaderSize)
+		header := make([]byte, storage.ChunkHeaderSize)
 		if _, err := io.ReadFull(f, header); err != nil {
 			return nil, fmt.Errorf("read chunk header %x: %w", hash[:8], storage.ErrCorrupted)
 		}
 
-		compressed := header[0]&chunkFlagCompressed != 0
+		compressed := header[0]&storage.ChunkFlagCompressed != 0
 
 		var data []byte
 		if compressed {
-			if err := fs.zstdDecoder.Reset(f); err != nil {
-				return nil, fmt.Errorf("decode chunk %x: %w", hash[:8], storage.ErrCorrupted)
-			}
-			decoded, err := io.ReadAll(fs.zstdDecoder)
+			decoded, err := fs.decompressFromReader(f)
 			if err != nil {
 				return nil, fmt.Errorf("decode chunk %x: %w", hash[:8], storage.ErrCorrupted)
 			}
@@ -110,7 +103,7 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 		return storage.CloneChunk(ch), nil
 	}
 	if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("open chunk %x: %w", hash[:8], err)
+		return nil, fmt.Errorf("open chunk %x: %w", hash[:8], mapOSError(err))
 	}
 
 	packNames, err := fs.listPackNames()
@@ -135,7 +128,22 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 	return nil, fmt.Errorf("get chunk %x: %w", hash[:8], storage.ErrNotFound)
 }
 
+// PutChunk stores a chunk to disk. The chunk data is verified against its
+// declared hash before persisting, so a caller-supplied mismatch can never
+// reach disk and cause later GetChunk integrity failures. If the chunk
+// already exists (loose or in a pack), PutChunk is a no-op.
+//
+// Writes are not verified by re-reading; on-disk corruption is detected on
+// the subsequent GetChunk via the BLAKE3 integrity check.
 func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
+	// Verify the chunk data matches its declared hash before persisting,
+	// so a caller-supplied mismatch can never reach disk and cause later
+	// GetChunk integrity failures.
+	computed := core.Hash(blake3.Sum256(chunk.Data))
+	if computed != chunk.Hash {
+		return fmt.Errorf("put chunk %x: hash mismatch, expected %s, got %s: %w", chunk.Hash[:8], chunk.Hash.FullString(), computed.FullString(), storage.ErrCorrupted)
+	}
+
 	has, err := fs.HasChunk(ctx, chunk.Hash)
 	if err != nil {
 		return fmt.Errorf("check chunk existence %x: %w", chunk.Hash[:8], err)
@@ -150,25 +158,7 @@ func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 		return fmt.Errorf("mkdir chunks: %w", err)
 	}
 
-	// fs.compression is read without a lock: the porcelain workspace
-	// lock guarantees single-threaded access, and SetCompressionConfig is only
-	// called during initialization (before any data-access method).
-	useCompression := fs.compression
-
-	var payload []byte
-	var flags byte
-	if useCompression {
-		compressed := fs.zstdEncoder.EncodeAll(chunk.Data, nil)
-		payload = make([]byte, 0, chunkHeaderSize+len(compressed))
-		payload = append(payload, chunkFlagCompressed)
-		payload = append(payload, compressed...)
-		flags = chunkFlagCompressed
-	} else {
-		payload = make([]byte, 0, chunkHeaderSize+len(chunk.Data))
-		payload = append(payload, 0x00)
-		payload = append(payload, chunk.Data...)
-		flags = 0x00
-	}
+	payload, flags := fs.buildChunkPayload(chunk.Data, fs.isCompressionEnabled())
 
 	if err := fsutil.WriteFileAtomic(path, payload, fsutil.DefaultFilePerm); err != nil {
 		return fmt.Errorf("write chunk: %w", err)
@@ -181,17 +171,22 @@ func (fs *FSStorage) PutChunk(ctx context.Context, chunk *core.Chunk) error {
 		Flags: core.ChunkFlagNone,
 	}
 	copy(stored.Data, chunk.Data)
-	if flags&chunkFlagCompressed != 0 {
+	if flags&storage.ChunkFlagCompressed != 0 {
 		stored.Flags = core.ChunkFlagCompressed
 	}
 	fs.chunkCache.Add(chunk.Hash, stored)
 	return nil
 }
 
+// DeleteChunk removes a loose chunk from disk and evicts it from the
+// in-memory cache. It is idempotent: a missing file is not an error.
+//
+// DeleteChunk only removes loose chunks; packed chunks are not affected
+// and must be reclaimed via CompactChunks.
 func (fs *FSStorage) DeleteChunk(ctx context.Context, hash core.Hash) error {
 	path := fs.chunkPath(hash)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("delete chunk %x: %w", hash[:8], err)
+		return fmt.Errorf("delete chunk %x: %w", hash[:8], mapOSError(err))
 	}
 	fs.chunkCache.Remove(hash)
 	return nil
@@ -225,10 +220,12 @@ func (fs *FSStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 		rel = filepath.ToSlash(rel)
 		parts := strings.Split(rel, "/")
 		if len(parts) != 2 {
+			slog.Warn("skipping non-chunk file in chunks directory", "path", path)
 			return nil
 		}
 		b, err := hex.DecodeString(parts[0] + parts[1])
 		if err != nil {
+			slog.Warn("skipping chunk file with invalid hex name", "path", path, "error", err)
 			return nil
 		}
 		var h core.Hash

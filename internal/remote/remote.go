@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -20,24 +21,31 @@ var (
 // implement. push/pull logic operates solely against this interface, so
 // adding a new protocol (e.g. S3) only requires implementing it here and
 // registering it in an init() block.
+//
+// Every method takes a context.Context. The underlying protocol libraries
+// (gowebdav, go-smb2) do not yet honor context for in-flight network calls,
+// so implementations check ctx.Err() at entry and return context.Canceled /
+// context.DeadlineExceeded before issuing the request. This lets callers
+// bail out of long batch operations (push/pull loops) without launching new
+// requests, and leaves the interface ready for context-aware libraries.
 type RemoteFS interface {
 	// Stat returns metadata for a remote path, or an error wrapping
 	// os.ErrNotExist when the path does not exist.
-	Stat(path string) (*RemoteInfo, error)
+	Stat(ctx context.Context, path string) (*RemoteInfo, error)
 	// Read opens a remote file for reading. The caller must close the
 	// returned reader. Returns an error wrapping os.ErrNotExist when the
 	// path does not exist.
-	Read(path string) (io.ReadCloser, error)
+	Read(ctx context.Context, path string) (io.ReadCloser, error)
 	// Write uploads a file. Path's parent directories are created if
 	// needed. If the file already exists it is overwritten.
-	Write(path string, r io.Reader) error
+	Write(ctx context.Context, path string, r io.Reader) error
 	// Remove deletes a remote file. A missing file is not an error.
-	Remove(path string) error
+	Remove(ctx context.Context, path string) error
 	// List enumerates entries under a directory path. Returns an empty
 	// slice (not nil) when the directory is empty or does not exist.
-	List(path string) ([]RemoteInfo, error)
+	List(ctx context.Context, path string) ([]RemoteInfo, error)
 	// MkdirAll creates a directory tree, similar to os.MkdirAll.
-	MkdirAll(path string) error
+	MkdirAll(ctx context.Context, path string) error
 	// Close releases protocol-level resources (connections, sessions).
 	// It must be called exactly once when the RemoteFS is no longer needed.
 	Close() error

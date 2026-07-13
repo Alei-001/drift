@@ -1,6 +1,7 @@
 package image
 
 import (
+	"bytes"
 	"encoding/binary"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,14 @@ const (
 	formatBMP  = "bmp"
 	formatTIFF = "tiff"
 )
+
+// minBMPHeaderSize is the minimum header length for a valid BMP file:
+// 14-byte file header + 40-byte BITMAPINFOHEADER (the most common DIB
+// header). Shorter headers cannot represent a standard BMP.
+const minBMPHeaderSize = 54
+
+// pngSignature is the 8-byte PNG magic: \x89PNG\r\n\x1a\n.
+var pngSignature = []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}
 
 var imageExtensions = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
@@ -60,8 +69,8 @@ func detectFormatByMagic(header []byte) string {
 	if len(header) == 0 {
 		return ""
 	}
-	// PNG: \x89PNG\r\n\x1a\n
-	if len(header) >= 4 && header[0] == 0x89 && header[1] == 'P' && header[2] == 'N' && header[3] == 'G' {
+	// PNG: 8-byte signature \x89PNG\r\n\x1a\n
+	if len(header) >= 8 && bytes.Equal(header[:8], pngSignature) {
 		return formatPNG
 	}
 	// JPEG: \xFF\xD8\xFF
@@ -77,11 +86,12 @@ func detectFormatByMagic(header []byte) string {
 		return formatWebP
 	}
 	// BMP: "BM" magic plus a valid DIB header size at offset 14-17.
-	// Requiring the DIB size avoids false positives on text files that
-	// happen to start with "BM" (e.g. "BMW parts..."). Known valid DIB
-	// header sizes: 12 (BITMAPCOREHEADER), 40 (BITMAPINFOHEADER), 52, 56,
-	// 64, 108 (BITMAPV4HEADER), 124 (BITMAPV5HEADER).
-	if len(header) >= 18 && header[0] == 'B' && header[1] == 'M' {
+	// Requiring minBMPHeaderSize and a valid DIB size avoids false positives
+	// on text files that happen to start with "BM" (e.g. "BMW parts...").
+	// Known valid DIB header sizes: 12 (BITMAPCOREHEADER), 40
+	// (BITMAPINFOHEADER), 52, 56, 64, 108 (BITMAPV4HEADER), 124
+	// (BITMAPV5HEADER).
+	if len(header) >= minBMPHeaderSize && header[0] == 'B' && header[1] == 'M' {
 		dibSize := binary.LittleEndian.Uint32(header[14:18])
 		switch dibSize {
 		case 12, 40, 52, 56, 64, 108, 124:

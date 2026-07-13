@@ -26,6 +26,15 @@ const (
 	packNameFormat      = packPrefix + "%08d"
 	packEntrySize       = 45
 	packIndexHeaderSize = 4 + 1 + 4 // magic + version + chunk_count
+	// maxPackEntryLength is the upper bound on a single chunk's stored
+	// length inside a pack file. A pack entry claiming a larger length
+	// indicates a corrupt index and is rejected to prevent OOM from an
+	// attacker-crafted .idx file.
+	maxPackEntryLength = 64 << 20 // 64 MB
+	// maxPackIndexEntries bounds the number of entries we are willing to
+	// read from a .idx file, preventing OOM from a corrupt index header
+	// claiming an absurdly large count.
+	maxPackIndexEntries = 1 << 20 // ~1M entries
 )
 
 // packEntry records where a single chunk lives inside a pack file.
@@ -128,7 +137,7 @@ func (fs *FSStorage) loadPackIndex(name string) (*packIndex, error) {
 	idxPath := fs.packIndexPath(name)
 	data, err := os.ReadFile(idxPath)
 	if err != nil {
-		return nil, fmt.Errorf("read pack index %s: %w", name, err)
+		return nil, fmt.Errorf("read pack index %s: %w", name, mapOSError(err))
 	}
 	if len(data) < packIndexHeaderSize {
 		return nil, fmt.Errorf("pack index %s: file too short: %w", name, storage.ErrCorrupted)
@@ -142,8 +151,13 @@ func (fs *FSStorage) loadPackIndex(name string) (*packIndex, error) {
 	}
 
 	count := binary.BigEndian.Uint32(data[5:9])
-	expectedSize := packIndexHeaderSize + int(count)*packEntrySize
-	if len(data) < expectedSize {
+	if count > maxPackIndexEntries {
+		return nil, fmt.Errorf("pack index %s: entry count %d exceeds max %d: %w", name, count, maxPackIndexEntries, storage.ErrCorrupted)
+	}
+	// Use int64 for expectedSize to avoid 32-bit overflow when count is
+	// large (int is 32 bits on some platforms).
+	expectedSize := int64(packIndexHeaderSize) + int64(count)*int64(packEntrySize)
+	if int64(len(data)) < expectedSize {
 		return nil, fmt.Errorf("pack index %s: file too short for %d entries: %w", name, count, storage.ErrCorrupted)
 	}
 
@@ -159,6 +173,11 @@ func (fs *FSStorage) loadPackIndex(name string) (*packIndex, error) {
 		pos += 4
 		flags := data[pos]
 		pos++
+		// Detect duplicate hashes — a well-formed index never lists the
+		// same hash twice; a duplicate indicates corruption.
+		if _, exists := entries[hash]; exists {
+			return nil, fmt.Errorf("pack index %s: duplicate hash %s: %w", name, hash.FullString(), storage.ErrCorrupted)
+		}
 		entries[hash] = packEntry{offset: offset, length: length, flags: flags}
 	}
 
@@ -195,9 +214,32 @@ func (fs *FSStorage) getPackIndex(name string) (*packIndex, error) {
 // performs BLAKE3 integrity verification against the expected hash, and
 // returns the chunk.
 func (fs *FSStorage) readChunkFromPack(name string, entry packEntry, hash core.Hash) (*core.Chunk, error) {
-	f, err := os.Open(fs.packPath(name))
+	packPath := fs.packPath(name)
+
+	// P2-d / P2-f: validate the entry against the actual pack file size
+	// before allocating a buffer, to prevent OOM from a corrupt index
+	// claiming an absurd length or an offset beyond EOF.
+	stat, err := os.Stat(packPath)
 	if err != nil {
-		return nil, fmt.Errorf("open pack %s: %w", name, err)
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("stat pack %s: pack file missing while index exists: %w", name, storage.ErrCorrupted)
+		}
+		return nil, fmt.Errorf("stat pack %s: %w", name, mapOSError(err))
+	}
+	packFileSize := stat.Size()
+	if entry.length > maxPackEntryLength {
+		return nil, fmt.Errorf("pack %s: entry length %d exceeds max %d: %w", name, entry.length, maxPackEntryLength, storage.ErrCorrupted)
+	}
+	if entry.offset < 0 || entry.offset+int64(entry.length) > packFileSize {
+		return nil, fmt.Errorf("pack %s: entry offset %d length %d exceeds pack size %d: %w", name, entry.offset, entry.length, packFileSize, storage.ErrCorrupted)
+	}
+
+	f, err := os.Open(packPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("open pack %s: pack file missing while index exists: %w", name, storage.ErrCorrupted)
+		}
+		return nil, fmt.Errorf("open pack %s: %w", name, mapOSError(err))
 	}
 	defer f.Close()
 
@@ -212,14 +254,11 @@ func (fs *FSStorage) readChunkFromPack(name string, entry packEntry, hash core.H
 
 	header := buf[0]
 	payload := buf[1:]
-	compressed := header&chunkFlagCompressed != 0
+	compressed := header&storage.ChunkFlagCompressed != 0
 
 	var data []byte
 	if compressed {
-		if err := fs.zstdDecoder.Reset(bytes.NewReader(payload)); err != nil {
-			return nil, fmt.Errorf("decode chunk from pack %s: %w", name, storage.ErrCorrupted)
-		}
-		decoded, err := io.ReadAll(fs.zstdDecoder)
+		decoded, err := fs.decompressFromReader(bytes.NewReader(payload))
 		if err != nil {
 			return nil, fmt.Errorf("decode chunk from pack %s: %w", name, storage.ErrCorrupted)
 		}

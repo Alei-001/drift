@@ -67,11 +67,14 @@
 │  └─────────────┘  └─────────────┘  └─────────────┘              │
 │                          │                                       │
 │           ┌──────────────┼──────────────┐                       │
-│           ▼              ▼              ▼                       │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │  filesystem │  │   memory    │  │  s3/ipfs   │              │
-│  │  (.drift/)  │  │  (测试用)    │  │  (未来)     │              │
-│  └─────────────┘  └─────────────┘  └─────────────┘              │
+│           ▼              ▼                                     │
+│  ┌─────────────┐  ┌─────────────┐                              │
+│  │  filesystem │  │   memory    │                              │
+│  │  (.drift/)  │  │  (测试用)    │                              │
+│  └─────────────┘  └─────────────┘                              │
+│                          │                                       │
+│           remote 同步层 (remote/) ← 独立于 storage，依赖共享常量   │
+│           WebDAV / SMB 协议，对象级内容寻址同步                     │
 ├──────────────────────────────────────────────────────────────────┤
 │                        core 层 (core/)                            │
 │  ┌────────┬────────┬──────────┬─────────┬─────────┬─────────┐  │
@@ -138,7 +141,10 @@ graph TB
     subgraph STORE_IMPL["存储实现"]
         FS["filesystem<br/>.drift/ 目录"]
         Mem["memory<br/>内存"]
-        Remote["remote<br/>S3/IPFS（未来）"]
+    end
+
+    subgraph REMOTE["remote 同步层（独立于 storage）"]
+        RemoteSync["remote<br/>WebDAV/SMB 同步"]
     end
 
     subgraph CORE["core 层"]
@@ -160,8 +166,10 @@ graph TB
     PORCELAIN --> FILETYPE
     PORCELAIN --> CHUNKER
     PORCELAIN --> STORAGE
+    PORCELAIN --> REMOTE
     FILETYPE --> CHUNKER
     STORAGE --> STORE_IMPL
+    REMOTE --> STORAGE
     CHUNKER --> CORE
     PORCELAIN --> CORE
     STORAGE --> CORE
@@ -431,6 +439,8 @@ drift/
 │   │   ├── clone.go                  # 共享克隆工具
 │   │   ├── errors.go                 # 存储层 sentinel errors
 │   │   ├── constants.go              # 存储常量
+│   │   ├── layout.go                 # 共享磁盘布局常量（ChunksDir, SnapshotsDir 等）
+│   │   ├── chunk_format.go           # 共享块线格式常量（ChunkHeaderSize, ChunkFlagCompressed）
 │   │   ├── refname/                  # ref 名校验
 │   │   │   └── refname.go
 │   │   ├── stream/                   # 流式工具（PeekHeader, HashFileContent）
@@ -1191,19 +1201,41 @@ func (fs *FSStorage) PutChunk(chunk *core.Chunk) error {
 
 ### 7.3 敏感文件保护
 
-```go
-// .driftignore 默认模板
-var defaultIgnorePatterns = []string{
-    ".drift/",          // 自身目录
-    ".DS_Store",        // macOS
-    "Thumbs.db",        // Windows
-    "*.tmp",            // 临时文件
-    "*.swp",            // vim 交换文件
-    "~*",               // 备份文件
-    ".env",             // 环境变量
-    "*.key",            // 密钥文件
-    ".git/",            // .git 目录
-}
+`.driftignore` 文件**不会**在 `drift init` 时自动创建（与 git 一致）。用户通过 `drift ignore add <pattern>` 按需添加规则，或手动创建 `.driftignore` 文件。`.drift/` 目录由 `fsutil.Walk` 内置跳过，无需在 `.driftignore` 中声明。
+
+`.driftignore` 支持的 glob 语法（由 `internal/util/glob` 实现）：
+
+| 模式 | 含义 | 示例 |
+|------|------|------|
+| `*` | 单层通配符（不跨越 `/`） | `*.log` 匹配任意 `.log` 文件 |
+| `**` | 递归通配符（跨越 `/`） | `src/**.test.js` 匹配 src 下所有测试文件 |
+| `?` | 单字符通配符 | `?.txt` 匹配 `a.txt` 但不匹配 `ab.txt` |
+| `[...]` | 字符类 | `*.[ch]` 匹配 `.c` 和 `.h` 文件 |
+| `[!...]` | 取反字符类 | `*.[!tmp]` 匹配非 `.tmp` 后缀 |
+| `/` 前缀 | 锚定到仓库根 | `/secret.txt` 仅匹配根目录的 secret.txt |
+| `#` | 注释行 | `# 这是注释` |
+| 空行 | 忽略 | — |
+
+> **模式匹配规则**：不含 `/` 的模式按 basename 匹配（在任意目录层级生效）；含 `/` 的模式按相对路径匹配。路径分隔符统一为 `/`。
+
+推荐添加的忽略规则示例：
+
+```
+# 操作系统生成文件
+.DS_Store
+Thumbs.db
+
+# 临时与备份文件
+*.tmp
+*.swp
+~*
+
+# 敏感文件
+.env
+*.key
+
+# 第三方版本控制
+.git/
 ```
 
 ### 7.4 隐私策略

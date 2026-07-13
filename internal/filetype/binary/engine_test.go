@@ -186,6 +186,20 @@ func TestDiff_NewReaderError(t *testing.T) {
 	}
 }
 
+// TestDiff_NilReader verifies that a nil reader returns an error instead of
+// panicking when io.ReadFull would dereference the nil interface.
+func TestDiff_NilReader(t *testing.T) {
+	engine := NewEngine()
+	data := []byte{0x01}
+
+	if _, err := engine.Diff(context.Background(), "old.bin", nil, "new.bin", bytes.NewReader(data)); err == nil {
+		t.Error("expected error for nil oldReader, got nil")
+	}
+	if _, err := engine.Diff(context.Background(), "old.bin", bytes.NewReader(data), "new.bin", nil); err == nil {
+		t.Error("expected error for nil newReader, got nil")
+	}
+}
+
 // errReader is a Reader that always fails with the given error on Read.
 type errReader struct{ err error }
 

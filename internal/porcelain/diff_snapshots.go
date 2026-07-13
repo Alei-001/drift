@@ -3,7 +3,6 @@ package porcelain
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/filetype"
@@ -31,7 +30,11 @@ func DiffSnapshots(snap1, snap2 *core.Snapshot) FileDiffResult {
 			continue
 		}
 
-		if entry1.Size != entry2.Size || !slices.Equal(entry1.Chunks, entry2.Chunks) {
+		// Compare by file hash (BLAKE3 of chunk-hash concatenation),
+		// consistent with countSnapshotDiff and DiffWorkspaceVsSnapshot.
+		// Hash changes iff size or chunk list changes, so this is
+		// equivalent to comparing (Size, Chunks) but simpler and faster.
+		if entry1.Hash != entry2.Hash {
 			result.Modified = append(result.Modified, entry2.Path)
 		}
 		delete(snap1Files, entry2.Path)
@@ -84,7 +87,7 @@ func DiffFileInSnapshots(ctx context.Context, store storage.Storer, workDir stri
 	if entry1 == nil && entry2 == nil {
 		return ContentDiffResult{Stderr: fmt.Sprintf("  warning: '%s' not found in either snapshot.\n", filePath)}
 	}
-	if entry1.Size == entry2.Size && slices.Equal(entry1.Chunks, entry2.Chunks) {
+	if entry1.Hash == entry2.Hash {
 		return ContentDiffResult{Stdout: "  (no change)\n", Kind: "unchanged"}
 	}
 

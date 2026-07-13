@@ -25,7 +25,7 @@ var undoCmd = &cobra.Command{
 	Long:  "Undo the last save. HEAD moves back to the previous snapshot; the undone snapshot becomes unreachable and will be removed by 'drift gc'.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := getCwd(cmd)
+		cwd, err := getCwd()
 		if err != nil {
 			return err
 		}
@@ -48,14 +48,14 @@ var undoCmd = &cobra.Command{
 			}
 			if errors.Is(err, porcelain.ErrUncommittedChanges) {
 				reportFailed("Undo", "undo", "uncommitted changes would be lost.", "use 'drift save' or 'drift restore' first.")
-				return ErrSilent
+				return silentWrap(err)
 			}
 			return err
 		}
 
 		newHead := resolveSnapshot(ctx, store, "head")
 
-		hint := "the undone snapshot is now unreachable. It will be removed by 'drift gc'."
+		hint := "workspace files were not changed. Use 'drift restore head' to revert files to the current HEAD, or 'drift save' to keep them as a new snapshot. The undone snapshot is now unreachable and will be removed by 'drift gc'."
 
 		if globalJSON {
 			data := undoData{}

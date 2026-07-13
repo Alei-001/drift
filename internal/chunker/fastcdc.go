@@ -52,6 +52,11 @@ func NewFastCDCChunkerWithParams(minSize, avgSize, maxSize int) *FastCDCChunker 
 	}
 }
 
+// maxChunkSizeLimit caps maxSize to prevent uint32 overflow in
+// core.Chunk.Size, which stores chunk length as uint32. 1 GiB is safely
+// within both uint32 and int32 ranges on all platforms.
+const maxChunkSizeLimit = 1 << 30
+
 // clampFastCDCParams normalizes min/avg/max sizes against both the task's
 // clamp rules and the FastCDC library constraints.
 func clampFastCDCParams(minSize, avgSize, maxSize int) (int, int, int) {
@@ -66,6 +71,13 @@ func clampFastCDCParams(minSize, avgSize, maxSize int) (int, int, int) {
 	// maxSize: non-positive or smaller than minSize -> default 512KB.
 	if maxSize <= 0 || maxSize < minSize {
 		maxSize = fastCDCDefaultMaxSize
+	}
+
+	// maxSize must fit in uint32 (core.Chunk.Size is uint32). Cap to
+	// maxChunkSizeLimit to prevent overflow on 64-bit platforms where
+	// int is 64 bits but Chunk.Size is still 32 bits.
+	if maxSize > maxChunkSizeLimit {
+		maxSize = maxChunkSizeLimit
 	}
 
 	// If minSize and maxSize are still inconsistent (minSize >= maxSize,
@@ -133,10 +145,11 @@ func nearestPowerOfTwoBetween(minVal, maxVal int) int {
 }
 
 // Chunk splits r into content-defined chunks using FastCDC. Each chunk is
-// BLAKE3-hashed and zero-length chunks are skipped. The returned slice is
-// empty for an empty reader. The context is checked at each cut point so a
-// cancelled context aborts the chunking loop promptly.
-func (f *FastCDCChunker) Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk, error) {
+// BLAKE3-hashed and zero-length chunks are skipped. fn is invoked for every
+// emitted chunk; if fn returns an error Chunk stops and returns it. The
+// context is checked at each cut point so a cancelled context aborts the
+// chunking loop promptly.
+func (f *FastCDCChunker) Chunk(ctx context.Context, r io.Reader, fn func(*core.Chunk) error) error {
 	// Use "fastcdc-v1.0.0" instead of legacy "fastcdc": the legacy mode
 	// forces hardcoded masks computed for an 8KB NormalSize, which would
 	// skew cut points for our 128KB/256KB/512KB sizes. The v1.0.0 variant
@@ -147,12 +160,10 @@ func (f *FastCDCChunker) Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk,
 		MaxSize:    f.maxSize,
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var chunks []*core.Chunk
-
-	err = ch.Split(func(offset, length uint, chunkData []byte) error {
+	return ch.Split(func(offset, length uint, chunkData []byte) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -173,12 +184,6 @@ func (f *FastCDCChunker) Chunk(ctx context.Context, r io.Reader) ([]*core.Chunk,
 		}
 		copy(chunk.Data, chunkData)
 
-		chunks = append(chunks, chunk)
-		return nil
+		return fn(chunk)
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return chunks, nil
 }

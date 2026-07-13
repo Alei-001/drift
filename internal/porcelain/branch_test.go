@@ -35,7 +35,7 @@ func TestCreateBranch_FromHead(t *testing.T) {
 		Target: targetHash,
 	})
 
-	err := CreateBranch(context.Background(), store, dir, "feature")
+	_, err := CreateBranch(context.Background(), store, dir, "feature")
 	if err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
@@ -53,12 +53,12 @@ func TestCreateBranch_AlreadyExists(t *testing.T) {
 	store := setupBranchStore()
 	dir := t.TempDir()
 
-	err := CreateBranch(context.Background(), store, dir, "feature")
+	_, err := CreateBranch(context.Background(), store, dir, "feature")
 	if err != nil {
 		t.Fatalf("first CreateBranch failed: %v", err)
 	}
 
-	err = CreateBranch(context.Background(), store, dir, "feature")
+	_, err = CreateBranch(context.Background(), store, dir, "feature")
 	if err == nil {
 		t.Fatal("expected error for duplicate branch, got nil")
 	}
@@ -68,17 +68,17 @@ func TestCreateBranch_InvalidName(t *testing.T) {
 	store := setupBranchStore()
 	dir := t.TempDir()
 
-	if err := CreateBranch(context.Background(), store, dir, ""); err == nil {
+	if _, err := CreateBranch(context.Background(), store, dir, ""); err == nil {
 		t.Error("expected error for empty name, got nil")
 	}
 
-	if err := CreateBranch(context.Background(), store, dir, "foo..bar"); err == nil {
+	if _, err := CreateBranch(context.Background(), store, dir, "foo..bar"); err == nil {
 		t.Error("expected error for name with '..', got nil")
 	}
 
 	// Hierarchical branch names (e.g. "feature/foo") follow Git semantics
 	// and are allowed by refname.Validate.
-	if err := CreateBranch(context.Background(), store, dir, "feature/foo"); err != nil {
+	if _, err := CreateBranch(context.Background(), store, dir, "feature/foo"); err != nil {
 		t.Errorf("expected hierarchical name to be allowed, got: %v", err)
 	}
 }
@@ -87,10 +87,10 @@ func TestListBranches(t *testing.T) {
 	store := setupBranchStore()
 	dir := t.TempDir()
 
-	if err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
+	if _, err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
 		t.Fatalf("CreateBranch feature failed: %v", err)
 	}
-	if err := CreateBranch(context.Background(), store, dir, "dev"); err != nil {
+	if _, err := CreateBranch(context.Background(), store, dir, "dev"); err != nil {
 		t.Fatalf("CreateBranch dev failed: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestListBranches(t *testing.T) {
 func TestDeleteBranch_Success(t *testing.T) {
 	store := setupBranchStore()
 	dir := t.TempDir()
-	if err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
+	if _, err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
@@ -189,7 +189,7 @@ func TestDeleteBranch_EmptyName(t *testing.T) {
 func TestRenameBranch_NonCurrent(t *testing.T) {
 	store := setupBranchStore()
 	dir := t.TempDir()
-	if err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
+	if _, err := CreateBranch(context.Background(), store, dir, "feature"); err != nil {
 		t.Fatalf("CreateBranch failed: %v", err)
 	}
 
@@ -547,30 +547,32 @@ func TestWalkSnapshotChain_FullChain(t *testing.T) {
 	store := setupBranchStore()
 
 	// s1 (root) -> s2 -> s3, main tip at s3.
-	h1, h2, h3 := core.Hash{1}, core.Hash{2}, core.Hash{3}
-	s1 := &core.Snapshot{ID: core.SnapshotID{Hash: h1}, Message: "first", Timestamp: 100}
-	s2 := &core.Snapshot{ID: core.SnapshotID{Hash: h2}, PrevID: &core.SnapshotID{Hash: h1}, Message: "second", Timestamp: 200}
-	s3 := &core.Snapshot{ID: core.SnapshotID{Hash: h3}, PrevID: &core.SnapshotID{Hash: h2}, Message: "third", Timestamp: 300}
+	s1 := &core.Snapshot{Message: "first", Timestamp: 100}
+	s1.ID = computeSnapshotID(s1)
+	s2 := &core.Snapshot{PrevID: &core.SnapshotID{Hash: s1.ID.Hash}, Message: "second", Timestamp: 200}
+	s2.ID = computeSnapshotID(s2)
+	s3 := &core.Snapshot{PrevID: &core.SnapshotID{Hash: s2.ID.Hash}, Message: "third", Timestamp: 300}
+	s3.ID = computeSnapshotID(s3)
 	store.PutSnapshot(ctx, s1)
 	store.PutSnapshot(ctx, s2)
 	store.PutSnapshot(ctx, s3)
 
 	// Walk from s3 — should return [s3, s2, s1] in chain order (newest first).
-	summaries, err := WalkSnapshotChain(ctx, store, h3)
+	summaries, err := WalkSnapshotChain(ctx, store, s3.ID.Hash)
 	if err != nil {
 		t.Fatalf("WalkSnapshotChain: %v", err)
 	}
 	if len(summaries) != 3 {
 		t.Fatalf("expected 3 summaries, got %d", len(summaries))
 	}
-	if summaries[0].ID.Hash != h3 {
-		t.Errorf("first: got %x, want 03", summaries[0].ID.Hash)
+	if summaries[0].ID.Hash != s3.ID.Hash {
+		t.Errorf("first: got %x, want %x", summaries[0].ID.Hash, s3.ID.Hash)
 	}
-	if summaries[1].ID.Hash != h2 {
-		t.Errorf("second: got %x, want 02", summaries[1].ID.Hash)
+	if summaries[1].ID.Hash != s2.ID.Hash {
+		t.Errorf("second: got %x, want %x", summaries[1].ID.Hash, s2.ID.Hash)
 	}
-	if summaries[2].ID.Hash != h1 {
-		t.Errorf("third: got %x, want 01", summaries[2].ID.Hash)
+	if summaries[2].ID.Hash != s1.ID.Hash {
+		t.Errorf("third: got %x, want %x", summaries[2].ID.Hash, s1.ID.Hash)
 	}
 }
 
@@ -582,31 +584,34 @@ func TestWalkSnapshotChain_IncludesInheritedCommits(t *testing.T) {
 	//                \-> s4 (feature tip)
 	// Walking from feature tip s4 should return [s4, s2, s1] — the shared
 	// ancestors s2 and s1 are included (git log semantics).
-	h1, h2, h3, h4 := core.Hash{1}, core.Hash{2}, core.Hash{3}, core.Hash{4}
-	s1 := &core.Snapshot{ID: core.SnapshotID{Hash: h1}, Message: "root", Timestamp: 100}
-	s2 := &core.Snapshot{ID: core.SnapshotID{Hash: h2}, PrevID: &core.SnapshotID{Hash: h1}, Message: "shared", Timestamp: 200}
-	s3 := &core.Snapshot{ID: core.SnapshotID{Hash: h3}, PrevID: &core.SnapshotID{Hash: h2}, Message: "main tip", Timestamp: 300}
-	s4 := &core.Snapshot{ID: core.SnapshotID{Hash: h4}, PrevID: &core.SnapshotID{Hash: h2}, Message: "feature tip", Timestamp: 250}
+	s1 := &core.Snapshot{Message: "root", Timestamp: 100}
+	s1.ID = computeSnapshotID(s1)
+	s2 := &core.Snapshot{PrevID: &core.SnapshotID{Hash: s1.ID.Hash}, Message: "shared", Timestamp: 200}
+	s2.ID = computeSnapshotID(s2)
+	s3 := &core.Snapshot{PrevID: &core.SnapshotID{Hash: s2.ID.Hash}, Message: "main tip", Timestamp: 300}
+	s3.ID = computeSnapshotID(s3)
+	s4 := &core.Snapshot{PrevID: &core.SnapshotID{Hash: s2.ID.Hash}, Message: "feature tip", Timestamp: 250}
+	s4.ID = computeSnapshotID(s4)
 	store.PutSnapshot(ctx, s1)
 	store.PutSnapshot(ctx, s2)
 	store.PutSnapshot(ctx, s3)
 	store.PutSnapshot(ctx, s4)
 
-	summaries, err := WalkSnapshotChain(ctx, store, h4)
+	summaries, err := WalkSnapshotChain(ctx, store, s4.ID.Hash)
 	if err != nil {
 		t.Fatalf("WalkSnapshotChain: %v", err)
 	}
 	if len(summaries) != 3 {
 		t.Fatalf("expected 3 summaries (s4, s2, s1), got %d", len(summaries))
 	}
-	if summaries[0].ID.Hash != h4 {
-		t.Errorf("first: got %x, want 04", summaries[0].ID.Hash)
+	if summaries[0].ID.Hash != s4.ID.Hash {
+		t.Errorf("first: got %x, want %x", summaries[0].ID.Hash, s4.ID.Hash)
 	}
-	if summaries[1].ID.Hash != h2 {
-		t.Errorf("second: got %x, want 02 (inherited)", summaries[1].ID.Hash)
+	if summaries[1].ID.Hash != s2.ID.Hash {
+		t.Errorf("second: got %x, want %x (inherited)", summaries[1].ID.Hash, s2.ID.Hash)
 	}
-	if summaries[2].ID.Hash != h1 {
-		t.Errorf("third: got %x, want 01 (inherited)", summaries[2].ID.Hash)
+	if summaries[2].ID.Hash != s1.ID.Hash {
+		t.Errorf("third: got %x, want %x (inherited)", summaries[2].ID.Hash, s1.ID.Hash)
 	}
 }
 
@@ -627,24 +632,23 @@ func TestWalkSnapshotChain_BrokenChain(t *testing.T) {
 	store := setupBranchStore()
 
 	// s3 points to a non-existent prev — walk should stop gracefully.
-	h3 := core.Hash{3}
 	s3 := &core.Snapshot{
-		ID:        core.SnapshotID{Hash: h3},
 		PrevID:    &core.SnapshotID{Hash: core.Hash{0x99}}, // not stored
 		Message:   "orphan",
 		Timestamp: 300,
 	}
+	s3.ID = computeSnapshotID(s3)
 	store.PutSnapshot(ctx, s3)
 
-	summaries, err := WalkSnapshotChain(ctx, store, h3)
+	summaries, err := WalkSnapshotChain(ctx, store, s3.ID.Hash)
 	if err != nil {
 		t.Fatalf("WalkSnapshotChain: %v", err)
 	}
 	if len(summaries) != 1 {
 		t.Fatalf("expected 1 summary (chain breaks at missing prev), got %d", len(summaries))
 	}
-	if summaries[0].ID.Hash != h3 {
-		t.Errorf("got %x, want 03", summaries[0].ID.Hash)
+	if summaries[0].ID.Hash != s3.ID.Hash {
+		t.Errorf("got %x, want %x", summaries[0].ID.Hash, s3.ID.Hash)
 	}
 }
 

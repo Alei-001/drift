@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Alei-001/drift/internal/util/fsutil"
@@ -13,29 +14,47 @@ import (
 
 // workspaceLockData is the JSON payload stored in the workspace lock file.
 type workspaceLockData struct {
-	PID       int   `json:"pid"`
-	Timestamp int64 `json:"timestamp"`
+	PID       int    `json:"pid"`
+	Timestamp int64  `json:"timestamp"`
+	StartTime int64  `json:"start_time,omitempty"`
 }
 
 // lockStaleTimeout is how long a lock may live before being considered stale.
+//
+// A long-running operation that exceeds this timeout will have its lock
+// considered stale by another process, which may then steal it and start a
+// concurrent workspace-modifying operation. Callers that may exceed the
+// timeout should call TouchWorkspaceLock periodically to refresh the
+// timestamp.
 const lockStaleTimeout = 600 * time.Second
 
-// ErrLocked is returned by AcquireWorkspaceLock when the workspace lock is
-// held by another live operation. Callers may test for it with errors.Is.
-var ErrLocked = errors.New("workspace is locked by another operation")
+// acquireLockMu serializes stale-lock replacement within a single process.
+// Without it, two goroutines that both observe the same stale lock would race
+// on the rename-replace step: both would succeed, and the loser would silently
+// own a lock file whose content no longer matches its in-memory data.
+// Cross-process races are not serialized by this mutex; they are mitigated by
+// the small window between the stale check and the rename.
+var acquireLockMu sync.Mutex
 
 // AcquireWorkspaceLock creates a workspace lock file at .drift/workspace.lock.
 // It coordinates access between workspace-modifying commands (switch, restore)
 // and the watch daemon so the daemon does not observe an inconsistent state
 // (files rewritten but index not yet rebuilt) during a transition.
 //
+// This lock is NOT reentrant. Calling AcquireWorkspaceLock from within a
+// function that already holds the lock will return ErrLocked. Use the NoLock
+// variants for internal calls.
+//
 // Acquisition is race-free: the lock file is created atomically with
 // O_CREATE|O_EXCL, so two processes can never both create the lock and then
 // each believe they hold it. If a stale lock exists (older than
-// lockStaleTimeout or whose PID is no longer alive) it is removed and
-// acquisition is retried once. A lock that cannot be parsed (e.g. an empty
-// file being written concurrently) is treated as held rather than stale, so a
-// writer is never clobbered mid-write.
+// lockStaleTimeout or whose PID is no longer alive) it is replaced atomically
+// via a temp-file + os.Rename, eliminating the remove→create window present
+// in the previous remove-then-create approach where another process's freshly
+// acquired lock could be accidentally deleted by our os.Remove before our
+// O_EXCL create ran. A lock that cannot be parsed (e.g. an empty file being
+// written concurrently) is treated as held rather than stale, so a writer is
+// never clobbered mid-write.
 func AcquireWorkspaceLock(cwd string) error {
 	lockPath := filepath.Join(cwd, ".drift", "workspace.lock")
 	if err := os.MkdirAll(filepath.Dir(lockPath), fsutil.DefaultDirPerm); err != nil {
@@ -45,20 +64,27 @@ func AcquireWorkspaceLock(cwd string) error {
 	lock := workspaceLockData{
 		PID:       os.Getpid(),
 		Timestamp: time.Now().Unix(),
+		StartTime: currentProcessStartTime(),
 	}
 	data, err := json.Marshal(&lock)
 	if err != nil {
 		return fmt.Errorf("marshal lock data: %w", err)
 	}
 
-	// Attempt 1: atomic create.
+	// Attempt 1: atomic O_EXCL create. Handles the "no lock exists" case
+	// race-free — two callers can never both observe "the file does not
+	// exist" and then each create it.
 	if err := createLockFile(lockPath, data); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrLocked) {
 		return err
 	}
 
-	// The lock exists. Inspect it to decide whether it can be stolen.
+	// The lock exists. Serialize stale-lock replacement within this process
+	// so two goroutines do not both rename over the same stale lock.
+	acquireLockMu.Lock()
+	defer acquireLockMu.Unlock()
+
 	existing, err := readWorkspaceLock(lockPath)
 	if err != nil {
 		return err
@@ -67,32 +93,11 @@ func AcquireWorkspaceLock(cwd string) error {
 		return fmt.Errorf("workspace is locked by another operation (PID %d): %w", existing.PID, ErrLocked)
 	}
 
-	// Stale lock: capture its identity, remove, then re-verify. Between the
-	// stale check above and the remove below another process may have stolen
-	// the same stale lock and refreshed it; re-reading after the remove
-	// detects that and yields with ErrLocked instead of clobbering a fresh
-	// owner. The O_EXCL create that follows is the final race-free arbiter.
-	stalePID := existing.PID
-	staleTS := existing.Timestamp
-	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale workspace lock: %w", err)
-	}
-	if reRead, err := readWorkspaceLock(lockPath); err == nil {
-		// A lock file exists again after our remove. If it carries different
-		// data than the stale lock we removed, another process has acquired
-		// the workspace — yield with ErrLocked.
-		if reRead.PID != stalePID || reRead.Timestamp != staleTS {
-			return fmt.Errorf("workspace is locked by another operation (PID %d): %w", reRead.PID, ErrLocked)
-		}
-		// Same stale data reappeared (another process is recovering the same
-		// stale lock and re-wrote it, or our remove raced). Remove it once
-		// more so the O_EXCL create can succeed.
-		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove stale workspace lock: %w", err)
-		}
-	}
-	if err := createLockFile(lockPath, data); err != nil {
-		return err
+	// Stale lock: atomically replace it via temp-file + rename. This
+	// eliminates the remove→create window where another process's freshly
+	// acquired lock could be accidentally deleted by our os.Remove.
+	if err := fsutil.WriteFileAtomic(lockPath, data, fsutil.DefaultFilePerm); err != nil {
+		return fmt.Errorf("replace stale workspace lock: %w", err)
 	}
 	return nil
 }
@@ -126,7 +131,7 @@ func createLockFile(lockPath string, data []byte) error {
 
 // readWorkspaceLock reads and parses the lock file. It returns ErrLocked
 // whenever the lock cannot be proven stale — i.e. the file is missing, empty,
-// or unparseable — so that the caller does not remove a lock that may be
+// or unparseable — so that the caller does not replace a lock that may be
 // mid-write.
 func readWorkspaceLock(lockPath string) (*workspaceLockData, error) {
 	data, err := os.ReadFile(lockPath)
@@ -176,11 +181,47 @@ func removeLockIfOwned(lockPath string, pid int) {
 	}
 }
 
+// TouchWorkspaceLock refreshes the workspace lock's timestamp to prevent it
+// from being considered stale during a long-running operation. It should be
+// called periodically by operations that may exceed lockStaleTimeout (e.g.
+// snapshotting a very large workspace).
+//
+// TouchWorkspaceLock is best-effort: if the lock has been removed, stolen by
+// another process, or cannot be parsed, it returns nil without error. The
+// caller is not expected to act on a failed touch — a stale lock will
+// eventually be reclaimed by the timeout in AcquireWorkspaceLock.
+func TouchWorkspaceLock(workDir string) error {
+	lockPath := filepath.Join(workDir, ".drift", "workspace.lock")
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read workspace lock: %w", err)
+	}
+	var lock workspaceLockData
+	if json.Unmarshal(data, &lock) != nil {
+		return nil
+	}
+	if lock.PID != os.Getpid() {
+		return nil
+	}
+	lock.Timestamp = time.Now().Unix()
+	newData, err := json.Marshal(&lock)
+	if err != nil {
+		return fmt.Errorf("marshal lock data: %w", err)
+	}
+	if err := fsutil.WriteFileAtomic(lockPath, newData, fsutil.DefaultFilePerm); err != nil {
+		return fmt.Errorf("rewrite workspace lock: %w", err)
+	}
+	return nil
+}
+
 func isLockStale(lock *workspaceLockData) bool {
 	if time.Since(time.Unix(lock.Timestamp, 0)) > lockStaleTimeout {
 		return true
 	}
-	if lock.PID > 0 && !processExists(lock.PID) {
+	if lock.PID > 0 && !processExistsWithStartTime(lock.PID, lock.StartTime) {
 		return true
 	}
 	return false

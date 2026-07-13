@@ -36,10 +36,18 @@ func parseSemver(s string) (semver, error) {
 		s = s[:i]
 	}
 
+	// Split off the pre-release suffix. A trailing '-' with no identifier
+	// (e.g. "v1.2.3-") is malformed per the SemVer spec; track the dash
+	// position so we can reject that case explicitly below.
+	dashIdx := strings.IndexByte(s, '-')
 	var pre string
-	if i := strings.IndexByte(s, '-'); i >= 0 {
-		pre = s[i+1:]
-		s = s[:i]
+	hasDash := dashIdx >= 0
+	if hasDash {
+		pre = s[dashIdx+1:]
+		s = s[:dashIdx]
+	}
+	if hasDash && pre == "" {
+		return semver{}, errInvalidVersion
 	}
 
 	parts := strings.Split(s, ".")

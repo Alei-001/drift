@@ -18,9 +18,19 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
+// maxDownloadSize caps how many bytes download() will accept from a single
+// asset response. 200 MiB comfortably exceeds the largest prebuilt drift
+// release archive while still bounding exposure to a misbehaving or hostile
+// server that streams indefinitely.
+const maxDownloadSize = 200 * 1024 * 1024 // 200 MiB
+
 // download fetches a URL into a temporary file and returns its path. The
 // caller is responsible for removing the file. When progressWriter is non-nil
 // and the response includes Content-Length, a progress bar is rendered to it.
+//
+// The response body is wrapped in an io.LimitReader so that a server cannot
+// exhaust disk by streaming past maxDownloadSize. An over-sized response is
+// reported as a download error rather than silently truncated.
 func download(ctx context.Context, url string, progressWriter io.Writer) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -56,9 +66,18 @@ func download(ctx context.Context, url string, progressWriter io.Writer) (string
 		defer bar.Finish()
 	}
 
-	if _, err := io.Copy(tmp, reader); err != nil {
+	// Allow up to maxDownloadSize+1 bytes through the limit reader: the
+	// extra byte lets us distinguish an exact-fit response (legal) from
+	// one that overflowed (illegal) by checking n > maxDownloadSize.
+	limited := io.LimitReader(reader, maxDownloadSize+1)
+	n, err := io.Copy(tmp, limited)
+	if err != nil {
 		os.Remove(tmp.Name())
 		return "", &upgradeError{kind: "download", err: err}
+	}
+	if n > maxDownloadSize {
+		os.Remove(tmp.Name())
+		return "", &upgradeError{kind: "download", err: fmt.Errorf("download exceeds maximum size of %d bytes", maxDownloadSize)}
 	}
 	return tmp.Name(), nil
 }
@@ -123,7 +142,16 @@ func extractBinary(archivePath, outPath, goos string) (string, error) {
 	return extractFromTarGz(archivePath, outPath)
 }
 
-// extractFromZip extracts the drift binary from a zip archive.
+// maxExtractedBinarySize bounds how large an extracted drift binary may be.
+// Real release binaries are well under 50 MiB; the 100 MiB ceiling catches
+// a zip-bomb or accidental packaging of a debug build without rejecting
+// legitimate large binaries.
+const maxExtractedBinarySize = 100 * 1024 * 1024 // 100 MiB
+
+// extractFromZip extracts the drift binary from a zip archive. When multiple
+// entries match the binary name (drift/drift.exe), the largest is selected so
+// a stray README or placeholder cannot displace the real binary. The
+// extracted size is capped at maxExtractedBinarySize to reject zip bombs.
 func extractFromZip(archivePath, outPath string) (string, error) {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {
@@ -131,13 +159,28 @@ func extractFromZip(archivePath, outPath string) (string, error) {
 	}
 	defer r.Close()
 
+	var match *zip.File
+	var matchBase string
 	for _, f := range r.File {
 		base := filepath.Base(f.Name)
-		if base == "drift.exe" || base == "drift" {
-			return base, copyZipEntry(f, outPath)
+		if base != "drift.exe" && base != "drift" {
+			continue
+		}
+		// Pick the largest matching entry: a real binary is orders of
+		// magnitude larger than a stray 0-byte placeholder of the same
+		// name. Ties resolve to the first match (deterministic).
+		if match == nil || f.UncompressedSize64 > match.UncompressedSize64 {
+			match = f
+			matchBase = base
 		}
 	}
-	return "", &upgradeError{kind: "extract", err: errors.New("no drift binary in archive")}
+	if match == nil {
+		return "", &upgradeError{kind: "extract", err: errors.New("no drift binary in archive")}
+	}
+	if match.UncompressedSize64 > maxExtractedBinarySize {
+		return "", &upgradeError{kind: "extract", err: fmt.Errorf("extracted binary exceeds maximum size of %d bytes", maxExtractedBinarySize)}
+	}
+	return matchBase, copyZipEntry(match, outPath)
 }
 
 func copyZipEntry(f *zip.File, outPath string) error {
@@ -151,8 +194,17 @@ func copyZipEntry(f *zip.File, outPath string) error {
 		return err
 	}
 	defer dst.Close()
-	_, err = io.Copy(dst, src)
-	return err
+	// Cap the copy at maxExtractedBinarySize+1 so an entry whose declared
+	// UncompressedSize64 was correct (small) but whose actual stream is
+	// huge cannot exhaust disk. The +1 lets us detect overflow exactly.
+	n, err := io.Copy(dst, io.LimitReader(src, maxExtractedBinarySize+1))
+	if err != nil {
+		return err
+	}
+	if n > maxExtractedBinarySize {
+		return fmt.Errorf("extracted entry exceeds maximum size of %d bytes", maxExtractedBinarySize)
+	}
+	return nil
 }
 
 // extractFromTarGz extracts the drift binary from a .tar.gz archive.

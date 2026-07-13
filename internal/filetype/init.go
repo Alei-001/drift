@@ -8,10 +8,17 @@ import (
 )
 
 func init() {
-	// Register engines in order: text → image → video → binary.
-	// Binary is the fallback and will match anything.
+	// Engine registration order matters for heuristic detection: text
+	// must be registered before binary, because binary's
+	// DetectByHeuristic always returns true and would short-circuit text
+	// detection. The order is: text → image → video → binary.
+	// Binary is also set as the explicit fallback so Detect never
+	// returns nil, even if a future change removes binary from the
+	// heuristic layer.
+	binEngine := binary.NewEngine()
 	Register(text.NewEngine())
 	Register(image.NewEngine())
 	Register(video.NewEngine())
-	Register(binary.NewEngine())
+	Register(binEngine)
+	SetFallback(binEngine)
 }

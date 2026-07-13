@@ -30,7 +30,7 @@ func init() {
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	cwd, err := getCwd(cmd)
+	cwd, err := getCwd()
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	report, err := porcelain.VerifyIntegrity(ctx, store, cwd, checkFilter, checkVerbose)
 	if err != nil {
-		reportFailed("Check", "check", err.Error(), "")
+		reportFailed("Check", "check", "integrity check failed.", "")
 		return ErrSilent
 	}
 

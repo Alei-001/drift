@@ -19,7 +19,7 @@ go build -ldflags "-X github.com/Alei-001/drift/internal/version.Version=v0.1.0 
   ./cmd/drift
 ```
 
-No Makefile. No lint config. Pure `go` toolchain. CI via GitHub Actions
+No Makefile. Lint via `.golangci.yml`. Pure `go` toolchain. CI via GitHub Actions
 (`.github/workflows/ci.yml` builds+tests on 3 OSes; `release.yml` publishes
 on version tags via GoReleaser + Inno Setup).
 
@@ -49,12 +49,15 @@ internal/             → business implementation (not importable by external pr
   porcelain/          → business logic (snapshot, branch, restore, lock, watch, gc)
   filetype/           → pluggable type engines (text/image/video/binary), 4 sub-packages
   chunker/            → FastCDC + fixed-size chunking algorithms
-  storage/            → Storer interface + shared clone helpers + constants
+  storage/            → Storer interface + shared clone helpers + layout/wire-format constants
     backends/         → storage implementations (physically separated from interface)
       filesystem/     → on-disk .drift/ implementation (prod)
       memory/         → in-memory implementation (tests; prefer in porcelain tests)
     refname/          → reference name validation
     stream/           → chunk streaming helpers (PeekHeader, HashFileContent, …)
+  remote/             → remote sync (WebDAV/SMB) — depends on storage + core only,
+                       NEVER imports storage/backends/filesystem (uses shared
+                       constants from storage/layout.go + storage/chunk_format.go)
   core/               → domain types (Hash, Chunk, Snapshot, FileEntry, Config, …)
   util/               → fsutil, glob, pathutil, format, cache
   version/            → build-time version metadata + self-upgrade (GitHub Releases)
@@ -68,9 +71,15 @@ import any of the business packages, so the public surface is just the CLI.
 ## Storage backends
 
 - **Memory**: use `storage/backends/memory.NewMemoryStorage()` for porcelain
-  tests (no temp dirs).
+  tests (no temp dirs). Thread-safe (internal `sync.RWMutex`).
 - **Filesystem**: the real on-disk `.drift/` store. Use
   `backends/filesystem.NewFSStorage(root)`.
+
+Shared layout constants (`ChunksDir`, `SnapshotsDir`, …) and chunk wire-format
+constants (`ChunkHeaderSize`, `ChunkFlagCompressed`) live in
+`internal/storage/layout.go` and `internal/storage/chunk_format.go`. Both the
+filesystem backend and the remote sync package reference these — the remote
+package must NOT import `storage/backends/filesystem`.
 
 ## Sentinels (use errors.Is, not string matching)
 
@@ -89,8 +98,10 @@ Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify erro
   unexported fields.
 - Assert against known-good literals, not recomputed values.
 - Naming: `TestFunctionName_Scenario`.
-- `TestAcquireWorkspaceLock_StaleLockToctouRace` is flaky on Windows (TOCTOU race
-  in concurrent lock acquisition). If it fails and nothing else changed, skip it.
+- `TestAcquireWorkspaceLock_StaleLockToctouRace` may fail intermittently (more
+  often on Windows due to filesystem timing). This race is a known logic bug in
+  lock acquisition (see lock.go TOCTOU window), to be fixed by atomic rename
+  replacement — not a platform-specific flake.
 
 ## Code conventions (verifiable rules)
 
@@ -105,7 +116,7 @@ Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify erro
 7. **Defer immediately** after resource acquisition.
 8. **Named constants**: no magic numbers. `core.HeaderPeekSize = 512`,
    `storage.MaxSymRefDepth = 8`, `core.DefaultChunkMinSize` etc.
-9. **File size ≤ 300 lines.** (Generated `*.pb.go` files are exempt.)
+9. **File size ≤ 500 lines, functions ≤ 80 lines.** (Generated `*.pb.go` files are exempt.)
 10. **Dedup rule**: identical code in ≥2 files → extract to nearest shared ancestor.
 11. **ctx.Err()** in every long-running loop.
 12. **Path validation**: all user paths through `pathutil.RelToWorkDir`.

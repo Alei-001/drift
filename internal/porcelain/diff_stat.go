@@ -91,6 +91,11 @@ func ComputeStatWorkspace(ctx context.Context, store storage.Storer, workDir str
 		if info.IsDir() {
 			return nil
 		}
+		// Skip symlinks: they are not tracked by snapshots and would
+		// always appear as "added" in the stat output.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 		rel, relErr := pathutil.Rel(workDir, path)
 		if relErr != nil {
 			return nil
@@ -125,9 +130,22 @@ func ComputeStatWorkspace(ctx context.Context, store storage.Storer, workDir str
 	return stats, nil
 }
 
+// statLargeFileThreshold is the maximum total file size for which
+// computeSnapFileStat / computeWorkFileStat will buffer chunk data in memory
+// to run a text diff. Files larger than this are reported as binary (size-
+// only comparison) to avoid OOM on large text or binary files.
+const statLargeFileThreshold = 10 * 1024 * 1024 // 10 MB
+
 // computeSnapFileStat computes insertions/deletions for a file between two
-// snapshot entries. Returns isBinary=true for non-text files or read errors.
+// snapshot entries. Returns isBinary=true for non-text files, read errors,
+// or files larger than statLargeFileThreshold (to avoid OOM).
 func computeSnapFileStat(ctx context.Context, store storage.Storer, e1, e2 *core.FileEntry) (ins, del int, isBinary bool) {
+	// Degrade to binary for large files: reading all chunks into memory
+	// for a text diff would risk OOM on files like multi-hundred-MB logs.
+	if (e1 != nil && e1.Size > statLargeFileThreshold) ||
+		(e2 != nil && e2.Size > statLargeFileThreshold) {
+		return 0, 0, true
+	}
 	var c1, c2 []byte
 	if e1 != nil {
 		data, err := readAllChunks(ctx, store, e1.Chunks)
@@ -169,8 +187,14 @@ func computeSnapFileStat(ctx context.Context, store storage.Storer, e1, e2 *core
 }
 
 // computeWorkFileStat computes insertions/deletions for a workspace file vs
-// a snapshot entry.
+// a snapshot entry. Returns isBinary=true for non-text files, read errors,
+// or files larger than statLargeFileThreshold (to avoid OOM).
 func computeWorkFileStat(ctx context.Context, store storage.Storer, workPath string, e1 *core.FileEntry) (ins, del int, isBinary bool) {
+	// Degrade to binary for large files: reading all chunks and the
+	// workspace file into memory would risk OOM.
+	if e1.Size > statLargeFileThreshold {
+		return 0, 0, true
+	}
 	c1, err := readAllChunks(ctx, store, e1.Chunks)
 	if err != nil {
 		return 0, 0, true
