@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/storage"
@@ -25,7 +26,13 @@ const defaultConcurrency = 8
 // (typically from RemoteConfig.Options["concurrency"] in the porcelain
 // layer). It is read once at the start of each transfer loop, so changing
 // it during an in-flight push/pull has no effect on that operation.
-var concurrency = defaultConcurrency
+// Access is atomic because SetConcurrency may be called from a different
+// goroutine than the transfer loops that read it.
+var concurrency atomic.Int32
+
+func init() {
+	concurrency.Store(int32(defaultConcurrency))
+}
 
 // SetConcurrency overrides the worker count for push/pull chunk transfers.
 // It must be called before Push/Pull. A non-positive value falls back to the
@@ -34,9 +41,9 @@ var concurrency = defaultConcurrency
 // every Push/Pull signature.
 func SetConcurrency(n int) {
 	if n > 0 {
-		concurrency = n
+		concurrency.Store(int32(n))
 	} else {
-		concurrency = defaultConcurrency
+		concurrency.Store(int32(defaultConcurrency))
 	}
 }
 
@@ -431,7 +438,7 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 	bar := progressbar.Default(int64(len(toUpload)), "chunks push")
 	var mu sync.Mutex
 	var firstErr error
-	sem := make(chan struct{}, concurrency)
+	sem := make(chan struct{}, int(concurrency.Load()))
 	var wg sync.WaitGroup
 	for _, ch := range toUpload {
 		if err := ctx.Err(); err != nil {
@@ -503,7 +510,7 @@ func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 	bar := progressbar.Default(int64(len(toDownload)), "chunks pull")
 	var mu sync.Mutex
 	var firstErr error
-	sem := make(chan struct{}, concurrency)
+	sem := make(chan struct{}, int(concurrency.Load()))
 	var wg sync.WaitGroup
 	for _, ch := range toDownload {
 		if err := ctx.Err(); err != nil {

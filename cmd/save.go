@@ -27,10 +27,9 @@ var saveCmd = &cobra.Command{
 			return err
 		}
 
-		store, cfg, err := porcelain.OpenProject(cwd)
+		store, cfg, err := openProjectOrReport("Save", "save", cwd)
 		if err != nil {
-			reportFailed("Save", "save", "not a drift repository.", "use 'drift init' to create one.")
-			return ErrSilent
+			return err
 		}
 		defer store.Close()
 

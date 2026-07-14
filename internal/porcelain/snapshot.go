@@ -125,9 +125,14 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	var orderedPaths []string
 	var tasks []fileTask
 
+	var touchCounter int
 	for _, f := range workspaceFiles {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		touchCounter++
+		if touchCounter%500 == 0 {
+			_ = TouchWorkspaceLock(workDir)
 		}
 		relPath, err := pathutil.Rel(workDir, f.path)
 		if err != nil {
@@ -159,6 +164,24 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	// Concurrent processing of changed files using a worker pool sized
 	// to runtime.NumCPU(). Each task opens its own file and stores chunks
 	// to content-addressed paths, so no locking is needed.
+	// Touch the workspace lock periodically during the potentially
+	// long-running chunking phase so the lock is not considered stale
+	// by a concurrent operation (lockStaleTimeout is 10 minutes).
+	touchDone := make(chan struct{})
+	defer close(touchDone)
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_ = TouchWorkspaceLock(workDir)
+			case <-touchDone:
+				return
+			}
+		}
+	}()
+
 	processedEntries, err := chunkFilesConcurrent(ctx, store, tasks, bar)
 	if err != nil {
 		return nil, err

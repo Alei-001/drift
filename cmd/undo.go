@@ -30,10 +30,9 @@ var undoCmd = &cobra.Command{
 			return err
 		}
 
-		store, cfg, err := porcelain.OpenProject(cwd)
+		store, cfg, err := openProjectOrReport("Undo", "undo", cwd)
 		if err != nil {
-			reportFailed("Undo", "undo", "not a drift repository.", "use 'drift init' to create one.")
-			return ErrSilent
+			return err
 		}
 		defer store.Close()
 

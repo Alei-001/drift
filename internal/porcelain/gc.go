@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -242,6 +243,7 @@ func CollectGarbage(ctx context.Context, store storage.Storer, workDir string, d
 		} else {
 			f, err := store.GetSnapshot(ctx, snap.ID)
 			if err != nil {
+				slog.Warn("failed to load snapshot for chunk reachability, skipping", "snapshot", snap.ID.Hash.FullString(), "error", err)
 				continue
 			}
 			full = f

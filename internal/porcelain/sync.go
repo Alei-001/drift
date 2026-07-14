@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/remote"
@@ -41,6 +42,11 @@ func resolveRemoteConfigWithWarn(workDir, remoteName string) (remote.RemoteConfi
 	cfg, err := resolveRemoteConfig(workDir, remoteName)
 	if err != nil {
 		return remote.RemoteConfig{}, err
+	}
+	if v, ok := cfg.Options["concurrency"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			remote.SetConcurrency(n)
+		}
 	}
 	if remote.IsInsecureScheme(cfg) {
 		slog.Warn("remote URL uses insecure http scheme; credentials are sent in cleartext",

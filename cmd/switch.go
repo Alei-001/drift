@@ -41,14 +41,14 @@ var switchCmd = &cobra.Command{
 			}
 			if errors.Is(err, porcelain.ErrBranchNotFound) {
 				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch list' to list existing branches.")
-				return ErrSilent
+				return silentWrap(err)
 			}
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
 				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
 				return silentWrap(err)
 			}
 			reportFailed("Switch", "switch", "could not switch branch.", "")
-			return ErrSilent
+			return silentWrap(err)
 		}
 
 		if globalJSON {

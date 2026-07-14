@@ -22,8 +22,10 @@ func init() {
 // The underlying *gowebdav.Client is safe for concurrent use.
 type WebDAVFS struct {
 	client *gowebdav.Client
-	// rootPath is the base path on the WebDAV server (the path component
-	// of the configured URL). All operations are relative to this root.
+	// rootPath is the default path returned by resolve for empty inputs.
+	// gowebdav's NewClient receives the full endpoint URL and uses its path
+	// component as the base for all requests, so "/" is correct here —
+	// operations are already scoped to the URL's path by gowebdav.
 	rootPath string
 }
 

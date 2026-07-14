@@ -42,6 +42,7 @@ func (fs *FSStorage) HasChunk(ctx context.Context, hash core.Hash) (bool, error)
 	for _, name := range packNames {
 		idx, err := fs.getPackIndex(name)
 		if err != nil {
+			slog.Warn("failed to read pack index, skipping", "pack", name, "error", err)
 			continue
 		}
 		if _, ok := idx.entries[hash]; ok {
@@ -113,6 +114,7 @@ func (fs *FSStorage) GetChunk(ctx context.Context, hash core.Hash) (*core.Chunk,
 	for _, name := range packNames {
 		idx, err := fs.getPackIndex(name)
 		if err != nil {
+			slog.Warn("failed to read pack index, skipping", "pack", name, "error", err)
 			continue
 		}
 		if entry, ok := idx.entries[hash]; ok {
@@ -250,6 +252,7 @@ func (fs *FSStorage) ListChunks(ctx context.Context) ([]core.Hash, error) {
 	for _, name := range packNames {
 		idx, err := fs.getPackIndex(name)
 		if err != nil {
+			slog.Warn("failed to read pack index, skipping", "pack", name, "error", err)
 			continue
 		}
 		for h := range idx.entries {

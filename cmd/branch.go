@@ -108,7 +108,7 @@ var branchCreateCmd = &cobra.Command{
 				return silentWrap(err)
 			}
 			reportFailed("Branch", "branch", "could not create branch.", "")
-			return ErrSilent
+			return silentWrap(err)
 		}
 		sid := "no commits yet"
 		if !tipID.Hash.IsZero() {
