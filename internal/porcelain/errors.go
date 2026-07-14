@@ -68,4 +68,10 @@ var (
 	// lock is held by another live operation. Callers may test for it
 	// with errors.Is.
 	ErrLocked = errors.New("workspace is locked by another operation")
+
+	// ErrLockLost is returned by TouchWorkspaceLock when the lock has
+	// been stolen by another process during a long-running operation.
+	// The caller MUST abort immediately: continuing to modify the store
+	// while another process holds the lock will cause corruption.
+	ErrLockLost = errors.New("workspace lock lost to another process")
 )

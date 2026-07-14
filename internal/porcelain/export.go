@@ -51,7 +51,20 @@ func ExportSnapshot(ctx context.Context, store storage.Storer, snapID core.Snaps
 			return nil, err
 		}
 
-		zipPath := filepath.ToSlash(entry.Path)
+		// Sanitize the zip entry path to prevent zip-slip: a malicious
+		// snapshot with entry.Path = "../../etc/cron.d/evil" would embed
+		// a path-traversal entry in the zip, which naive extractors
+		// (including some server-side pipelines) may follow to write
+		// outside the extraction directory. Strip leading "../", "./",
+		// and "/" so the entry is always relative to the zip root.
+		zipPath := filepath.ToSlash(filepath.Clean(entry.Path))
+		zipPath = strings.TrimPrefix(zipPath, "../")
+		zipPath = strings.TrimPrefix(zipPath, "./")
+		zipPath = strings.TrimPrefix(zipPath, "/")
+		if zipPath == "" || strings.HasPrefix(zipPath, "../") {
+			slog.Warn("skipping zip entry with escaping path", "path", entry.Path)
+			continue
+		}
 
 		if entry.Mode.IsDir() {
 			if !strings.HasSuffix(zipPath, "/") {
@@ -73,6 +86,9 @@ func ExportSnapshot(ctx context.Context, store storage.Storer, snapID core.Snaps
 			Method: zip.Deflate,
 		}
 		perm := os.FileMode(entry.Mode & 0o777)
+		// Mask group/other write bits (umask 0o022 semantics) for
+		// consistency with restore/import.
+		perm &^= 0o022
 		if perm == 0 {
 			perm = 0644
 		}

@@ -85,8 +85,8 @@ Error: <错误描述>
 
 | 类型 | 命令 | 输出特点 |
 |------|------|---------|
-| 执行 | init, save, restore, branch, switch, ignore, tag, undo | 状态行 + 文件列表 + 总结 |
-| 查询 | log, show, status, diff, check, config, version | 状态行 + 查询结果 + 总结 |
+| 执行 | init, save, restore, export, import, branch, switch, ignore, tag, undo, clone | 状态行 + 文件列表 + 总结 |
+| 查询 | log, show, status, diff, check, config, version, ls-remote | 状态行 + 查询结果 + 总结 |
 | 驻留 | watch | 状态行 + 实时日志流 + 结束总结 |
 | 工具 | upgrade | 状态行 + 升级摘要 |
 
@@ -122,6 +122,8 @@ drift
 ├── status          查看变更情况
 ├── diff            比较差异
 ├── restore         恢复文件到指定快照（自动备份）
+├── export          导出快照为 zip 归档
+├── import          从其他分支导入单个文件到当前工作区
 ├── branch          分支管理（list/create/delete/rename 子命令）
 ├── switch          切换分支
 ├── tag             标签管理（list/add/delete/rename 子命令）
@@ -130,9 +132,11 @@ drift
 ├── check           校验数据完整性
 ├── gc              回收无引用的快照与块
 ├── config          配置管理（get/set/list）
-├── remote          管理远程存储后端（add/remove/list/set-url/test）
+├── remote          管理远程存储后端（add/remove/list/rename/set-url/show/test）
 ├── push            上传本地对象到远程（快照/块/refs）
 ├── pull            下载远程对象到本地（快照/块/refs）
+├── clone           克隆远程仓库到本地新目录
+├── ls-remote       列出远程仓库的 refs（不下载对象）
 ├── version         查看版本与构建信息
 ├── upgrade         自升级到最新发布版
 └── help            帮助信息
@@ -784,6 +788,103 @@ Error: --no-backup is only allowed for single-file restore.
 
 ---
 
+### `drift export`
+
+```
+drift export <version> [-o <path>]
+```
+
+将指定快照的所有文件导出为 zip 归档，便于把某个版本分享给未安装 drift 的人。
+
+`<version>` 接受与其他命令一致的版本引用语法：`head`、`id:<前缀>`、`tag:<名称>`、`branch:<名称>`、`<裸名>`。
+
+选项：
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `-o, --output` | `drift-export-<short-id>.zip` | 输出 zip 文件路径 |
+
+示例：
+
+```
+drift export head
+drift export id:12ab
+drift export tag:submission -o release.zip
+drift export head -o /tmp/snapshot-12ab.zip
+```
+
+Output：
+
+```
+>>> Exported [ok]
+
+  /home/me/release.zip
+
+  3 files, 67.6 KB
+```
+
+Error — 快照不存在：
+
+```
+>>> Export [failed]
+Error: snapshot 'id:9f1e' not found.
+  hint: use 'drift log' to list available snapshots.
+```
+
+- 文件按 chunk 流式写入 zip，峰值内存取决于最大分块而非最大文件
+- 输出路径的父目录不存在时自动创建；目标文件已存在时覆盖
+- 目录条目保留，文件权限（Unix mode）一并写入 zip
+
+---
+
+### `drift import`
+
+```
+drift import <branch> <file>
+```
+
+从其他分支的最新快照中导入单个文件到当前工作区。这是一种非合并的文件级 cherry-pick：不影响其他工作区文件、不移动 HEAD、不创建快照。适用于把实验分支中的某个文件拿到当前分支而无需切换分支。
+
+导入后请执行 `drift save` 将变更记录为新快照。
+
+示例：
+
+```
+drift import dev chapter3.md
+drift import feature assets/cover.png
+```
+
+Output：
+
+```
+>>> Imported [ok]
+
+  chapter3.md  (from branch dev, 45.2 KB)
+
+  1 file imported. Use 'drift save' to record this change.
+```
+
+Error — 分支不存在：
+
+```
+>>> Import [failed]
+Error: import failed.
+  hint: use 'drift branch list' to see available branches.
+```
+
+Error — 文件不在分支中：
+
+```
+>>> Import [failed]
+Error: import failed.
+  hint: use 'drift show branch:dev' to list files in this branch.
+```
+
+- 写入工作区后同步更新本地索引，使下次 `save` 将其视为未变更（除非用户再次修改）
+- 工作区锁在导入期间持有，避免与 `save`/`restore` 并发冲突
+
+---
+
 ### `drift branch`
 
 ```
@@ -949,7 +1050,7 @@ Error: --no-autosave requires a clean working tree.
 
 ```
 drift tag list                                 列出所有 tag
-drift tag add <name> <snapshot-id>                 给已有快照打 tag
+drift tag add <name> [<version>]               给已有快照打 tag（默认 head）
 drift tag delete <name>                        删除 tag
 drift tag rename <old-name> <new-name>         重命名 tag
 
@@ -957,6 +1058,7 @@ drift tag rename <old-name> <new-name>         重命名 tag
   drift tag list
   drift tag add submission id:9f1e
   drift tag add 交稿v1 id:12ab                 # 中文 tag 名
+  drift tag add latest                          # 省略 version，默认打在 head
   drift tag delete submission
   drift tag rename v1 final-v1
 ```
@@ -1387,14 +1489,16 @@ Error: unknown config key 'chunk.min_size'.
 
 ```
 drift remote add <name> [--type webdav|smb] [--url <u>] [--user <u>] [--password <p>]
-                         [--no-save-password] [--option key=value]...
+                         [--password-stdin] [--no-save-password] [--option key=value]...
 drift remote remove <name>
 drift remote list
+drift remote rename <old-name> <new-name>
 drift remote set-url <name> <new-url>
+drift remote show <name>
 drift remote test <name>
 ```
 
-管理远程存储后端。`add` 在缺少 `--url` 或 `--user` 时进入交互模式（TTY 提示输入，密码隐式输入，SMB 额外询问 domain）。密码默认保存到用户级 `credentials.json`，`--no-save-password` 跳过保存（每次 push/pull 时提示输入）。
+管理远程存储后端。`add` 在缺少 `--url` 或 `--user` 时进入交互模式（TTY 提示输入，密码隐式输入，SMB 额外询问 domain）。密码默认保存到用户级 `credentials.json`，`--no-save-password` 跳过保存（每次 push/pull 时提示输入）。`--password-stdin` 从标准输入读取密码，优先级高于 `--password`，适用于自动化脚本与管道。
 
 选项（仅 `add`）：
 
@@ -1404,6 +1508,7 @@ drift remote test <name>
 | `--url` | （必填） | 远程 URL |
 | `--user` | （必填） | 用户名 |
 | `--password` | `""` | 密码；为空时交互提示 |
+| `--password-stdin` | `false` | 从 stdin 读取密码（用于自动化/脚本） |
 | `--no-save-password` | `false` | 不保存密码到 credentials.json |
 | `--option` | — | 协议特定字段，`key=value`，可重复（如 SMB 的 `domain=WORKGROUP`） |
 
@@ -1413,7 +1518,9 @@ drift remote test <name>
 drift remote add origin --type webdav --url https://dav.example.com/dav --user me
 drift remote add nas --type smb --url smb://nas.local/share --user me --option domain=WORKGROUP
 drift remote list
+drift remote rename old-backup archive
 drift remote set-url origin https://new.dav.example.com/dav
+drift remote show origin
 drift remote test origin
 drift remote remove old-backup
 ```
@@ -1462,6 +1569,22 @@ Output — `test`（成功）：
 >>> Remote "origin" reachable [ok]
 ```
 
+Output — `rename`：
+
+```
+Remote "old-backup" renamed to "archive"
+```
+
+Output — `show`：
+
+```
+  name:     origin
+  type:     webdav
+  url:      https://dav.example.com/dav
+  user:     me
+  option:   domain=WORKGROUP
+```
+
 Error — 远程不存在：
 
 ```
@@ -1480,32 +1603,44 @@ Error — 远程已存在：
 remote "origin" already exists; use 'drift remote set-url' to update
 ```
 
+Error — `rename` 时新名已存在：
+
+```
+remote "archive" already exists
+  hint: use a different name or remove the existing remote first.
+```
+
 - `remove` 不删除凭据（凭据可能被其他仓库复用）
 - `set-url` 检测 host 变化并告警，提示用户可能需要重新配置密码
 - `test` 通过 `List(".")` 验证连通性，覆盖 URL/凭据/网络三个失败维度
+- `rename` 仅改 remote 名，不移动凭据（凭据按 host+user 匹配，与 remote 名无关）
+- `show` 输出单个 remote 的完整配置（含协议特定 options），但隐藏 `_password` 等内部字段
 
 ---
 
 ### `drift push`
 
 ```
-drift push <remote> [--branch <name>] [--dry-run]
+drift push <remote> [--branch <name>] [--all] [--dry-run]
 ```
 
-上传本地对象（snapshots / manifests / chunks / refs）到远程。已存在于远程的对象跳过；refs 分叉（同名不同目标）时报错，提示先 pull。HEAD 和 config 不上传。
+上传本地对象（snapshots / manifests / chunks / refs）到远程。默认只推送当前分支；`--all` 推送所有分支。已存在于远程的对象跳过；refs 分叉（同名不同目标）时报错，提示先 pull。HEAD 和 config 不上传。
 
 选项：
 
 | 选项 | 默认 | 说明 |
 |------|------|------|
-| `--branch` / `-b` | `""`（全仓库） | 只推送指定分支链上的快照、chunk 及该分支 ref |
-| `--dry-run` | `false` | 预览将推送的内容（**当前未实现，传入会报错**） |
+| `--branch` / `-b` | `""`（当前分支） | 只推送指定分支链上的快照、chunk 及该分支 ref |
+| `--all` | `false` | 推送所有分支（不只是当前分支） |
+| `--dry-run` | `false` | 预览将推送的内容（不实际上传） |
 
 示例：
 
 ```
 drift push origin
 drift push origin --branch main
+drift push origin --all
+drift push origin --dry-run
 ```
 
 Output — 正常：
@@ -1518,18 +1653,21 @@ Output — 正常：
   refs:       2 updated
 ```
 
+Output — `--dry-run`：
+
+```
+>>> Push (dry run) [ok]
+  snapshots:  3 would upload, 1 already present
+  chunks:     27 would upload, 5 already present
+  refs:       2 would update
+```
+
 Error — 分叉（需先 pull）：
 
 ```
 >>> Push [failed]
 Error: ...
   hint: check remote configuration and network connectivity
-```
-
-Error — `--dry-run` 未实现：
-
-```
-dry-run mode is not yet implemented; omit --dry-run to push for real.
 ```
 
 - **refs 快进判定**：`isAncestor()` 沿 PrevID 链判断目标差异是快进（祖先关系）还是真正分叉。快进允许覆盖远程 ref；零 hash 目标（新仓库）始终快进。
@@ -1540,23 +1678,28 @@ dry-run mode is not yet implemented; omit --dry-run to push for real.
 ### `drift pull`
 
 ```
-drift pull <remote> [--branch <name>] [--dry-run]
+drift pull <remote> [--branch <name>] [--all] [--dry-run] [--restore]
 ```
 
-下载远程对象到本地。已存在本地对象跳过；分叉 refs 保留本地、远程版本另存为 `<name>.remote`；若当前分支 tip 前进，本地索引重建。HEAD 和 config 不下载；pull 不修改工作区文件——如需更新文件，pull 后执行 `drift restore head`。
+下载远程对象到本地。默认只拉取当前分支；`--all` 拉取所有分支。已存在本地对象跳过；分叉 refs 保留本地、远程版本另存为 `<name>.remote`；若当前分支 tip 前进，本地索引重建。HEAD 和 config 不下载。默认不修改工作区文件——如需更新文件，pull 后执行 `drift restore head`，或使用 `--restore` 让 pull 在分支 tip 前进后自动恢复工作区到最新快照。
 
 选项：
 
 | 选项 | 默认 | 说明 |
 |------|------|------|
-| `--branch` / `-b` | `""`（全仓库） | 只拉取指定分支链 |
-| `--dry-run` | `false` | 预览将拉取的内容（**当前未实现，传入会报错**） |
+| `--branch` / `-b` | `""`（当前分支） | 只拉取指定分支链 |
+| `--all` | `false` | 拉取所有分支（不只是当前分支） |
+| `--dry-run` | `false` | 预览将拉取的内容（不实际下载） |
+| `--restore` | `false` | pull 后自动恢复工作区文件（仅当分支 tip 前进时生效） |
 
 示例：
 
 ```
 drift pull origin
 drift pull origin --branch main
+drift pull origin --all
+drift pull origin --restore
+drift pull origin --dry-run
 ```
 
 Output — 正常（无 tip 前进）：
@@ -1580,14 +1723,132 @@ Output — 当前分支 tip 前进：
         run 'drift restore head' to update your files.
 ```
 
-Error — `--dry-run` 未实现：
+Output — `--restore`（tip 前进后自动恢复工作区）：
 
 ```
-dry-run mode is not yet implemented; omit --dry-run to pull for real.
+>>> Pulling from 'origin' [ok]
+  snapshots:  2 downloaded, 0 already present
+  chunks:     18 downloaded, 0 already present
+  refs:       1 updated, 0 diverged (saved as .remote)
+  index:      rebuilt (branch 'main' tip advanced)
+>>> Working directory restored [ok]
+```
+
+Output — `--dry-run`：
+
+```
+>>> Pull (dry run) [ok]
+  snapshots:  3 would download, 1 already present
+  chunks:     27 would download, 5 already present
+  refs:       2 would update, 0 diverged
 ```
 
 - 分叉 refs 显示 `N diverged (saved as .remote)`，用户可检查 `.remote` 版本后决定如何处理（如新建分支接住远程历史）
 - `BranchTipChanged` 存储完整 ref 名（含 `heads/` 前缀），输出时剥离前缀以提升可读性
+- `--restore` 仅在当前分支 tip 前进（索引重建）时触发恢复；恢复失败时输出 warning 并提示手动 `drift restore head`
+
+---
+
+### `drift clone`
+
+```
+drift clone <url> [<directory>] [--type webdav|smb] [--user <u>] [--password <p>] [--password-stdin]
+```
+
+从远程仓库克隆到本地新目录，等价于：`drift init <dir> && drift remote add origin <url> && drift pull origin --all`。
+
+未指定 `<directory>` 时，取 URL 路径的最后一段作为目录名。克隆完成后当前分支为远程的 HEAD 分支。
+
+选项：
+
+| 选项 | 默认 | 说明 |
+|------|------|------|
+| `--type` | `webdav` | 协议类型（`webdav` / `smb`） |
+| `--user` | `""` | 远程用户名 |
+| `--password` | `""` | 远程密码；建议改用 `--password-stdin` |
+| `--password-stdin` | `false` | 从 stdin 读取密码（用于自动化/脚本） |
+
+示例：
+
+```
+drift clone https://dav.example.com/dav/my-novel
+drift clone https://dav.example.com/dav/my-novel ~/Documents/my-novel
+drift clone smb://nas.local/share --type smb --user me
+echo "$PASS" | drift clone https://dav.example.com/dav/repo --user me --password-stdin
+```
+
+Output：
+
+```
+>>> Cloned into 'my-novel' [ok]
+  snapshots:  3
+  branches:   2
+  tags:       1
+  branch:     main
+```
+
+Output — 未保存密码（warning 输出到 stderr）：
+
+```
+>>> Cloned into 'my-novel' [ok]
+  snapshots:  3
+  branches:   2
+  tags:       1
+  branch:     main
+  warning: password was not saved; provide credentials on next push/pull.
+```
+
+Error — 克隆失败：
+
+```
+>>> Clone [failed]
+Error: clone failed.
+  hint: check the remote URL and network connectivity
+```
+
+- 克隆自动注册名为 `origin` 的 remote；密码非空时保存到用户级 `credentials.json`
+- `--password-stdin` 优先级高于 `--password`；使用 `--password` 时会输出安全警告（明文密码在进程列表可见）
+
+---
+
+### `drift ls-remote`
+
+```
+drift ls-remote <remote>
+```
+
+列出远程仓库的所有 refs（分支与标签），不下载任何对象。用于在 pull/clone 前查看远程有哪些分支与标签。
+
+示例：
+
+```
+drift ls-remote origin
+```
+
+Output：
+
+```
+3a7f9c1b2d4e6f8a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a  heads/main
+9f1e0a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f  heads/dev
+a3c20b4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b  tags/submission
+```
+
+Output — 远程无 refs：
+
+```
+(no refs on remote)
+```
+
+Error — 远程不可达：
+
+```
+>>> Ls-remote [failed]
+Error: could not list remote refs.
+  hint: check remote configuration and network connectivity
+```
+
+- 输出格式为 `<完整 target hash>\t<ref name>`，便于脚本解析
+- 与 `pull` 不同：只读取远程 refs，不传输 snapshots/chunks
 
 ---
 
@@ -1750,9 +2011,9 @@ drift upgrade [--check] [--force]
 | `main` | `main` / `master` | - |
 | `diff` | `diff` | Supports images, visual diff; `--` separator |
 | `config` | `config` | - |
-| `remote` | `remote` | Subcommands: add/remove/list/set-url/test; two-level config (repo + user creds) |
+| `remote` | `remote` | Subcommands: add/remove/list/rename/set-url/show/test; two-level config (repo + user creds) |
 | `push` | `push` | Object-level content-addressed; no merge; diverged refs error |
-| `pull` | `pull` / `fetch` | Diverged refs saved as `.remote`; does NOT touch working tree |
+| `pull` | `pull` / `fetch` | Diverged refs saved as `.remote`; `--restore` updates working tree |
 | - | `merge`, `rebase`, `stash`, `cherry-pick`, `bisect` | Intentionally omitted |
 
 ---
@@ -1779,7 +2040,7 @@ branch    switch    tag    ignore    watch    gc
 remote    push    pull
 ```
 
-已完成：`remote`（add/remove/list/set-url/test）、`push`、`pull` 支持 WebDAV 与 SMB 协议，refs 快进判定与分叉保护，两级凭据分离。后续优化（Stage 6）：并发上传、进度条、credential helper。
+已完成：`remote`（add/remove/list/rename/set-url/show/test）、`push`、`pull` 支持 WebDAV 与 SMB 协议，refs 快进判定与分叉保护，两级凭据分离；`clone`/`ls-remote` 远程查询，`export`/`import` 内容导入导出。后续优化（Stage 6）：并发上传、进度条、credential helper。
 
 ---
 
@@ -1822,10 +2083,13 @@ drift diff id:9f1e id:12ab           diff between two snapshots
 drift diff id:9f1e id:12ab -- chapter3.md   single file diff
 drift diff --stat id:9f1e id:12ab    stat only
 
-# 恢复
+# 恢复 / 导出 / 导入
 drift restore id:12ab                 restore to a snapshot (auto backup)
 drift restore id:12ab chapter.md      restore a single file
 drift restore id:12ab chapter.md --no-backup   single file, no backup
+drift export head                      export snapshot as zip
+drift export head -o release.zip       export to specific path
+drift import dev chapter.md           import a file from another branch
 
 # 分支
 drift branch list                      list all branches
@@ -1867,16 +2131,24 @@ drift gc                               reclaim unreachable data
 drift gc --keep-auto 5                 keep recent 5 auto-saves
 
 # 远程同步
+drift clone <url>                     clone a remote repo into a new directory
+drift clone <url> mydir               clone into a specific directory
+drift ls-remote origin                list remote refs without downloading
 drift remote add origin --type webdav --url <u> --user <u>   add a remote
 drift remote add nas --type smb --url <u> --user <u> --option domain=WORKGROUP
 drift remote list                      list all remotes
+drift remote rename old new           rename a remote
+drift remote show origin               show a remote's full config
 drift remote set-url origin <new-url>  update a remote's URL
 drift remote test origin               test connectivity
 drift remote remove old-backup         remove a remote (creds preserved)
-drift push origin                      upload all objects to remote
-drift push origin --branch main        push only one branch
-drift pull origin                      download remote objects
-drift pull origin --branch main        pull only one branch
+drift push origin                      upload current branch to remote
+drift push origin --all                push all branches
+drift push origin --dry-run            preview what would be pushed
+drift pull origin                      download remote objects (current branch)
+drift pull origin --all                pull all branches
+drift pull origin --restore            auto-restore working dir after pull
+drift pull origin --dry-run            preview what would be pulled
 
 # 版本与自升级
 drift version                          show version and build info
@@ -1923,10 +2195,10 @@ drift upgrade --force                  reinstall even when up to date
 | `watch` 不支持 `--json` | 守护进程为实时日志流，不适合 JSON 信封；程序化访问可解析 `watch status` 文本输出 |
 | `sync` 拆分为 `push` + `pull` | 方向独立、错误路径更可控；单一 `sync` 难以表达"只上传不下载"等场景 |
 | 新增 `remote`/`push`/`pull` 命令族 | 第三阶段远程同步落地：WebDAV/SMB 协议、两级凭据分离、refs 快进判定与分叉保护 |
-| `push`/`pull` 的 `--dry-run` 声明但未实现 | flag 已注册以便未来兼容，当前传入会明确报错而非静默执行真实操作 |
+| `push`/`pull` 的 `--dry-run` 已实现 | 预览将推送/拉取的对象数量，不实际执行上传/下载 |
 | `restore` 备份 ID 显示恢复前 HEAD | 工作区干净时无备份快照产生，fallback 显示恢复前的 HEAD ID（而非恢复目标），确保用户能据此撤销 |
 | `watch on` 预校验项目 | 原实现先 spawn 子进程再在子进程中打开项目，初始化失败时静默退出留下 stale PID 文件；预校验将错误前置到父进程 |
 | 文本检测增加控制字节比例阈值 | 原 NUL-only 启发式会将无 NUL 的二进制数据误判为 text；新增 10% 控制字节阈值作为二次防线 |
 | `remote` 命令族错误统一 `[failed]` 格式 | 原 `remove`/`set-url`/`add` 用裸 `fmt.Errorf`，与 `test`/`push`/`pull` 的格式化错误块不一致 |
 | 新增 `version`/`upgrade` 命令 | 用户需要查看已安装版本并自升级到最新 release；`upgrade` 走 GitHub Releases 二进制自更新，无需 Go 工具链 |
-| `cmd/version.go` 重命名为 `cmd/resolve.go` | 原文件名为快照版本引用解析（`resolveSnapshot`），与 CLI 自身版本混淆；重命名使文件名=职责 |
+| `cmd/version.go` 中 `resolveSnapshot` 移到 `cmd/resolve.go` | 原文件同时包含快照版本引用解析（`resolveSnapshot`）与 CLI 自身版本命令，职责混淆；拆分后 `resolve.go` 专管引用解析，`version.go` 仍存在并实现 `drift version` 命令 |

@@ -207,7 +207,7 @@ func resolveBranchTipHash(ctx context.Context, store storage.Storer, branchName 
 	}
 	ref, err := store.GetRef(ctx, "heads/"+branchName)
 	if err != nil {
-		reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", branchName), "use 'drift branch list' to list existing branches.")
+		reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", branchName), "use 'drift branch list' to list existing branches.", err)
 		return core.Hash{}, ErrSilent
 	}
 	return ref.Target, nil
@@ -222,7 +222,7 @@ func reportNoSnapshots(ctx context.Context, branchName string, all bool) error {
 	} else if all {
 		hint = "use 'drift save -m \"message\"' to create your first snapshot."
 	}
-	reportFailed("Log", "log", "no snapshots yet.", hint)
+	reportFailed("Log", "log", "no snapshots yet.", hint, nil)
 	return ErrSilent
 }
 
@@ -232,7 +232,7 @@ func reportNoSnapshots(ctx context.Context, branchName string, all bool) error {
 func logDetailMode(ctx context.Context, store storage.Storer, id string) error {
 	snapshot := resolveSnapshot(ctx, store, id)
 	if snapshot == nil {
-		reportFailed("Log", "log", fmt.Sprintf("snapshot not found: %s.", id), "use 'drift log' to list available snapshots.")
+		reportFailed("Log", "log", fmt.Sprintf("snapshot not found: %s.", id), "use 'drift log' to list available snapshots.", nil)
 		return ErrSilent
 	}
 

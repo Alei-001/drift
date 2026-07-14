@@ -97,7 +97,10 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 				Target: snapshotID.Hash,
 			}
 			if err = store.SetRef(ctx, headRef.SymRef, branchRef); err != nil {
-				return backupID, fmt.Errorf("update branch %s: %w", headRef.SymRef, err)
+				// Workspace and index have already been rewritten to
+				// snapshotID, but the branch ref failed to update.
+				// The backup snapshot (backupID) lets the user recover.
+				return backupID, fmt.Errorf("update branch %s (workspace already restored to %s; backup is %s — re-run restore or restore the backup to recover): %w", headRef.SymRef, snapshotID.Hash.String(), backupID, err)
 			}
 			headRef.Target = snapshotID.Hash
 			if err = store.SetRef(ctx, "HEAD", headRef); err != nil {
@@ -168,6 +171,10 @@ func RestoreSnapshot(ctx context.Context, store storage.Storer, workDir string, 
 			}
 
 			perm := os.FileMode(entry.Mode & 0o777)
+			// Mask group/other write bits (umask 0o022 semantics) to
+			// prevent malicious snapshots from creating world-writable
+			// files on restore.
+			perm &^= 0o022
 			if perm == 0 {
 				perm = fsutil.DefaultFilePerm
 			}

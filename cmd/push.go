@@ -41,8 +41,8 @@ config is per-repo behavior that each machine may customize independently.`,
 		if pushDryRun {
 			stats, err := porcelain.PushDryRun(ctx, store, cwd, remoteName, branch, pushAll)
 			if err != nil {
-				reportFailed("Push", "push", "push dry-run failed.", "check remote configuration and network connectivity")
-				return ErrSilent
+				reportFailed("Push", "push", "push dry-run failed.", "check remote configuration and network connectivity", err)
+				return silentWrap(err)
 			}
 			if globalJSON {
 				return outputJSON(JSONEnvelope{
@@ -70,7 +70,7 @@ config is per-repo behavior that each machine may customize independently.`,
 
 		result, err := porcelain.PushToRemote(ctx, store, cwd, remoteName, branch, pushAll)
 		if err != nil {
-			reportFailed("Push", "push", "push failed.", "check remote configuration and network connectivity")
+			reportFailed("Push", "push", "push failed.", "check remote configuration and network connectivity", err)
 			return silentWrap(err)
 		}
 		stats := result.Stats

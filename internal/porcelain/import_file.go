@@ -17,9 +17,9 @@ import (
 
 // ImportFileFromBranch reconstructs a single file from the target branch's
 // HEAD snapshot and writes it to the current workspace at the same relative
-// path. The workspace lock is acquired for the duration. The index is
-// updated to reflect the imported file so the next save detects it as
-// unchanged.
+// path. The workspace lock is acquired for the duration. The index is NOT
+// updated: the imported file appears as a new (added) file in 'drift status'
+// and is captured by the next 'drift save', which is the intended workflow.
 //
 // This is a non-merge file-level cherry-pick: it does not touch any other
 // workspace files, does not move HEAD, and does not create a snapshot.
@@ -86,6 +86,9 @@ func ImportFileFromBranch(ctx context.Context, store storage.Storer, workDir, br
 	}
 
 	perm := os.FileMode(targetEntry.Mode & 0o777)
+	// Mask group/other write bits (umask 0o022 semantics) to prevent
+	// malicious snapshots from creating world-writable files on import.
+	perm &^= 0o022
 	if perm == 0 {
 		perm = fsutil.DefaultFilePerm
 	}
@@ -96,39 +99,6 @@ func ImportFileFromBranch(ctx context.Context, store storage.Storer, workDir, br
 
 	if err := os.Chtimes(safePath, time.Unix(0, targetEntry.ModTime), time.Unix(0, targetEntry.ModTime)); err != nil {
 		return nil, fmt.Errorf("set modtime: %w", err)
-	}
-
-	existingIndex, err := store.GetIndex(ctx)
-	if err != nil {
-		if !errors.Is(err, storage.ErrNotFound) {
-			return nil, fmt.Errorf("read index: %w", err)
-		}
-		existingIndex = &core.Index{}
-	}
-
-	found := false
-	for i := range existingIndex.Entries {
-		if existingIndex.Entries[i].Path == relPath {
-			existingIndex.Entries[i].Size = targetEntry.Size
-			existingIndex.Entries[i].ModTime = targetEntry.ModTime
-			existingIndex.Entries[i].Chunks = targetEntry.Chunks
-			existingIndex.Entries[i].Hash = targetEntry.Hash
-			found = true
-			break
-		}
-	}
-	if !found {
-		existingIndex.Entries = append(existingIndex.Entries, core.IndexEntry{
-			Path:    targetEntry.Path,
-			Hash:    targetEntry.Hash,
-			Size:    targetEntry.Size,
-			ModTime: targetEntry.ModTime,
-			Chunks:  targetEntry.Chunks,
-		})
-	}
-
-	if err := store.SetIndex(ctx, existingIndex); err != nil {
-		return nil, fmt.Errorf("update index: %w", err)
 	}
 
 	slog.Info("file imported", "branch", branchName, "file", relPath, "size", targetEntry.Size)

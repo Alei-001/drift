@@ -73,6 +73,11 @@ func TestCloneRemote_BareSlashURL(t *testing.T) {
 // restored in cleanup because CloneRemote saves the password to the
 // user-level credentials.json.
 func TestCloneRemote_UnreachableRemote(t *testing.T) {
+	// Insecure http is refused by default; opt in so the test reaches the
+	// pull step (and verifies the connection-refused error path) rather
+	// than failing on the scheme check before init.
+	t.Setenv("DRIFT_ALLOW_INSECURE", "1")
+
 	backupRestoreCredentials(t)
 
 	workDir := t.TempDir()
@@ -115,6 +120,9 @@ func TestCloneRemote_UnreachableRemote(t *testing.T) {
 // HEAD-verification code. The test confirms the function does not
 // successfully return a result with a wrong branch name.
 func TestCloneRemote_HEADVerification(t *testing.T) {
+	// See TestCloneRemote_UnreachableRemote: opt into insecure http.
+	t.Setenv("DRIFT_ALLOW_INSECURE", "1")
+
 	backupRestoreCredentials(t)
 
 	workDir := t.TempDir()

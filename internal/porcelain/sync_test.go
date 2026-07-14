@@ -97,6 +97,10 @@ func TestPushToRemote_RemoteNotFound(t *testing.T) {
 // matching credential fails with "no credential" before the workspace lock
 // is acquired.
 func TestPushToRemote_NoCredential(t *testing.T) {
+	// Insecure http is refused by default; opt in so the test reaches the
+	// credential-resolution step rather than failing on scheme.
+	t.Setenv("DRIFT_ALLOW_INSECURE", "1")
+
 	store, dir := setupLockedProject(t)
 	writeTestRemote(t, dir, "test-nocred-remote", "http://127.0.0.1:1/repo")
 
@@ -114,6 +118,11 @@ func TestPushToRemote_NoCredential(t *testing.T) {
 // This requires the remote config and credentials to be fully resolved so
 // the function reaches the lock-acquisition step.
 func TestPushToRemote_WorkspaceLockHeld(t *testing.T) {
+	// Insecure http is refused by default (see resolveRemoteConfigWithWarn).
+	// This test exercises the lock-acquisition path, not the scheme check,
+	// so opt in for the duration of the test.
+	t.Setenv("DRIFT_ALLOW_INSECURE", "1")
+
 	store, dir := setupLockedProject(t)
 	writeTestRemote(t, dir, "origin", "http://127.0.0.1:1/repo")
 	saveTestCredential(t, "origin", "testpass")
@@ -149,6 +158,10 @@ func TestPullFromRemote_RemoteNotFound(t *testing.T) {
 // TestPullFromRemote_WorkspaceLockHeld verifies that PullFromRemote also
 // fails with ErrLocked when the workspace lock is held.
 func TestPullFromRemote_WorkspaceLockHeld(t *testing.T) {
+	// See TestPushToRemote_WorkspaceLockHeld: opt into insecure http so the
+	// test reaches the lock-acquisition step rather than failing on scheme.
+	t.Setenv("DRIFT_ALLOW_INSECURE", "1")
+
 	store, dir := setupLockedProject(t)
 	writeTestRemote(t, dir, "origin", "http://127.0.0.1:1/repo")
 	saveTestCredential(t, "origin", "testpass")

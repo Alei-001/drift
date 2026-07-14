@@ -73,10 +73,10 @@
 
 | 命令 | 对应文件 | 功能 |
 |------|---------|------|
-| `drift branch <name>` | cmd/branch.go | 创建分支（不切换）|
-| `drift branch -d <name>` | cmd/branch.go | 删除分支 |
-| `drift branch -m <new>` | cmd/branch.go | 重命名当前分支 |
-| `drift branch -m <old> <new>` | cmd/branch.go | 重命名指定分支 |
+| `drift branch create <name>` | cmd/branch.go | 创建分支（不切换）|
+| `drift branch delete <name>` | cmd/branch.go | 删除分支 |
+| `drift branch rename <new>` | cmd/branch.go | 重命名当前分支 |
+| `drift branch rename <old> <new>` | cmd/branch.go | 重命名指定分支 |
 | `drift switch <name>` | cmd/switch.go | 切换到已有分支 |
 | `drift switch -c <name>` | cmd/switch.go | 创建并切换到新分支 |
 | `drift switch main` | cmd/switch.go | 切回主线 |
@@ -177,7 +177,7 @@
 
 ---
 
-## 阶段五：远程协同（远期）
+## 阶段五：远程协同（已实现）
 
 **目标**：多人共享版本库。
 
@@ -185,10 +185,20 @@
 
 | 功能 | 说明 |
 |------|------|
-| `drift remote add <name> <url>` | 配置远程存储 |
-| `drift sync` | 块级增量同步（只传新块） |
-| 后端支持 | S3 / IPFS / 自建服务器 |
-| 端到端加密 | 可选的远程数据加密 |
+| `drift remote add <name> [--type webdav\|smb] [--url <u>] [--user <u>] [--password <p>] [--no-save-password] [--option key=value]...` | 配置远程存储（缺失字段进入交互模式） |
+| `drift remote remove <name>` / `list` / `set-url <name> <new-url>` / `test <name>` | 远程存储管理（add/remove/list/set-url/test 子命令） |
+| `drift push <remote> [--branch <name>] [--dry-run]` | 上传本地对象（snapshots / manifests / chunks / refs）到远程，已存在跳过，分叉时报错 |
+| `drift pull <remote> [--branch <name>] [--dry-run]` | 下载远程对象到本地，分叉 refs 保留本地、远程版本另存为 `<name>.remote` |
+| `drift clone <remote> [<dir>]` | 克隆远程仓库到本地新目录 |
+| `drift ls-remote <remote>` | 列出远程仓库的 refs |
+| `drift export <snapshot-id> <file> <output>` | 导出快照内单文件到指定输出路径 |
+| `drift import <src-path> [<dest-path>]` | 导入外部文件到工作区 |
+| 后端支持 | WebDAV（主力，覆盖网盘 / NAS）+ SMB（补充，Windows 共享 / NAS） |
+| 两级凭据分离 | `remotes.json`（仓库级，无密码，可分享）+ `credentials.json`（用户级，0600 权限，按 host+user 匹配） |
+| refs 策略 | 同名同目标幂等；分叉时 push 拒绝覆盖（提示先 pull），pull 保留本地、远程另存为 `<name>.remote` |
+| 端到端加密 | 可选的远程数据加密（未实现，未来规划） |
+
+> 原 `drift sync` 已拆分为 `drift push` + `drift pull`，方向独立、错误路径更可控（"只上传不下载"等场景更清晰）。HEAD 与 config 不参与远程同步。
 
 ---
 

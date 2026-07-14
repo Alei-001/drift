@@ -2,8 +2,9 @@
 # Docs: https://goreleaser.com
 #
 # Release flow: push a tag (v0.1.0) -> GitHub Actions runs `goreleaser release`
-# -> produces archives + Linux packages + checksums -> uploads to the GitHub
-# Release. Windows setup.exe is built separately by Inno Setup in the workflow.
+# -> produces archives + checksums -> uploads to the GitHub Release. Windows
+# setup.exe is built separately by Inno Setup in the workflow. Linux/macOS
+# users use the tar.gz archives directly (no .deb/.rpm/.pkg installers).
 #
 # Archive naming convention (must match internal/version/matchAsset):
 #   drift_<version>_<os>_<arch>.{zip|tar.gz}
@@ -55,31 +56,6 @@ archives:
     files:
       - LICENSE*
       - README*.md
-
-nfpms:
-  - id: drift
-    # Linux distribution packages only (deb + rpm). Windows/macOS users get
-    # archives or the Inno Setup .exe.
-    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    homepage: https://github.com/Alei-001/drift
-    maintainer: drift <Alei-001@users.noreply.github.com>
-    description: Content-addressed version control for creators.
-    license: MIT
-    formats:
-      - deb
-      - rpm
-    # GoReleaser automatically adds the built binaries to the package. bindir
-    # controls where they are installed; /usr/bin is on PATH by default.
-    bindir: /usr/bin
-    # Include LICENSE and README in /usr/share/doc/drift/, consistent with the
-    # Windows installer and macOS .pkg which also ship these files.
-    contents:
-      - src: LICENSE
-        dst: /usr/share/doc/drift/LICENSE
-      - src: README.md
-        dst: /usr/share/doc/drift/README.md
-      - src: README.zh-CN.md
-        dst: /usr/share/doc/drift/README.zh-CN.md
 
 checksum:
   # Suffix `_checksums.txt` is matched by internal/version/findChecksumAsset.

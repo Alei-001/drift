@@ -65,7 +65,7 @@ func safePreviewExt(filePath string) string {
 func openExternal(versionLabel, filePath string, r io.Reader) error {
 	tmpDir := filepath.Join(os.TempDir(), "drift-previews")
 	if err := os.MkdirAll(tmpDir, previewDirPerm); err != nil {
-		reportFailed("Show", "show", fmt.Sprintf("cannot create preview directory: %s.", err), "")
+		reportFailed("Show", "show", fmt.Sprintf("cannot create preview directory: %s.", err), "", err)
 		return ErrSilent
 	}
 
@@ -74,14 +74,14 @@ func openExternal(versionLabel, filePath string, r io.Reader) error {
 	ext := safePreviewExt(filePath)
 	tmpFile, err := os.CreateTemp(tmpDir, "drift_preview_*"+ext)
 	if err != nil {
-		reportFailed("Show", "show", fmt.Sprintf("cannot create temp file: %s.", err), "")
+		reportFailed("Show", "show", fmt.Sprintf("cannot create temp file: %s.", err), "", err)
 		return ErrSilent
 	}
 	tmpPath := tmpFile.Name()
 	if _, err := io.Copy(tmpFile, r); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		reportFailed("Show", "show", fmt.Sprintf("cannot write preview file: %s.", err), "")
+		reportFailed("Show", "show", fmt.Sprintf("cannot write preview file: %s.", err), "", err)
 		return ErrSilent
 	}
 	tmpFile.Close()
@@ -97,7 +97,7 @@ func openExternal(versionLabel, filePath string, r io.Reader) error {
 	}
 	if err := cmd.Start(); err != nil {
 		os.Remove(tmpPath)
-		reportFailed("Show", "show", fmt.Sprintf("cannot launch system viewer: %s.", err), "")
+		reportFailed("Show", "show", fmt.Sprintf("cannot launch system viewer: %s.", err), "", err)
 		return ErrSilent
 	}
 	timer := time.AfterFunc(previewViewerTimeout, func() {

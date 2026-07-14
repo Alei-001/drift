@@ -24,6 +24,14 @@ type RemoteConfig struct {
 	URL     string            `json:"url"`  // webdav: https://host[:port]/path; smb: smb://host[:port]/share[/path]
 	User    string            `json:"user"`
 	Options map[string]string `json:"options,omitempty"` // protocol-specific fields
+
+	// AllowInsecure permits http:// URLs. It is a runtime-only flag
+	// (never persisted to remotes.json) set by the porcelain layer based
+	// on DRIFT_ALLOW_INSECURE=1. Protocol factories (e.g. NewWebDAVFS)
+	// check this field and refuse cleartext http unless it is true. This
+	// centralizes the security check in the constructor so new callers
+	// cannot bypass it by forgetting to call IsInsecureScheme.
+	AllowInsecure bool `json:"-"`
 }
 
 // RemotesFile is the on-disk format of .drift/remotes.json.
@@ -60,7 +68,11 @@ func SaveRemotes(driftDir string, rf *RemotesFile) error {
 		return fmt.Errorf("marshal remotes.json: %w", err)
 	}
 	path := filepath.Join(driftDir, "remotes.json")
-	return fsutil.WriteFileAtomic(path, data, fsutil.DefaultFilePerm)
+	// 0600: remotes.json contains remote URLs and usernames that could
+	// leak infrastructure details (NAS addresses, server hostnames) to
+	// other users on the system. Owner-only access matches the
+	// credentials.json convention.
+	return fsutil.WriteFileAtomic(path, data, 0o600)
 }
 
 // FindRemote returns the RemoteConfig with the given name, or an error

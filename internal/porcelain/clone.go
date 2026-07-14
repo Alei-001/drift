@@ -19,6 +19,12 @@ type CloneOptions struct {
 	RemoteType string
 	User       string
 	Password   string
+	// RemoteName is the name under which the cloned remote is registered
+	// in .drift/remotes.json and credentials.json. Defaults to "origin"
+	// when empty. Allowing the caller to choose the name prevents the
+	// second clone of the same URL with different credentials from
+	// silently overwriting the first remote's stored password.
+	RemoteName string
 }
 
 // CloneResult reports the outcome of a clone operation.
@@ -37,6 +43,22 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 	if remoteType == "" {
 		remoteType = "webdav"
 	}
+	// Default the remote name to "origin" for backwards compatibility.
+	// Callers that need to distinguish multiple remotes pointing at the
+	// same URL with different credentials can set opts.RemoteName.
+	remoteName := opts.RemoteName
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+
+	// Refuse insecure http schemes unless explicitly opted in. This early
+	// check is for user experience: it fails before creating the target
+	// directory and initializing an empty repo. The security enforcement
+	// also happens in NewWebDAVFS (checking cfg.AllowInsecure), so even
+	// if a new caller forgets this check, the factory still refuses.
+	if remote.IsInsecureScheme(remote.RemoteConfig{URL: opts.RemoteURL}) && !allowInsecureRemote() {
+		return nil, fmt.Errorf("remote URL %q uses insecure http scheme; refusing to clone over an unencrypted connection. Set DRIFT_ALLOW_INSECURE=1 to override", opts.RemoteURL)
+	}
 
 	dir := opts.TargetDir
 	if dir == "" {
@@ -45,6 +67,19 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 		if dir == "" || dir == "." || dir == string(filepath.Separator) {
 			return nil, fmt.Errorf("cannot determine directory name from URL %q; specify one explicitly", opts.RemoteURL)
 		}
+	}
+	// Reject directory names that escape the workspace or refer to an
+	// absolute path. path.Base does not collapse "..", so a URL whose
+	// final segment is ".." (e.g. "https://host/foo/..") yields dir="..",
+	// which filepath.Join would resolve one level above WorkDir. Also
+	// reject absolute paths that slipped through path.Base on platforms
+	// where it does not strip a leading separator.
+	dir = filepath.Clean(dir)
+	if dir == ".." || strings.HasPrefix(dir, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("derived directory name %q escapes workspace; specify one explicitly", dir)
+	}
+	if filepath.IsAbs(dir) {
+		return nil, fmt.Errorf("derived directory name %q is absolute; specify one explicitly", dir)
 	}
 	targetDir := filepath.Join(opts.WorkDir, dir)
 
@@ -64,7 +99,7 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 
 	rf, _ := remote.LoadRemotes(filepath.Join(targetDir, ".drift"))
 	rf.AddOrUpdateRemote(remote.RemoteConfig{
-		Name: "origin",
+		Name: remoteName,
 		Type: remoteType,
 		URL:  opts.RemoteURL,
 		User: opts.User,
@@ -75,13 +110,16 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 
 	credentialsSaved := false
 	if opts.Password != "" {
-		host, _ := remote.HostFromURL(opts.RemoteURL)
+		host, err := remote.HostFromURL(opts.RemoteURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse host from URL %q: %w", opts.RemoteURL, err)
+		}
 		cred, err := remote.LoadCredentials()
 		if err != nil {
 			return nil, fmt.Errorf("load credentials: %w", err)
 		}
 		cred.AddOrUpdateCredential(remote.Credential{
-			Remote:   "origin",
+			Remote:   remoteName,
 			Host:     host,
 			User:     opts.User,
 			Password: opts.Password,
@@ -92,10 +130,11 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 		credentialsSaved = true
 	}
 
-	rCfg, err := resolveRemoteConfig(targetDir, "origin")
+	rCfg, err := resolveRemoteConfig(targetDir, remoteName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve remote: %w", err)
 	}
+	rCfg.AllowInsecure = allowInsecureRemote()
 
 	rfs, err := remote.NewRemoteFS(rCfg)
 	if err != nil {
@@ -103,7 +142,7 @@ func CloneRemote(ctx context.Context, opts CloneOptions) (*CloneResult, error) {
 	}
 	defer rfs.Close()
 
-	stats, err := remote.Pull(ctx, store, rfs, "")
+	stats, err := remote.Pull(ctx, store, rfs, "", remote.SyncOptions{Concurrency: parseConcurrency(rCfg)})
 	if err != nil {
 		return nil, fmt.Errorf("%w: pull: %w", remote.ErrNetwork, err)
 	}

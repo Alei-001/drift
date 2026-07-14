@@ -46,7 +46,8 @@ changed through content-defined chunking.
   comparison, supports PNG/JPEG/GIF/WebP/BMP/TIFF), video (format detection +
   dimension parsing, supports MP4/MOV/AVI/MKV/WebM), binary (fallback). New
   engines plug in via a registry.
-- **Automatic watches** — `drift watch on` auto-saves on file change, with
+- **Automatic watches** — `drift watch on` periodically scans the workspace
+  and auto-saves when changes are detected (default interval 300s), with
   auto-saves hidden from `log` by default.
 - **Remote sync** — push/pull to remote storage via WebDAV or SMB, with
   incremental transfer and branch-scoped sync.
@@ -117,10 +118,10 @@ drift restore id:12ab
 drift undo
 
 # Configure a remote and sync
-drift remote add origin webdav://example.com/dav/my-novel
+drift remote add origin --url https://example.com/dav/my-novel --user <user>
 drift push origin            # push local data to remote
 drift pull origin            # pull latest data from remote
-drift clone webdav://example.com/dav/my-novel my-novel  # clone a remote repo
+drift clone https://example.com/dav/my-novel my-novel  # clone a remote repo
 ```
 
 ## Commands
@@ -141,7 +142,7 @@ drift clone webdav://example.com/dav/my-novel my-novel  # clone a remote repo
 | `drift watch {on,off,status,pause,resume}` | Background auto-save daemon |
 | `drift ignore <pattern>` | Add ignore rules to `.driftignore` |
 | `drift resolve <version>` | Resolve a version reference to a snapshot ID |
-| `drift remote {add,list,remove}` | Manage remote repository configuration |
+| `drift remote {add,list,remove,rename,set-url,show,test}` | Manage remote repository configuration |
 | `drift push <remote> [--branch <name>] [--dry-run]` | Push local data to remote |
 | `drift pull <remote> [--branch <name>] [--dry-run]` | Pull data from remote to local |
 | `drift clone <remote-url> <path>` | Clone a remote repository to local |

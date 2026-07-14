@@ -86,7 +86,10 @@ func TestResolveSnapshotRef_HeadKeyword(t *testing.T) {
 }
 
 // TestResolveSnapshotRef_HeadNotFound verifies that resolving "head" when
-// HEAD does not exist returns ErrSnapshotNotFound.
+// HEAD does not exist returns ErrNotARepo (the workspace has not been
+// initialized). This distinguishes "no repo" from "repo exists but has no
+// commits yet" (which would be ErrSnapshotNotFound) so `drift log` exits
+// with ExitNotRepo in a non-repo directory.
 func TestResolveSnapshotRef_HeadNotFound(t *testing.T) {
 	store := memory.NewMemoryStorage()
 
@@ -94,8 +97,8 @@ func TestResolveSnapshotRef_HeadNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error resolving head with no HEAD ref, got nil")
 	}
-	if !errors.Is(err, ErrSnapshotNotFound) {
-		t.Errorf("expected ErrSnapshotNotFound, got %v", err)
+	if !errors.Is(err, ErrNotARepo) {
+		t.Errorf("expected ErrNotARepo, got %v", err)
 	}
 }
 

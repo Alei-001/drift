@@ -127,5 +127,5 @@ func upgradeReportFailed(err error) {
 	default:
 		hint = "see https://github.com/Alei-001/drift/releases for manual download."
 	}
-	reportFailed("Upgrade", "upgrade", err.Error(), hint)
+	reportFailed("Upgrade", "upgrade", err.Error(), hint, err)
 }

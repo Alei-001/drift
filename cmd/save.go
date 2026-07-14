@@ -36,10 +36,13 @@ var saveCmd = &cobra.Command{
 		// -m is optional: when omitted, synthesize a default message so
 		// CreateSnapshot (which requires a non-empty message) still works.
 		// The display layer prefixes "[no message]" to signal the auto message.
+		// The timestamp includes seconds so two consecutive auto-saves within
+		// the same minute do not collide (which would make 'drift log' hard
+		// to read).
 		noMessage := saveMessage == ""
 		message := saveMessage
 		if noMessage {
-			message = "snapshot " + time.Now().Format("2006-01-02 15:04")
+			message = "snapshot " + time.Now().Format("2006-01-02 15:04:05")
 		}
 
 		author := cfg.User.Name
@@ -63,7 +66,7 @@ var saveCmd = &cobra.Command{
 		snapshot, err := porcelain.CreateSnapshot(ctx, store, cwd, message, author, &cfg.Core)
 		if err != nil {
 			if errors.Is(err, porcelain.ErrNothingToSave) {
-				reportFailed("Save", "save", "nothing to save.", "modify some files first to create a meaningful checkpoint.")
+				reportFailed("Save", "save", "nothing to save.", "modify some files first to create a meaningful checkpoint.", err)
 				return ErrSilent
 			}
 			return err

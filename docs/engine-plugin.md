@@ -29,7 +29,7 @@ type Engine interface {
 | `Detector` | `DetectByExtension(path string) bool` | **Layer 2** — file extension |
 | `Detector` | `DetectByHeuristic(path string, header []byte) bool` | **Layer 3** — content sniffing (weakest, fallback) |
 | `ChunkerSelector` | `ChunkerFor(fileSize int64) chunker.Chunker` | Returns a chunker for this file size |
-| `Differ` | `Diff(oldPath, oldReader, newPath, newReader) (string, error)` | Streaming content diff |
+| `Differ` | `Diff(ctx, oldPath, oldReader, newPath, newReader) (string, error)` | Streaming content diff |
 | `Previewer` | `Preview(header, size, reader, maxLines) (string, error)` | Short human-readable preview |
 | `Engine` | `Metadata() *core.FileMetadata` | Self-describing MIME type and metadata |
 
@@ -39,8 +39,8 @@ Engines are registered in [`init.go`](../internal/filetype/init.go) in this
 order:
 
 1. **text** — UTF-8 text files
-2. **image** — PNG, JPEG, GIF, WebP
-3. **video** — MP4, WebM
+2. **image** — PNG, JPEG, GIF, WebP, BMP, TIFF
+3. **video** — MP4, MOV, AVI, MKV, WebM
 4. **binary** — fallback (matches everything via `DetectByHeuristic → true`)
 
 Detection runs three layers sequentially across all registered engines:
@@ -56,12 +56,14 @@ fallback — `DetectEngine` never returns nil when binary is registered.
 ## File Layout
 
 Each engine lives in its own sub-package under
-`internal/filetype/<name>/` and follows a **4-file convention**:
+`internal/filetype/<name>/`. The file count varies by engine: image and
+video reuse `chunker.DefaultSelector` (no `chunker.go`), while text and
+binary implement custom chunker selection.
 
 ```
 internal/filetype/<name>/
 ├── engine.go       # Engine struct + Detector methods + constructor
-├── chunker.go      # ChunkerFor implementation
+├── chunker.go      # ChunkerFor implementation (text/binary only; image/video embed DefaultSelector)
 ├── differ.go       # Diff implementation
 ├── preview.go      # Preview implementation
 ├── metadata.go     # Metadata implementation
@@ -72,7 +74,8 @@ internal/filetype/<name>/
 
 ### Step 1: Create the package
 
-Create `internal/filetype/<name>/` with the 5 files above.
+Create `internal/filetype/<name>/` with the files above (`chunker.go` is
+only needed for engines with custom chunking).
 
 ### Step 2: Implement the Engine struct
 
@@ -112,7 +115,7 @@ a simple "binary files differ" message:
 
 ```go
 // differ.go
-func (e *FooEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+func (e *FooEngine) Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
     // Streaming — do not read entire file into memory unless necessary.
 }
 ```
@@ -147,13 +150,20 @@ func init() {
     Register(image.NewEngine())
     Register(video.NewEngine())
     Register(foo.NewEngine())    // ← add before binary
-    Register(binary.NewEngine()) // must be last (fallback)
+    binEngine := binary.NewEngine()
+    Register(binEngine)
+    SetFallback(binEngine) // explicit fallback (never returns nil from Detect)
 }
 ```
 
 **Registration order matters**: engines are queried in registration order at
 each detection layer. Place specialized engines before `binary` (the
 catch-all fallback).
+
+**SetFallback**: in addition to `Register`, call `SetFallback` with the
+binary engine to explicitly set the fallback. This guarantees `DetectEngine`
+never returns nil, even if a future change removes binary from the
+heuristic layer.
 
 ### Step 8: Write tests
 

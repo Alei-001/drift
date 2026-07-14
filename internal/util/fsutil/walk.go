@@ -50,7 +50,14 @@ func WalkCtx(ctx context.Context, root, ignoreFile string, fn func(path string, 
 
 	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsPermission(err) || os.IsNotExist(err) {
+			if os.IsPermission(err) {
+				// Log permission errors so the user knows files were
+				// skipped — a silent skip could lead to incomplete
+				// snapshots without any indication.
+				slog.Warn("skip unreadable path during walk", "path", p, "error", err)
+				return nil
+			}
+			if os.IsNotExist(err) {
 				return nil
 			}
 			return err

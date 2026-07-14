@@ -22,6 +22,15 @@ var (
 // adding a new protocol (e.g. S3) only requires implementing it here and
 // registering it in an init() block.
 //
+// Path contract: all paths passed to these methods are relative to the
+// remote root, use forward slashes (/), and have NO leading slash. The
+// root directory is represented by "" or ".". Path helpers
+// (chunkRemotePath, snapshotRemotePath, etc.) produce paths that already
+// conform to this contract. Each implementation's resolve() method is
+// responsible for converting these relative paths to whatever form the
+// underlying protocol library requires (e.g. gowebdav needs absolute paths
+// with a leading /, go-smb2 needs relative paths without one).
+//
 // Every method takes a context.Context. The underlying protocol libraries
 // (gowebdav, go-smb2) do not yet honor context for in-flight network calls,
 // so implementations check ctx.Err() at entry and return context.Canceled /

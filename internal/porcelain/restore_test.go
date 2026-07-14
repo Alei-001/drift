@@ -375,6 +375,16 @@ func TestRestore_PartialFailureReturnsBackupID(t *testing.T) {
 		}
 	}
 
+	// Remove file2.txt from the workspace. Without this, the backup
+	// snapshot created inside RestoreSnapshot would re-chunk file2.txt
+	// (same content → same hash → chunk re-stored via content-addressable
+	// storage), undoing the chunk deletion above and making the restore
+	// succeed. Removing the workspace file ensures the backup cannot
+	// re-create the chunks, so the restore fails as expected.
+	if err := os.Remove(filepath.Join(dir, "file2.txt")); err != nil {
+		t.Fatalf("remove file2: %v", err)
+	}
+
 	// Modify file1.txt so the workspace has changes. This ensures a
 	// backup snapshot is created (rather than ErrNothingToSave).
 	if err := os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("modified"), 0644); err != nil {

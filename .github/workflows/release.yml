@@ -2,17 +2,15 @@
 #
 # Produces:
 #   - Cross-platform archives (zip/tar.gz) via goreleaser
-#   - Linux packages (.deb/.rpm) via goreleaser nfpm
-#   - macOS packages (.pkg) via pkgbuild
-#   - SHA-256 checksums file (goreleaser, covers archives + Linux packages)
-#   - Per-artifact .sha256 sidecar files (covers installer + .pkg)
+#   - SHA-256 checksums file (goreleaser, covers archives)
+#   - Per-artifact .sha256 sidecar files (covers installer)
 #   - Windows graphical installer (.exe) via Inno Setup
 #
 # All artifacts are uploaded to the GitHub Release as drafts for review before
-# publishing. The Windows installer and macOS .pkg are built in separate jobs
-# because their toolchains (Inno Setup, pkgbuild) run natively on their
-# respective OSes. Each installer ships with a .sha256 sidecar so users can
-# verify integrity without consulting the aggregate checksums file.
+# publishing. The Windows installer is built in a separate job because Inno
+# Setup runs natively on Windows. Each installer ships with a .sha256 sidecar
+# so users can verify integrity without consulting the aggregate checksums
+# file. Linux/macOS users use the tar.gz archives directly.
 
 name: release
 
@@ -25,8 +23,8 @@ permissions:
   contents: write
 
 jobs:
-  # Job 1: goreleaser produces archives, Linux packages, and checksums on
-  # Linux (fast, cross-compile from a single host).
+  # Job 1: goreleaser produces archives and checksums on Linux
+  # (fast, cross-compile from a single host).
   goreleaser:
     runs-on: ubuntu-latest
     steps:
@@ -133,71 +131,5 @@ jobs:
           files: |
             dist/drift_*_windows_amd64_setup.exe
             dist/drift_*_windows_amd64_setup.exe.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Job 3: macOS .pkg installers. Uses the system-provided pkgbuild tool to
-  # produce standard macOS installer packages for both Intel and Apple Silicon.
-  # No signing/notarization (keeps it simple); users may need to allow the
-  # package in System Settings > Privacy & Security on first launch.
-  macos-installer:
-    runs-on: macos-latest
-    needs: goreleaser
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Download goreleaser artifacts
-        uses: actions/download-artifact@v8
-        with:
-          name: goreleaser-dist
-          path: dist/
-
-      - name: Determine version from tag
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Build .pkg installers
-        run: |
-          version="${{ steps.version.outputs.version }}"
-          for arch in amd64 arm64; do
-            tarball=$(ls dist/drift_*_darwin_${arch}.tar.gz | head -1)
-            extract_dir="dist/extract_${arch}"
-            pkg_root="dist/pkg_root_${arch}"
-            mkdir -p "$extract_dir" "$pkg_root/bin" "$pkg_root/share/drift"
-            tar xzf "$tarball" -C "$extract_dir"
-            bin=$(find "$extract_dir" -name drift -type f | head -1)
-            if [ -z "$bin" ]; then
-              echo "drift binary not found in $tarball"
-              exit 1
-            fi
-            cp "$bin" "$pkg_root/bin/drift"
-            chmod +x "$pkg_root/bin/drift"
-            cp LICENSE "$pkg_root/share/drift/"
-            cp README.md "$pkg_root/share/drift/"
-            cp README.zh-CN.md "$pkg_root/share/drift/"
-            pkgbuild \
-              --root "$pkg_root" \
-              --identifier com.github.alei-001.drift \
-              --version "$version" \
-              --install-location /usr/local \
-              "dist/drift_${version}_darwin_${arch}.pkg"
-            rm -rf "$extract_dir" "$pkg_root"
-          done
-
-      - name: Generate .sha256 sidecars
-        run: |
-          for pkg in dist/drift_*_darwin_*.pkg; do
-            name="${pkg##*/}"
-            (cd dist && sha256sum "$name" > "$name.sha256")
-          done
-
-      - name: Upload .pkg and checksums to release
-        uses: softprops/action-gh-release@v3
-        with:
-          draft: true
-          files: |
-            dist/drift_*_darwin_*.pkg
-            dist/drift_*_darwin_*.pkg.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

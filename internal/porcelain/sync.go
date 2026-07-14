@@ -34,25 +34,41 @@ func resolveBranchOrDefault(ctx context.Context, store storage.Storer, branch st
 	return ResolveCurrentBranchName(ctx, store)
 }
 
-// resolveRemoteConfigWithWarn loads the remote config and logs a warning if
-// the URL uses an insecure (http) scheme that would expose credentials in
-// cleartext over the network. The warning is surfaced here rather than in
-// the remote layer so that the remote package never writes to stderr.
+// resolveRemoteConfigWithWarn loads the remote config and sets the
+// AllowInsecure flag based on DRIFT_ALLOW_INSECURE=1. The actual refusal
+// of cleartext http happens in NewWebDAVFS (the protocol factory), not
+// here — this centralizes the security check so new callers of
+// NewRemoteFS cannot bypass it by forgetting to call IsInsecureScheme.
+// When the user opts in, a warning is logged so the decision is visible.
 func resolveRemoteConfigWithWarn(workDir, remoteName string) (remote.RemoteConfig, error) {
 	cfg, err := resolveRemoteConfig(workDir, remoteName)
 	if err != nil {
 		return remote.RemoteConfig{}, err
 	}
-	if v, ok := cfg.Options["concurrency"]; ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			remote.SetConcurrency(n)
-		}
-	}
-	if remote.IsInsecureScheme(cfg) {
-		slog.Warn("remote URL uses insecure http scheme; credentials are sent in cleartext",
+	cfg.AllowInsecure = allowInsecureRemote()
+	if cfg.AllowInsecure && remote.IsInsecureScheme(cfg) {
+		slog.Warn("remote URL uses insecure http scheme; credentials are sent in cleartext (DRIFT_ALLOW_INSECURE=1)",
 			"remote", remoteName, "url", cfg.URL)
 	}
 	return cfg, nil
+}
+
+// allowInsecureRemote reports whether the user has opted into insecure http
+// remotes via DRIFT_ALLOW_INSECURE=1. The opt-in is per-process (env var),
+// not per-remote, so a single export applies to all subsequent sync calls.
+func allowInsecureRemote() bool {
+	return os.Getenv("DRIFT_ALLOW_INSECURE") == "1"
+}
+
+// parseConcurrency extracts the concurrency option from a RemoteConfig,
+// returning 0 (default) when not set or invalid.
+func parseConcurrency(cfg remote.RemoteConfig) int {
+	if v, ok := cfg.Options["concurrency"]; ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // PushToRemote uploads local objects to the named remote. It acquires the
@@ -76,7 +92,8 @@ func PushToRemote(ctx context.Context, store storage.Storer, workDir, remoteName
 	}
 	defer rfs.Close()
 
-	stats, err := remote.Push(ctx, store, rfs, branch)
+	opts := remote.SyncOptions{Concurrency: parseConcurrency(cfg)}
+	stats, err := remote.Push(ctx, store, rfs, branch, opts)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", remote.ErrNetwork, err)
 	}
@@ -103,7 +120,12 @@ func PushDryRun(ctx context.Context, store storage.Storer, workDir, remoteName, 
 	}
 	defer rfs.Close()
 
-	return remote.PushDryRun(ctx, store, rfs, branch)
+	opts := remote.SyncOptions{Concurrency: parseConcurrency(cfg)}
+	stats, err := remote.PushDryRun(ctx, store, rfs, branch, opts)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", remote.ErrNetwork, err)
+	}
+	return stats, nil
 }
 
 // PullFromRemote downloads remote objects to local. It acquires the
@@ -126,7 +148,8 @@ func PullFromRemote(ctx context.Context, store storage.Storer, workDir, remoteNa
 	}
 	defer rfs.Close()
 
-	stats, err := remote.Pull(ctx, store, rfs, branch)
+	opts := remote.SyncOptions{Concurrency: parseConcurrency(cfg)}
+	stats, err := remote.Pull(ctx, store, rfs, branch, opts)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", remote.ErrNetwork, err)
 	}
@@ -149,11 +172,16 @@ func PullDryRun(ctx context.Context, store storage.Storer, workDir, remoteName, 
 	branch = resolveBranchOrDefault(ctx, store, branch, all)
 	rfs, err := remote.NewRemoteFS(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create remote client: %w", err)
+		return nil, fmt.Errorf("%w: create remote client: %w", remote.ErrNetwork, err)
 	}
 	defer rfs.Close()
 
-	return remote.PullDryRun(ctx, store, rfs, branch)
+	opts := remote.SyncOptions{Concurrency: parseConcurrency(cfg)}
+	stats, err := remote.PullDryRun(ctx, store, rfs, branch, opts)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", remote.ErrNetwork, err)
+	}
+	return stats, nil
 }
 
 // LsRemote lists all refs from a remote without downloading any objects.
@@ -164,11 +192,15 @@ func LsRemote(ctx context.Context, workDir, remoteName string) ([]*core.Referenc
 	}
 	rfs, err := remote.NewRemoteFS(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create remote client: %w", err)
+		return nil, fmt.Errorf("%w: create remote client: %w", remote.ErrNetwork, err)
 	}
 	defer rfs.Close()
 
-	return remote.LsRemote(ctx, rfs)
+	refs, err := remote.LsRemote(ctx, rfs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", remote.ErrNetwork, err)
+	}
+	return refs, nil
 }
 
 // resolveRemoteConfig loads the remote definition from .drift/remotes.json and

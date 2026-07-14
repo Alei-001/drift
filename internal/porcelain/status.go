@@ -18,6 +18,12 @@ type ChangeSummary struct {
 	Added    []string
 	Modified []string
 	Deleted  []string
+	// UntrackedSymlinks is the number of symbolic links present in the
+	// workspace. Drift's snapshot schema cannot represent symlink targets,
+	// so symlinks are silently skipped during save and are never restored.
+	// This count surfaces them so the CLI can warn the user that those
+	// entries are not under version control.
+	UntrackedSymlinks int
 }
 
 // DetectChanges compares the workspace against the stored index and returns changes.
@@ -52,6 +58,7 @@ func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir stri
 	}
 
 	workspaceFiles := make(map[string]os.FileInfo)
+	summary := &ChangeSummary{}
 	err = fsutil.WalkCtx(ctx, workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
 		if info.IsDir() {
 			return nil
@@ -59,8 +66,10 @@ func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir stri
 		// Skip symlinks: they are not tracked by snapshots (see
 		// createSnapshotInLock), so reporting them as added would
 		// cause SwitchBranch --no-autosave and UndoLastSave to refuse
-		// an otherwise-clean workspace.
+		// an otherwise-clean workspace. Count them so the CLI can
+		// surface a warning that those entries are untracked.
 		if info.Mode()&os.ModeSymlink != 0 {
+			summary.UntrackedSymlinks++
 			return nil
 		}
 		rel, err := pathutil.Rel(workDir, path)
@@ -74,7 +83,6 @@ func detectChangesNoLock(ctx context.Context, store storage.Storer, workDir stri
 		return nil, fmt.Errorf("scan workspace: %w", err)
 	}
 
-	summary := &ChangeSummary{}
 	printed := make(map[string]bool)
 
 	for _, entry := range index.Entries {

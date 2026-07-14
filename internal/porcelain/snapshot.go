@@ -67,6 +67,7 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	}
 
 	var workspaceFiles []workspaceFile
+	var symlinkCount int
 	err = fsutil.Walk(workDir, cfg.IgnoreFile, func(path string, info os.FileInfo) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -81,6 +82,7 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		// entry that restore would write back as a regular file. Skipping
 		// preserves the symlink in the workspace without tracking it.
 		if info.Mode()&os.ModeSymlink != 0 {
+			symlinkCount++
 			return nil
 		}
 		workspaceFiles = append(workspaceFiles, workspaceFile{path: path, info: info})
@@ -88,6 +90,10 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	})
 	if err != nil {
 		return nil, fmt.Errorf("scan workspace: %w", err)
+	}
+	if symlinkCount > 0 {
+		slog.Warn("symlinks present but not tracked (drift cannot represent symlink targets)",
+			"count", symlinkCount)
 	}
 
 	oldIndexMap := make(map[string]*core.IndexEntry)
@@ -108,19 +114,23 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	}
 
 	// First pass: separate unchanged (fast path) from changed files.
-	// Unchanged files are identified by matching ModTime + Size against
-	// the old index; their entries are copied without re-chunking.
+	// The fast path is gated by cfg.TrustMtime (default false): when
+	// disabled, every file is re-chunked so tools that preserve mtime
+	// while changing content (cp -p, rsync --times, editor atomic-save
+	// that restores mtime) cannot silently cause stale chunks to be
+	// reused. When enabled by an opt-in user, a file whose (size, mtime)
+	// matches the old index entry is reused without re-chunking.
 	//
-	// Security note: this fast path is a performance optimization, NOT a
-	// security guarantee. It trusts (mtime, size) as a proxy for "content
-	// unchanged". An adversary who can forge mtime (e.g. touch -t) and
-	// preserve size could trick CreateSnapshot into reusing stale chunks.
-	// Drift assumes the workspace is not under active adversarial
-	// tampering between snapshots; verified content integrity would
-	// require re-reading every file, defeating the purpose of the index.
-	// The merge phase below still re-chunks any file whose mtime or size
-	// differs, and the resulting FileEntry.Hash is compared against the
-	// old index hash to detect real content changes.
+	// Security note: even with TrustMtime=true, this is a performance
+	// optimization, NOT a security guarantee. An adversary who can forge
+	// mtime (e.g. touch -t) and preserve size could trick CreateSnapshot
+	// into reusing stale chunks. Drift assumes the workspace is not under
+	// active adversarial tampering between snapshots; verified content
+	// integrity would require re-reading every file, defeating the
+	// purpose of the index. The merge phase below still re-chunks any
+	// file whose mtime or size differs, and the resulting FileEntry.Hash
+	// is compared against the old index hash to detect real content
+	// changes.
 	entryMap := make(map[string]core.FileEntry, len(workspaceFiles))
 	var orderedPaths []string
 	var tasks []fileTask
@@ -132,7 +142,9 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		}
 		touchCounter++
 		if touchCounter%500 == 0 {
-			_ = TouchWorkspaceLock(workDir)
+			if terr := TouchWorkspaceLock(workDir); terr != nil {
+				return nil, terr
+			}
 		}
 		relPath, err := pathutil.Rel(workDir, f.path)
 		if err != nil {
@@ -140,22 +152,24 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		}
 		orderedPaths = append(orderedPaths, relPath)
 
-		if oldEntry, ok := oldIndexMap[relPath]; ok &&
-			oldEntry.Size == f.info.Size() &&
-			oldEntry.ModTime == f.info.ModTime().UnixNano() {
-			entryMap[relPath] = core.FileEntry{
-				Path:    relPath,
-				Mode:    core.FileMode(f.info.Mode()),
-				Size:    f.info.Size(),
-				ModTime: f.info.ModTime().UnixNano(),
-				Chunks:  oldEntry.Chunks,
-				Hash:    oldEntry.Hash,
+		if cfg.TrustMtime {
+			if oldEntry, ok := oldIndexMap[relPath]; ok &&
+				oldEntry.Size == f.info.Size() &&
+				oldEntry.ModTime == f.info.ModTime().UnixNano() {
+				entryMap[relPath] = core.FileEntry{
+					Path:    relPath,
+					Mode:    core.FileMode(f.info.Mode()),
+					Size:    f.info.Size(),
+					ModTime: f.info.ModTime().UnixNano(),
+					Chunks:  oldEntry.Chunks,
+					Hash:    oldEntry.Hash,
+				}
+				totalSize += f.info.Size()
+				if bar != nil {
+					bar.Add(1) //nolint:errcheck
+				}
+				continue
 			}
-			totalSize += f.info.Size()
-			if bar != nil {
-				bar.Add(1) //nolint:errcheck
-			}
-			continue
 		}
 
 		tasks = append(tasks, fileTask{wf: f, relPath: relPath})
@@ -175,7 +189,16 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		for {
 			select {
 			case <-ticker.C:
-				_ = TouchWorkspaceLock(workDir)
+				if terr := TouchWorkspaceLock(workDir); terr != nil {
+					// Lock lost: signal the main goroutine to abort.
+					// The touch goroutine cannot return an error, but
+					// the main goroutine will check ctx.Err() on the
+					// next iteration. We log the error; the main
+					// goroutine will encounter the stale/missing lock
+					// when it next tries to write.
+					slog.Error("workspace lock lost during long save", "error", terr)
+					return
+				}
 			case <-touchDone:
 				return
 			}
@@ -233,7 +256,13 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 	}
 
 	snapProto := core.SnapshotToProto(snap, false)
-	marshaled, err := proto.Marshal(snapProto)
+	// Deterministic: true is REQUIRED for hash stability. snapshot.proto
+	// has a map<string,string> extra field; the default proto.Marshal
+	// iterates map keys in non-deterministic order, so the hash computed
+	// here must use the same deterministic ordering that GetSnapshot uses
+	// when it re-marshals to verify integrity. Without this, snapshots
+	// with 2+ Extra entries would intermittently fail verification.
+	marshaled, err := proto.MarshalOptions{Deterministic: true}.Marshal(snapProto)
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
 	}
@@ -266,28 +295,26 @@ func createSnapshotInLock(ctx context.Context, store storage.Storer, workDir str
 		Type:   core.RefTypeBranch,
 		Target: snap.ID.Hash,
 	}
-	// Save the previous branch ref so SetIndex failure can roll back the
-	// SetRef below. Without this, a SetIndex error would leave the branch
-	// pointing at the new snapshot while the index still reflects the old
-	// workspace state, making the next save link to the wrong parent.
-	oldBranchRef, oldBranchErr := store.GetRef(ctx, symRef)
-	if oldBranchErr != nil && !errors.Is(oldBranchErr, storage.ErrNotFound) {
-		return nil, fmt.Errorf("read previous branch ref: %w", oldBranchErr)
-	}
+	// Git model: ref is the commit point, index is a rebuildable cache.
+	// Order: PutSnapshot → SetRef → SetIndex.
+	//   - SetRef fails: snapshot is unreachable, GC reclaims it. The
+	//     branch still points at the previous snapshot and the history
+	//     chain is intact. No rollback needed.
+	//   - SetIndex fails: ref already points at the new snapshot, so
+	//     history is correct. The index is stale, but the next save
+	//     re-chunks every file (TrustMtime defaults to false) and
+	//     rebuilds it. The snapshot itself is durable; we return it
+	//     alongside an error so the caller knows the commit succeeded
+	//     even though the index update failed.
+	//   - kill -9 between SetRef and SetIndex: same as SetIndex failure;
+	//     on restart the user re-runs save, which rebuilds the index.
 	if err := store.SetRef(ctx, symRef, branchRef); err != nil {
 		return nil, fmt.Errorf("update branch: %w", err)
 	}
-
 	if err := store.SetIndex(ctx, newIndex); err != nil {
-		// Roll back the branch ref to its pre-save value. If the branch
-		// did not exist before (oldBranchErr == ErrNotFound), delete the
-		// ref we just created; otherwise restore the previous value.
-		if errors.Is(oldBranchErr, storage.ErrNotFound) {
-			_ = store.DeleteRef(ctx, symRef)
-		} else {
-			_ = store.SetRef(ctx, symRef, oldBranchRef)
-		}
-		return nil, fmt.Errorf("update index (rolled back branch ref): %w", err)
+		slog.Warn("snapshot committed but index update failed; next save will re-chunk all files",
+			"snapshot", snap.ShortID(), "branch", symRef, "error", err)
+		return snap, fmt.Errorf("snapshot %s committed but index update failed: %w (run 'drift save' to rebuild the index)", snap.ShortID(), err)
 	}
 
 	slog.Info("snapshot created", "id", snap.ShortID(), "branch", symRef, "files", len(snap.Files), "size", snap.TotalSize, "message", message)

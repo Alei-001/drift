@@ -80,7 +80,7 @@ var remoteRemoveCmd = &cobra.Command{
 			return err
 		}
 		if !rf.RemoveRemote(name) {
-			reportFailed("Remote remove", "remote remove", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.")
+			reportFailed("Remote remove", "remote remove", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.", nil)
 			return ErrSilent
 		}
 		if err := saveRemotes(cwd, rf); err != nil {
@@ -116,7 +116,7 @@ var remoteSetURLCmd = &cobra.Command{
 		}
 		cfg, err := rf.FindRemote(name)
 		if err != nil {
-			reportFailed("Remote set-url", "remote set-url", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.")
+			reportFailed("Remote set-url", "remote set-url", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.", err)
 			return ErrSilent
 		}
 		oldHost, _ := remote.HostFromURL(cfg.URL)
@@ -154,18 +154,18 @@ var remoteTestCmd = &cobra.Command{
 		}
 		cfg, err := resolveRemote(cwd, name)
 		if err != nil {
-			reportFailed("Remote test", "remote test", "could not resolve remote.", "use 'drift remote list' to see configured remotes, or 'drift remote add' to configure one.")
+			reportFailed("Remote test", "remote test", "could not resolve remote.", "use 'drift remote list' to see configured remotes, or 'drift remote add' to configure one.", err)
 			return ErrSilent
 		}
 		rfs, err := remote.NewRemoteFS(cfg)
 		if err != nil {
-			reportFailed("Remote test", "remote test", "could not create remote client.", "check the remote URL and protocol type.")
+			reportFailed("Remote test", "remote test", "could not create remote client.", "check the remote URL and protocol type.", err)
 			return ErrSilent
 		}
 		defer rfs.Close()
 		if _, err := rfs.List(context.Background(), "."); err != nil {
-			reportFailed("Remote test", "remote test", "remote is not reachable.", "check URL, credentials, and network connectivity")
-			return ErrSilent
+			reportFailed("Remote test", "remote test", "remote is not reachable.", "check URL, credentials, and network connectivity", err)
+			return silentWrap(fmt.Errorf("%w: %w", remote.ErrNetwork, err))
 		}
 		if globalJSON {
 			return outputJSON(JSONEnvelope{
@@ -196,11 +196,11 @@ var remoteRenameCmd = &cobra.Command{
 		}
 		cfg, err := rf.FindRemote(oldName)
 		if err != nil {
-			reportFailed("Remote rename", "remote rename", fmt.Sprintf("remote %q not found", oldName), "use 'drift remote list' to see configured remotes.")
+			reportFailed("Remote rename", "remote rename", fmt.Sprintf("remote %q not found", oldName), "use 'drift remote list' to see configured remotes.", err)
 			return ErrSilent
 		}
 		if _, err := rf.FindRemote(newName); err == nil {
-			reportFailed("Remote rename", "remote rename", fmt.Sprintf("remote %q already exists", newName), "use a different name or remove the existing remote first.")
+			reportFailed("Remote rename", "remote rename", fmt.Sprintf("remote %q already exists", newName), "use a different name or remove the existing remote first.", nil)
 			return ErrSilent
 		}
 		cfg.Name = newName
@@ -238,7 +238,7 @@ var remoteShowCmd = &cobra.Command{
 		}
 		cfg, err := rf.FindRemote(name)
 		if err != nil {
-			reportFailed("Remote show", "remote show", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.")
+			reportFailed("Remote show", "remote show", fmt.Sprintf("remote %q not found", name), "use 'drift remote list' to see configured remotes.", err)
 			return ErrSilent
 		}
 		opts := make(map[string]string)
@@ -327,6 +327,7 @@ func resolveRemote(cwd, name string) (remote.RemoteConfig, error) {
 		cfg.Options = make(map[string]string)
 	}
 	cfg.Options["_password"] = password
+	cfg.AllowInsecure = os.Getenv("DRIFT_ALLOW_INSECURE") == "1"
 	return cfg, nil
 }
 

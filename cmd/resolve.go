@@ -6,10 +6,84 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/Alei-001/drift/internal/storage"
 )
+
+// resolveCmd resolves a version reference to a snapshot ID.
+var resolveCmd = &cobra.Command{
+	Use:   "resolve <version>",
+	Short: "Resolve a version reference to a snapshot ID",
+	Long: `Resolve a version reference and print the snapshot's short ID.
+
+Version references accept the same syntax used by other commands:
+  head              — current HEAD snapshot
+  id:<hash-prefix>  — match by hash prefix (>= 4 chars)
+  tag:<name>        — resolve via tag
+  branch:<name>     — resolve via branch head
+  <bare-name>       — shorthand for branch:<bare-name>
+
+This command is useful in scripts to validate a reference or obtain a
+concrete snapshot ID before calling other commands.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		cwd, err := getCwd()
+		if err != nil {
+			return err
+		}
+		store, _, err := openProjectOrReport("Resolve", "resolve", cwd)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+
+		ref := args[0]
+		snap, err := porcelain.ResolveSnapshotRef(ctx, store, ref)
+		if err != nil {
+			hint := "use 'drift log' to list available snapshots."
+			if errors.Is(err, porcelain.ErrAmbiguousID) {
+				hint = "use a longer hash prefix to disambiguate."
+			}
+			reportFailed("Resolve", "resolve",
+				fmt.Sprintf("could not resolve %q.", ref), hint, err)
+			return ErrSilent
+		}
+
+		if globalJSON {
+			return outputJSON(JSONEnvelope{
+				Command: "resolve",
+				Status:  "ok",
+				Data: resolveData{
+					Ref:        ref,
+					SnapshotID: snap.ShortID(),
+				},
+			})
+		}
+
+		if globalQuiet {
+			fmt.Println(snap.ShortID())
+			return nil
+		}
+
+		fmt.Printf(">>> Resolved [ok]\n")
+		fmt.Printf("  %s -> %s\n", ref, snap.ShortID())
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(resolveCmd)
+}
+
+// resolveData is the JSON payload for a successful drift resolve.
+type resolveData struct {
+	Ref        string `json:"ref"`
+	SnapshotID string `json:"snapshot_id"`
+}
 
 // resolveSnapshot resolves a snapshot reference to a snapshot.
 //

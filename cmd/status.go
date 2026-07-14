@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
@@ -32,7 +33,7 @@ var statusCmd = &cobra.Command{
 
 		changes, err := porcelain.DetectChanges(ctx, store, cwd, &cfg.Core)
 		if err != nil {
-			reportFailed("Status", "status", "could not get status.", "")
+			reportFailed("Status", "status", "could not get status.", "", err)
 			return ErrSilent
 		}
 
@@ -60,6 +61,7 @@ var statusCmd = &cobra.Command{
 					Modified: len(modified),
 					Deleted:  len(deleted),
 				},
+				UntrackedSymlinks: changes.UntrackedSymlinks,
 			}
 			return outputJSON(JSONEnvelope{Command: "status", Status: "ok", Data: data})
 		}
@@ -67,6 +69,14 @@ var statusCmd = &cobra.Command{
 		// Quiet mode: success produces no output (exit code is authoritative).
 		if globalQuiet {
 			return nil
+		}
+
+		// Warn about symlinks that drift cannot track. The snapshot schema
+		// has no symlink-target field, so these entries are silently
+		// skipped on save and never restored. Surfacing them in status
+		// makes the gap visible rather than silently losing user data.
+		if changes.UntrackedSymlinks > 0 {
+			fmt.Fprintf(os.Stderr, "warning: %d symlink(s) present but not tracked (drift cannot represent symlink targets)\n", changes.UntrackedSymlinks)
 		}
 
 		total := len(changes.Added) + len(changes.Modified) + len(changes.Deleted)
@@ -142,9 +152,10 @@ type statusJSONSummary struct {
 // Branch is the current branch name (without "heads/" prefix), or empty if
 // HEAD is detached.
 type statusJSONData struct {
-	Branch   string            `json:"branch"`
-	Added    []string          `json:"added"`
-	Modified []string          `json:"modified"`
-	Deleted  []string          `json:"deleted"`
-	Summary  statusJSONSummary `json:"summary"`
+	Branch            string            `json:"branch"`
+	Added             []string          `json:"added"`
+	Modified          []string          `json:"modified"`
+	Deleted           []string          `json:"deleted"`
+	Summary           statusJSONSummary `json:"summary"`
+	UntrackedSymlinks int               `json:"untracked_symlinks"`
 }

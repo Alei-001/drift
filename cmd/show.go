@@ -96,8 +96,8 @@ var showCmd = &cobra.Command{
 
 		snapshot := resolveSnapshot(ctx, store, versionLabel)
 		if snapshot == nil {
-			reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
-				"use 'drift log' to list available snapshots.")
+		reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
+			"use 'drift log' to list available snapshots.", nil)
 			return ErrSilent
 		}
 
@@ -162,16 +162,16 @@ func showFile(ctx context.Context, store storage.Storer, cwd string, snapshot *c
 	if err != nil {
 		if errors.Is(err, porcelain.ErrFileNotFound) {
 			reportFailed("Show", "show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, versionLabel),
-				fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel))
+				fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel), err)
 			return ErrSilent
 		}
 		if errors.Is(err, porcelain.ErrInvalidPath) {
 			reportFailed("Show", "show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
-				"use a relative path from the project root.")
+				"use a relative path from the project root.", err)
 			return ErrSilent
 		}
 		reportFailed("Show", "show", fmt.Sprintf("cannot read '%s' from snapshot: %s.", filePath, err),
-			"the chunk data may be missing or corrupted; use 'drift check' to verify.")
+			"the chunk data may be missing or corrupted; use 'drift check' to verify.", err)
 		return ErrSilent
 	}
 
@@ -187,7 +187,7 @@ func showFile(ctx context.Context, store storage.Storer, cwd string, snapshot *c
 		fmt.Printf(">>> File %s:%s\n", versionLabel, filePath)
 		fmt.Println()
 		if _, err := os.Stdout.Write(result.Content); err != nil {
-			reportFailed("Show", "show", fmt.Sprintf("failed to stream '%s': %s.", filePath, err), "")
+			reportFailed("Show", "show", fmt.Sprintf("failed to stream '%s': %s.", filePath, err), "", err)
 			return ErrSilent
 		}
 		return nil

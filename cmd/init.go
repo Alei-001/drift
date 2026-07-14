@@ -33,7 +33,7 @@ var initCmd = &cobra.Command{
 
 		driftDir := filepath.Join(target, ".drift")
 		if _, err := os.Stat(driftDir); err == nil {
-			reportFailed("Init", "init", "already a drift repository.", "use 'drift status' to check current state.")
+			reportFailed("Init", "init", "already a drift repository.", "use 'drift status' to check current state.", nil)
 			return ErrSilent
 		}
 

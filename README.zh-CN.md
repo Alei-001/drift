@@ -33,7 +33,7 @@
 - **无暂存区** —— `drift save` 原样捕获工作区。作者只需关注作品本身，无需关心索引。
 - **无合并的分支** —— 创建实验性分支，自由切换，从任意位置恢复。永远不会有合并冲突。
 - **文件类型引擎** —— 文本（逐行 unified diff）、图片（格式/尺寸/大小对比，支持 PNG/JPEG/GIF/WebP/BMP/TIFF）、视频（格式识别 + 尺寸解析，支持 MP4/MOV/AVI/MKV/WebM）、二进制（兜底）。新引擎通过注册表插拔。
-- **自动监听** —— `drift watch on` 在文件变更时自动保存，auto-save 默认在 `log` 中隐藏。
+- **自动监听** —— `drift watch on` 定期扫描工作区，检测到变更时自动保存（默认间隔 300 秒），auto-save 默认在 `log` 中隐藏。
 - **远程同步** —— 通过 WebDAV 或 SMB 协议将本地仓库推送到远程存储，支持增量同步与分支级推送/拉取。
 - **单一二进制** —— macOS / Windows / Linux 通用的 Go 静态二进制。无需运行时，无需安装守护进程。
 
@@ -100,10 +100,10 @@ drift restore id:12ab
 drift undo
 
 # 配置远程仓库并同步
-drift remote add origin webdav://example.com/dav/my-novel
+drift remote add origin --url https://example.com/dav/my-novel --user <user>
 drift push origin            # 推送本地数据到远程
 drift pull origin            # 从远程拉取最新数据
-drift clone webdav://example.com/dav/my-novel my-novel  # 克隆远程仓库
+drift clone https://example.com/dav/my-novel my-novel  # 克隆远程仓库
 ```
 
 ## 命令一览

@@ -109,18 +109,23 @@ func NewSMBFS(cfg RemoteConfig) (RemoteFS, error) {
 	}, nil
 }
 
-// resolve joins a relative path with the SMB subPath. All paths use forward
-// slashes; go-smb2 accepts them on all platforms.
+// resolve joins a relative path with the SMB subPath. Per the RemoteFS
+// path contract, input paths have no leading slash; go-smb2 also requires
+// relative paths (no leading "/"), so resolve keeps paths as-is, joining
+// only the subPath prefix when configured. The root is represented by "."
+// because go-smb2 rejects paths starting with "\" (which "/" maps to).
 func (s *SMBFS) resolve(p string) string {
 	if p == "" || p == "." {
-		p = "/"
-	}
-	p = strings.ReplaceAll(p, "\\", "/")
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	if s.subPath != "" && s.subPath != "/" {
-		p = path.Join(s.subPath, p)
+		if s.subPath == "" || s.subPath == "/" {
+			return "."
+		}
+		p = s.subPath
+	} else {
+		p = strings.ReplaceAll(p, "\\", "/")
+		p = strings.TrimPrefix(p, "/")
+		if s.subPath != "" && s.subPath != "/" {
+			p = strings.TrimPrefix(s.subPath, "/") + "/" + p
+		}
 	}
 	return path.Clean(p)
 }
@@ -168,27 +173,6 @@ func (s *SMBFS) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 	return &smbReadCloser{file: f}, nil
 }
 
-// mkdirParents ensures the parent directory of resolved exists. It stats
-// first so the common "already exists" case avoids relying on MkdirAll's
-// EEXIST, which is filesystem-dependent.
-func (s *SMBFS) mkdirParents(ctx context.Context, resolved string) error {
-	parent := path.Dir(resolved)
-	if parent == "/" || parent == "." {
-		return nil
-	}
-	if info, err := s.share.Stat(parent); err == nil && info.IsDir() {
-		return nil
-	} else if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("stat parent %q: %w", parent, err)
-	}
-	if err := s.share.MkdirAll(parent, 0o755); err != nil {
-		if !os.IsExist(err) {
-			return fmt.Errorf("mkdir parent %q: %w", parent, err)
-		}
-	}
-	return nil
-}
-
 // Write uploads a file atomically: it first writes to <path>.partial, then
 // removes the target and renames the partial onto it. This prevents a
 // network interruption from leaving a half-written object on the remote.
@@ -198,10 +182,10 @@ func (s *SMBFS) Write(ctx context.Context, p string, r io.Reader) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	resolved := s.resolve(p)
-	if err := s.mkdirParents(ctx, resolved); err != nil {
+	if err := ensureRemoteDir(ctx, s, path.Dir(p)); err != nil {
 		return err
 	}
+	resolved := s.resolve(p)
 	partial := resolved + ".partial"
 	f, err := s.share.Create(partial)
 	if err != nil {

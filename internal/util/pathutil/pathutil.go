@@ -39,11 +39,16 @@ func Normalize(p string) string {
 func RelToWorkDir(workDir, path string) (string, error) {
 	path = Normalize(path)
 	if filepath.IsAbs(path) {
-		rel, err := Rel(workDir, path)
+		rel, err := filepath.Rel(workDir, path)
 		if err != nil {
 			return "", err
 		}
-		path = rel
+		// filepath.Rel on Windows returns a path with OS-native
+		// separators (backslashes). Normalize to forward slashes so the
+		// ".." escape check below works consistently on all platforms.
+		// Without this, a path like "..\..\Windows" would bypass the
+		// HasPrefix("../") check on Windows.
+		path = filepath.ToSlash(rel)
 	}
 	// Reject Unix-style rooted paths that filepath.IsAbs misses on Windows
 	// (e.g. "/etc/passwd", "\foo"). These are absolute on Unix and should

@@ -63,7 +63,7 @@ The current branch after clone is the remote's HEAD branch.`,
 			Password:   password,
 		})
 		if err != nil {
-			reportFailed("Clone", "clone", "clone failed.", "check the remote URL and network connectivity")
+			reportFailed("Clone", "clone", "clone failed.", "check the remote URL and network connectivity", err)
 			return silentWrap(err)
 		}
 

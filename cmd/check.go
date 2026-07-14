@@ -42,7 +42,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	report, err := porcelain.VerifyIntegrity(ctx, store, cwd, checkFilter, checkVerbose)
 	if err != nil {
-		reportFailed("Check", "check", "integrity check failed.", "")
+		reportFailed("Check", "check", "integrity check failed.", "", err)
 		return ErrSilent
 	}
 

@@ -30,7 +30,7 @@ var restoreCmd = &cobra.Command{
 
 		snapshot := resolveSnapshot(ctx, store, args[0])
 		if snapshot == nil {
-			reportFailed("Restore", "restore", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
+			reportFailed("Restore", "restore", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.", nil)
 			return ErrSilent
 		}
 
@@ -45,7 +45,7 @@ var restoreCmd = &cobra.Command{
 		if restoreNoBackup && filePath == "" {
 			reportFailed("Restore", "restore",
 				"--no-backup is only allowed for single-file restore.",
-				"full restore always creates a backup for safety.")
+				"full restore always creates a backup for safety.", nil)
 			return ErrSilent
 		}
 
@@ -78,7 +78,7 @@ var restoreCmd = &cobra.Command{
 			if errors.Is(err, porcelain.ErrFileNotFound) {
 				hint = fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", args[0])
 			}
-			reportFailed("Restore", "restore", "restore failed.", hint)
+			reportFailed("Restore", "restore", "restore failed.", hint, err)
 			return ErrSilent
 		}
 

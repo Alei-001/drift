@@ -54,17 +54,33 @@ func ResolveSnapshotRef(ctx context.Context, store storage.Storer, id string) (*
 }
 
 // resolveHead resolves the HEAD reference to a snapshot, following symbolic
-// references. Returns ErrSnapshotNotFound when HEAD is missing or points to
-// nothing.
+// references.
 //
-// store.GetRef already resolves symref chains recursively (see the
-// filesystem and memory backends), so the returned headRef.Target is the
-// final snapshot hash. The previous redundant second GetRef call has been
-// removed.
+// Error classification:
+//   - HEAD ref missing  → ErrNotARepo (the workspace has not been
+//     initialized; `drift log` in such a directory should exit with
+//     ExitNotRepo, not ExitInternalError).
+//   - HEAD present but Target is zero (empty repo with no commits yet)
+//     → ErrSnapshotNotFound (the repo exists but there is no snapshot to
+//     show).
+//   - HEAD points at a snapshot that is not in the store (corruption)
+//     → ErrSnapshotNotFound (wrapped with the missing hash for context).
+//
+// store.GetRef is contractually required to fully resolve symrefs: a GetRef
+// on a symref HEAD returns a Reference whose Target is the final snapshot
+// hash (not the intermediate branch ref). This matches the documented
+// contract of storage.Storer.GetRef and the filesystem backend's
+// implementation in internal/storage/backends/filesystem/ref.go. Callers
+// therefore never need a second GetRef to chase symrefs. ResolveHeadSnapshot
+// (in snapshot_branch.go) relies on the same contract; the two functions
+// intentionally use a single GetRef.
 func resolveHead(ctx context.Context, store storage.Storer) (*core.Snapshot, error) {
 	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
-		return nil, fmt.Errorf("read HEAD: %w", ErrSnapshotNotFound)
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, fmt.Errorf("read HEAD: %w", ErrNotARepo)
+		}
+		return nil, fmt.Errorf("read HEAD: %w", err)
 	}
 	if headRef.Target.IsZero() {
 		return nil, fmt.Errorf("HEAD points at nothing: %w", ErrSnapshotNotFound)

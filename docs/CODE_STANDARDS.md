@@ -54,8 +54,8 @@ Define sentinel errors in the package that owns the concept:
 | Package | Sentinel errors |
 |---------|----------------|
 | `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrPermission`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
-| `internal/porcelain/` | `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrTagNotFound`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain`, `ErrAmbiguousID`, `ErrCannotUndo`, `ErrUncommittedChanges` |
-| `internal/version/` | `ErrNetwork`, `ErrNoRelease`, `ErrNoAsset` |
+| `internal/porcelain/` | `ErrNotARepo`, `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrTagNotFound`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain`, `ErrAmbiguousID`, `ErrCannotUndo`, `ErrUncommittedChanges`, `ErrFileNotFound` |
+| `internal/version/` | `ErrNetwork`, `ErrNoRelease`, `ErrNoAsset`, `ErrChecksumMismatch` |
 
 Message format: either prefixed (`drift: not found`, storage/) or plain (`nothing to save`, porcelain/). Be consistent within a package.
 
@@ -283,7 +283,7 @@ Any `exec.Command` must use only program-generated or hardcoded arguments. User 
 
 ### 8.4 File extension allowlist for preview
 
-The `safePreviewExts` map in `cmd/show.go` is the single source of truth for which file types can be handed to the system viewer.
+The `safePreviewExts` map in `cmd/show_open.go` is the single source of truth for which file types can be handed to the system viewer.
 
 ---
 

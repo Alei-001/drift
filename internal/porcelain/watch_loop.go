@@ -229,7 +229,10 @@ func writeState(path string, state *WatchState) {
 		slog.Warn("marshal watch state", "error", err)
 		return
 	}
-	if err := fsutil.WriteFileAtomic(path, data, 0644); err != nil {
+	// 0600: watch.state may include file paths and last_error messages
+	// that could leak workspace layout or user data to other users on the
+	// system. Owner-only read/write matches credentials.json's convention.
+	if err := fsutil.WriteFileAtomic(path, data, 0o600); err != nil {
 		slog.Warn("write watch state", "path", path, "error", err)
 	}
 }

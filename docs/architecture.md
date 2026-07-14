@@ -24,10 +24,13 @@
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        CLI 层 (cmd/)                              │
-│  ┌────────┬────────┬────────┬────────┬────────┬──────────────┐   │
-│  │ init   │ save   │ log    │ show   │ status │ diff         │   │
-│  │restore │ new    │ switch │ ignore │ watch  │ check        │   │
-│  └────────┴────────┴────────┴────────┴────────┴──────────────┘   │
+│  ┌───────────┬───────────┬───────────┬───────────┬───────────┐   │
+│  │ init      │ save      │ log       │ show      │ status    │   │
+│  │ diff      │ restore   │ branch    │ switch    │ ignore    │   │
+│  │ watch     │ check     │ undo      │ tag       │ gc        │   │
+│  │ config    │ remote    │ push      │ pull      │ clone     │   │
+│  │ ls-remote │ export    │ import    │ version   │ upgrade   │   │
+│  └───────────┴───────────┴───────────┴───────────┴───────────┘   │
 ├──────────────────────────────────────────────────────────────────┤
 │                      porcelain 层 (porcelain/)                     │
 │  ┌─────────────┬─────────────┬─────────────┬──────────────────┐  │
@@ -107,6 +110,19 @@ graph TB
         IgnoreCmd["ignore"]
         WatchCmd["watch"]
         CheckCmd["check"]
+        UndoCmd["undo"]
+        TagCmd["tag"]
+        GcCmd["gc"]
+        ConfigCmd["config"]
+        RemoteCmd["remote"]
+        PushCmd["push"]
+        PullCmd["pull"]
+        CloneCmd["clone"]
+        LsRemoteCmd["ls-remote"]
+        ExportCmd["export"]
+        ImportCmd["import"]
+        VersionCmd["version"]
+        UpgradeCmd["upgrade"]
     end
 
     subgraph PORCELAIN["porcelain 层"]
@@ -193,7 +209,7 @@ flowchart LR
         Chunking["CDC 分块<br/>chunker.FastCDC"]
         Dedup["去重<br/>ChunkStore.Has()"]
         Store["存储新块<br/>ChunkStore.Put()"]
-        Thumb["生成预览<br/>Previewer.Generate()"]
+        Thumb["生成预览 (stub)<br/>Previewer.Preview()<br/>PutPreview 未实现"]
         BuildSnap["构建快照<br/>Snapshot{Chunks,Files}"]
         UpdateRef["更新引用<br/>RefStore.Set()"]
     end
@@ -201,7 +217,7 @@ flowchart LR
     subgraph OUTPUT["输出"]
         SnapObj["快照对象<br/>.drift/snapshots/"]
         ChunkObj["块对象<br/>.drift/chunks/"]
-        PreviewObj["预览缓存<br/>.drift/previews/"]
+        PreviewObj["预览缓存 (stub)<br/>.drift/previews/<br/>未持久化"]
         RefObj["引用<br/>.drift/refs/"]
     end
 
@@ -216,7 +232,7 @@ flowchart LR
     BuildSnap --> UpdateRef
     Store --> ChunkObj
     BuildSnap --> SnapObj
-    Thumb --> PreviewObj
+    Thumb -. "stub: PutPreview no-op" .-> PreviewObj
     UpdateRef --> RefObj
 ```
 
@@ -317,6 +333,7 @@ drift/
 │   ├── log.go                    # drift log
 │   ├── log_format.go             # log 格式化输出
 │   ├── log_json.go               # log JSON 输出
+│   ├── ls_remote.go              # drift ls-remote
 │   ├── show.go                   # drift show
 │   ├── show_json.go              # show JSON 输出
 │   ├── show_open.go              # show --open
@@ -324,6 +341,7 @@ drift/
 │   ├── diff_json.go              # diff JSON 输出
 │   ├── diff_file_json.go         # diff --file JSON 输出
 │   ├── diff_stat.go              # diff --stat 统计
+│   ├── export.go                 # drift export
 │   ├── restore.go                # drift restore
 │   ├── branch.go                 # drift branch
 │   ├── switch.go                 # drift switch
@@ -331,8 +349,10 @@ drift/
 │   ├── undo.go                   # drift undo
 │   ├── resolve.go                # drift resolve（冲突解决）
 │   ├── ignore.go                 # drift ignore
+│   ├── import.go                 # drift import
 │   ├── watch.go                  # drift watch
 │   ├── check.go                  # drift check
+│   ├── clone.go                  # drift clone
 │   ├── gc.go                     # drift gc
 │   ├── config.go                 # drift config
 │   ├── remote.go                 # drift remote
@@ -381,10 +401,14 @@ drift/
 │   │   ├── remote.go             # RemoteFS 接口 + 协议注册
 │   │   ├── config.go             # RemoteConfig 配置
 │   │   ├── credentials.go        # 凭据管理
-│   │   ├── sync.go               # 对象级内容寻址同步 + refs 快进判定
+│   │   ├── sync_batch.go         # 批量块哈希列举（本地/远程）
+│   │   ├── sync_index.go         # 同步后索引重建 + 分支 tip 解析
+│   │   ├── sync_remote_io.go     # 远程对象 I/O（snapshot/chunk/ref 传输）
+│   │   ├── sync_scope.go         # push/pull 范围收集 + 快照链遍历
+│   │   ├── sync_transfer.go      # Push/Pull/LsRemote 主入口 + 并发传输
 │   │   ├── webdav.go             # WebDAV 协议实现
 │   │   ├── smb.go                # SMB 协议实现
-│   │   └── mock_remote.go        # 测试用 mock 实现
+│   │   └── mock_remote_test.go   # 测试用 mock 实现
 │   │
 │   ├── version/                  # 版本元数据 + 自升级
 │   │   ├── version.go            # 构建时版本元数据
@@ -422,7 +446,7 @@ drift/
 │   │       └── metadata.go           # Metadata 实现
 │   │
 │   ├── chunker/                      # 分块算法层
-│   │   ├── chunker.go                # Chunker 接口（Chunk(r io.Reader)）
+│   │   ├── chunker.go                # Chunker 接口（Chunk(ctx, r, fn func(*core.Chunk) error) error）
 │   │   ├── strategy.go               # 共享分块策略（DefaultSelector + 阈值常量）
 │   │   ├── fastcdc.go                # FastCDC 实现
 │   │   ├── fixed.go                  # 定长分块（大文件 fallback）
@@ -437,10 +461,11 @@ drift/
 │   │   ├── config_store.go           # ConfigStore 接口
 │   │   ├── snapshot_store.go         # SnapshotStore 接口
 │   │   ├── clone.go                  # 共享克隆工具
+│   │   ├── compactor.go              # ChunkCompactor 接口 + CompactReport
 │   │   ├── errors.go                 # 存储层 sentinel errors
 │   │   ├── constants.go              # 存储常量
 │   │   ├── layout.go                 # 共享磁盘布局常量（ChunksDir, SnapshotsDir 等）
-│   │   ├── chunk_format.go           # 共享块线格式常量（ChunkHeaderSize, ChunkFlagCompressed）
+│   │   ├── chunk_format.go           # 共享块线格式常量（ChunkHeaderSize, ChunkFlagCompressed, ChunkFlagEncrypted）
 │   │   ├── refname/                  # ref 名校验
 │   │   │   └── refname.go
 │   │   ├── stream/                   # 流式工具（PeekHeader, HashFileContent）
@@ -449,6 +474,8 @@ drift/
 │   │       ├── filesystem/           # 磁盘存储（生产）
 │   │       │   ├── storage.go
 │   │       │   ├── chunk.go
+│   │       │   ├── compact.go         # CompactChunks 实现（loose → pack 整合）
+│   │       │   ├── pack.go             # pack 文件读写（.pack + .idx）
 │   │       │   ├── ref.go
 │   │       │   ├── snapshot.go
 │   │       │   ├── snapshot_codec.go # 快照 protobuf 编解码
@@ -581,7 +608,7 @@ type ChunkerSelector interface {
 
 // Differ 计算两个版本文件内容的差异（流式，不缓冲整个文件到内存）
 type Differ interface {
-    Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error)
+    Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error)
 }
 
 // Previewer 生成文件预览（文本用前N行，图片用尺寸/格式摘要，视频用容器信息）
@@ -675,17 +702,17 @@ type ConfigStorer interface {
 // push/pull 逻辑仅针对此接口编程，新增协议只需实现它并在 init() 中注册
 type RemoteFS interface {
     // Stat 返回远程路径的元数据，路径不存在时返回包装 os.ErrNotExist 的错误
-    Stat(path string) (*RemoteInfo, error)
+    Stat(ctx context.Context, path string) (*RemoteInfo, error)
     // Read 打开远程文件用于读取，调用方负责关闭返回的 reader
-    Read(path string) (io.ReadCloser, error)
+    Read(ctx context.Context, path string) (io.ReadCloser, error)
     // Write 上传文件，自动创建父目录，已存在则覆盖
-    Write(path string, r io.Reader) error
+    Write(ctx context.Context, path string, r io.Reader) error
     // Remove 删除远程文件，文件不存在不视为错误
-    Remove(path string) error
+    Remove(ctx context.Context, path string) error
     // List 枚举目录下的条目，目录为空或不存在时返回空 slice（非 nil）
-    List(path string) ([]RemoteInfo, error)
+    List(ctx context.Context, path string) ([]RemoteInfo, error)
     // MkdirAll 创建目录树，类似 os.MkdirAll
-    MkdirAll(path string) error
+    MkdirAll(ctx context.Context, path string) error
     // Close 释放协议级资源（连接/会话），不再使用时必须调用一次
     Close() error
 }
@@ -821,8 +848,9 @@ type IndexEntry struct {
 
 // Config 项目配置
 type Config struct {
-    User        UserConfig        // 用户信息
-    Core        CoreConfig        // 核心行为配置
+    Version int        `json:"version,omitempty"`
+    User    UserConfig `json:"user"`
+    Core    CoreConfig `json:"core"`
 }
 
 type UserConfig struct {
@@ -849,8 +877,11 @@ type CoreConfig struct {
 ├── workspace.lock        # 工作区并发锁文件（JSON，含 PID + 时间戳）
 │
 ├── chunks/               # 内容寻址的块存储
-│   └── ab/
-│       └── cdef1234...   # 块文件：{hash[0:2]}/{hash[2:]}，1字节头部+数据
+│   ├── ab/
+│   │   └── cdef1234...   # loose 块文件：{hash[0:2]}/{hash[2:]}，1字节头部+数据
+│   └── packs/            # pack 文件（loose 块数超阈值时自动打包）
+│       ├── pack-001.pack # 多个块拼接的 pack 数据文件
+│       └── pack-001.idx  # pack 索引（hash → offset/size 映射）
 │
 ├── snapshots/            # 快照对象
 │   └── 12/
@@ -924,10 +955,10 @@ sequenceDiagram
         Snapshot->>Registry: DetectEngine(path, content)
         Registry-->>Snapshot: Engine(text/image/video/binary)
 
-        Note over Snapshot,PS: 3. 生成预览
+        Note over Snapshot,PS: 3. 生成预览（Previewer.Preview 已实现，PutPreview 为 stub/no-op）
         Snapshot->>Engine: Previewer.Preview(header, size, reader, maxLines)
         Engine-->>Snapshot: Preview{summary}
-        Snapshot->>PS: PutPreview(hash, "thumb_128", preview)
+        Snapshot->>PS: PutPreview(hash, "thumb_128", preview) (stub: no-op，未持久化)
 
         Note over Snapshot,CD: 4. CDC 分块
         Snapshot->>Engine: ChunkerFor(fileSize)
@@ -1124,15 +1155,43 @@ func (e *ClipStudioEngine) DetectByHeuristic(path string, header []byte) bool { 
 错误在跨层传递时使用 `fmt.Errorf` 包装上下文，外部调用方用 `errors.Is` / `errors.As` 判断类型：
 
 ```go
-// 错误类型层级
+// 错误类型层级 —— 按包分组定义 sentinel errors
+// 各包独立定义自己的 sentinel，跨层传递时用 fmt.Errorf("…: %w", err) 包装
+
+// =================== internal/storage/errors.go ===================
 var (
     ErrNotFound      = errors.New("drift: not found")
     ErrAlreadyExists = errors.New("drift: already exists")
     ErrPermission    = errors.New("drift: permission denied")
-    ErrLocked        = errors.New("workspace is locked by another operation")
     ErrInvalidRef    = errors.New("drift: invalid reference")
     ErrCorrupted     = errors.New("drift: data corrupted")
     ErrUnsupported   = errors.New("drift: unsupported operation")
+)
+
+// =================== internal/porcelain/errors.go ===================
+var (
+    ErrNotARepo               = errors.New("not a drift repository")
+    ErrNothingToSave          = errors.New("nothing to save")
+    ErrBranchNotFound         = errors.New("branch not found")
+    ErrBranchAlreadyExists    = errors.New("branch already exists")
+    ErrSnapshotNotFound       = errors.New("snapshot not found")
+    ErrAmbiguousID            = errors.New("ambiguous snapshot ID prefix")
+    ErrTagAlreadyExists       = errors.New("tag already exists")
+    ErrTagNotFound            = errors.New("tag not found")
+    ErrCannotUndo             = errors.New("cannot undo: already at initial snapshot")
+    ErrUncommittedChanges     = errors.New("uncommitted changes would be lost")
+    ErrCannotDeleteCurrentBranch = errors.New("cannot delete the current branch")
+    ErrCannotDeleteMain       = errors.New("cannot delete 'main'")
+    ErrCannotRenameMain       = errors.New("cannot rename 'main'")
+    ErrLocked                 = errors.New("workspace is locked by another operation")
+)
+
+// =================== internal/version/release.go ===================
+var (
+    ErrNetwork          = errors.New("network error")
+    ErrNoRelease        = errors.New("no release available")
+    ErrNoAsset          = errors.New("no matching release asset")
+    ErrChecksumMismatch = errors.New("checksum verification failed")
 )
 
 // 跨层包装示例
@@ -1334,7 +1393,7 @@ func (e *ClipStudioEngine) ChunkerFor(fileSize int64) chunker.Chunker {
     return chunker.BinaryChunkerFor(fileSize)
 }
 
-func (e *ClipStudioEngine) Diff(oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
+func (e *ClipStudioEngine) Diff(ctx context.Context, oldPath string, oldReader io.Reader, newPath string, newReader io.Reader) (string, error) {
     // 图层级 diff（自定义实现，流式读取）
     return clipLayerDiff(oldReader, newReader)
 }
@@ -1419,20 +1478,25 @@ storage 接口使用语义化版本：
 │                                                    │
 │  ┌──────────────┐   ┌──────────────┐              │
 │  │  Chunk Cache  │   │ Preview Cache│              │
-│  │  (LRU, 256MB) │   │ (LRU, 128MB) │              │
+│  │  (LRU, 256MB) │   │ (未实现/stub)│              │
 │  │  热点块内存缓存│   │  缩略图缓存   │              │
 │  └──────────────┘   └──────────────┘              │
 │         │                  │                       │
-│         ▼                  ▼                       │
+│         ▼                  ▼ (stub)                │
 │  ┌─────────────────────────────────┐              │
 │  │         磁盘 (.drift/)           │              │
-│  │  所有块 + 预览图的持久化存储      │              │
+│  │  块持久化存储；预览未持久化        │              │
 │  └─────────────────────────────────┘              │
 │                                                    │
 │  驱逐策略：                                        │
-│  - GUI 时间线预加载最近 20 个快照的缩略图                  │
+│  - GUI 时间线预加载最近 20 个快照的缩略图（未实现）          │
 │  - CLI 操作仅缓存热点块，不加载预览                         │
 │  - 超过限制按 LRU 淘汰，数据仍在磁盘                │
+│                                                    │
+│  注：Preview Cache 当前为 stub。                     │
+│  PreviewStorer.PutPreview 是 no-op，               │
+│  GetPreview 返回 ErrNotFound。                      │
+│  预览功能待后续阶段实现（见 §1.3）。                  │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -1549,7 +1613,7 @@ func chunkFile(ctx context.Context, path string, r io.Reader, engine filetype.En
 | **分块策略** | 无（整文件 delta） | FastCDC 内容定义分块 |
 | **存储格式** | packfile（delta 链） | 内容寻址块 + zstd 压缩 |
 | **文件类型** | 全部视为二进制 | 注册式引擎，按类型定制 |
-| **预览/缩略图** | 无 | 存储层内置生成，GUI 时间线展示，CLI 不显示 |
+| **预览/缩略图** | 无 | 引擎层 Previewer.Preview() 已实现；存储层为 stub（PutPreview no-op / GetPreview 返回 ErrNotFound），持久化待后续阶段 |
 | **暂存区** | 有（git add） | 无（save 自动全量） |
 | **合并模型** | 三路合并 | 不做合并 |
 | **远程协议** | Git smart protocol | 块级同步（未来） |

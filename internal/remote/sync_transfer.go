@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/Alei-001/drift/internal/core"
 	"github.com/Alei-001/drift/internal/storage"
@@ -21,30 +21,23 @@ import (
 // connections.
 const defaultConcurrency = 8
 
-// concurrency is the worker count used by push/pull chunk transfers. It
-// defaults to defaultConcurrency and can be overridden via SetConcurrency
-// (typically from RemoteConfig.Options["concurrency"] in the porcelain
-// layer). It is read once at the start of each transfer loop, so changing
-// it during an in-flight push/pull has no effect on that operation.
-// Access is atomic because SetConcurrency may be called from a different
-// goroutine than the transfer loops that read it.
-var concurrency atomic.Int32
-
-func init() {
-	concurrency.Store(int32(defaultConcurrency))
+// SyncOptions configures the behavior of Push, Pull, PushDryRun, and
+// PullDryRun. A zero-value SyncOptions uses sensible defaults. Pass it
+// explicitly to each call so that concurrent operations do not share
+// mutable global state.
+type SyncOptions struct {
+	// Concurrency is the maximum number of concurrent chunk transfers.
+	// A non-positive value falls back to defaultConcurrency (8).
+	Concurrency int
 }
 
-// SetConcurrency overrides the worker count for push/pull chunk transfers.
-// It must be called before Push/Pull. A non-positive value falls back to the
-// default (8). This is the hook by which RemoteConfig.Options["concurrency"]
-// reaches the transfer loops without threading an extra parameter through
-// every Push/Pull signature.
-func SetConcurrency(n int) {
-	if n > 0 {
-		concurrency.Store(int32(n))
-	} else {
-		concurrency.Store(int32(defaultConcurrency))
+// effectiveConcurrency returns the concurrency value to use, falling back
+// to the default when opts.Concurrency is non-positive.
+func (o SyncOptions) effectiveConcurrency() int {
+	if o.Concurrency > 0 {
+		return o.Concurrency
 	}
+	return defaultConcurrency
 }
 
 // SyncStats reports the outcome of a push or pull operation.
@@ -78,7 +71,7 @@ func LsRemote(ctx context.Context, rfs RemoteFS) ([]*core.Reference, error) {
 //
 // If branch is non-empty, only that branch's snapshot chain and its chunks
 // are synced, plus the branch ref itself.
-func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string) (*SyncStats, error) {
+func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -90,7 +83,7 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 	}
 
 	// 1. Upload chunks first so snapshots always reference existing chunks.
-	if err := pushChunksConcurrent(ctx, store, rfs, chunkHashes, stats); err != nil {
+	if err := pushChunksConcurrent(ctx, store, rfs, chunkHashes, stats, opts); err != nil {
 		return nil, err
 	}
 
@@ -168,7 +161,7 @@ func partialPullErr(err error, stats *SyncStats) error {
 //
 // If branch is non-empty, only that branch's snapshot chain and its chunks
 // are synced, plus the branch ref itself.
-func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string) (*SyncStats, error) {
+func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -209,7 +202,7 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 	}
 
 	// Download chunks concurrently with progress reporting.
-	if err := pullChunksConcurrent(ctx, store, rfs, chunkHashes, stats); err != nil {
+	if err := pullChunksConcurrent(ctx, store, rfs, chunkHashes, stats, opts); err != nil {
 		return stats, partialPullErr(err, stats)
 	}
 
@@ -300,7 +293,7 @@ func classifyRefPush(ctx context.Context, store storage.Storer, rfs RemoteFS, re
 
 // PushDryRun collects the push scope and returns stats without actually
 // uploading anything. The remote is only read (for existence checks).
-func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string) (*SyncStats, error) {
+func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -360,7 +353,7 @@ func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 
 // PullDryRun collects the pull scope and returns stats without actually
 // downloading anything. The remote is only read (for listing).
-func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string) (*SyncStats, error) {
+func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -405,7 +398,7 @@ func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 // before uploading, replacing N per-chunk Stat calls with at most 256 List
 // calls (typically far fewer). On the first error the derived context is
 // cancelled so no new workers are launched and in-flight workers exit early.
-func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats) error {
+func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats, opts SyncOptions) error {
 	chunkTotal := len(chunkHashes)
 	if chunkTotal == 0 {
 		return nil
@@ -430,6 +423,25 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 		return nil
 	}
 
+	// Pre-create missing chunk prefix directories serially before launching
+	// concurrent workers. This eliminates the TOCTOU race where multiple
+	// goroutines simultaneously try to MkdirAll the same parent directory
+	// (e.g. chunks/3d/), which fails on non-standard servers that return
+	// 500 instead of 405 for MKCOL on an existing directory.
+	missingDirs := make(map[string]bool)
+	for _, ch := range toUpload {
+		hex := ch.FullString()
+		missingDirs[path.Join(storage.ChunksDir, hex[:2])] = true
+	}
+	for dir := range missingDirs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := ensureRemoteDir(ctx, rfs, dir); err != nil {
+			return fmt.Errorf("pre-create chunk dir %q: %w", dir, err)
+		}
+	}
+
 	// Derive a cancellable context so the first error stops launching new
 	// workers and signals in-flight workers to abandon their work.
 	ctx, cancel := context.WithCancel(ctx)
@@ -438,7 +450,7 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 	bar := progressbar.Default(int64(len(toUpload)), "chunks push")
 	var mu sync.Mutex
 	var firstErr error
-	sem := make(chan struct{}, int(concurrency.Load()))
+	sem := make(chan struct{}, opts.effectiveConcurrency())
 	var wg sync.WaitGroup
 	for _, ch := range toUpload {
 		if err := ctx.Err(); err != nil {
@@ -477,7 +489,7 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 // downloading, replacing N per-chunk HasChunk calls with a single call. On
 // the first error the derived context is cancelled so no new workers are
 // launched and in-flight workers exit early.
-func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats) error {
+func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats, opts SyncOptions) error {
 	chunkTotal := len(chunkHashes)
 	if chunkTotal == 0 {
 		return nil
@@ -510,7 +522,7 @@ func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 	bar := progressbar.Default(int64(len(toDownload)), "chunks pull")
 	var mu sync.Mutex
 	var firstErr error
-	sem := make(chan struct{}, int(concurrency.Load()))
+	sem := make(chan struct{}, opts.effectiveConcurrency())
 	var wg sync.WaitGroup
 	for _, ch := range toDownload {
 		if err := ctx.Err(); err != nil {

@@ -35,9 +35,10 @@ const (
 // Global CLI option flags. These are bound to PersistentFlags in init() and
 // are available to all subcommands.
 var (
-	globalCwd   string
-	globalJSON  bool
-	globalQuiet bool
+	globalCwd     string
+	globalJSON    bool
+	globalQuiet   bool
+	globalVerbose bool
 )
 
 // logCloser holds the closer for .drift/logs/drift.log when file logging
@@ -89,6 +90,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&globalCwd, "cwd", "C", "", "run command in the specified directory")
 	rootCmd.PersistentFlags().BoolVar(&globalJSON, "json", false, "output in JSON format")
 	rootCmd.PersistentFlags().BoolVarP(&globalQuiet, "quiet", "q", false, "quiet mode (errors only)")
+	rootCmd.PersistentFlags().BoolVarP(&globalVerbose, "verbose", "v", false, "show detailed error information")
 }
 
 // getCwd returns the working directory for the command. If --cwd is set,
@@ -148,6 +150,7 @@ func classifyError(err error) int {
 		return ExitConflict
 	}
 	if isUsageError(err) {
+		fmt.Fprintln(os.Stderr, err)
 		return ExitUsage
 	}
 	if errors.Is(err, ErrSilent) {

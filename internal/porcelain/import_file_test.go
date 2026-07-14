@@ -84,22 +84,17 @@ func TestImportFileFromBranch_NormalImport(t *testing.T) {
 		t.Errorf("content = %q, want %q", string(content), string(textData))
 	}
 
-	// Verify the index was updated.
+	// Verify the index was NOT updated: the imported file must appear as
+	// a new (added) file in 'drift status' so the next 'drift save' can
+	// capture it. This is the intended workflow documented in the command
+	// help ("After importing, run 'drift save' to record the change").
 	idx, err := store.GetIndex(context.Background())
-	if err != nil {
-		t.Fatalf("GetIndex failed: %v", err)
-	}
-	var found bool
-	for _, e := range idx.Entries {
-		if e.Path == "docs/readme.txt" {
-			found = true
-			if e.Size != int64(len(textData)) {
-				t.Errorf("index size = %d, want %d", e.Size, len(textData))
+	if err == nil && len(idx.Entries) > 0 {
+		for _, e := range idx.Entries {
+			if e.Path == "docs/readme.txt" {
+				t.Error("index should NOT contain 'docs/readme.txt' after import; the file must be detectable as 'added' by status/save")
 			}
 		}
-	}
-	if !found {
-		t.Error("expected index to contain 'docs/readme.txt'")
 	}
 }
 
@@ -192,14 +187,16 @@ func TestImportFileFromBranch_BranchNoSnapshots(t *testing.T) {
 	}
 }
 
-// TestImportFileFromBranch_UpdatesExistingIndexEntry verifies that when the
-// file already exists in the index, its entry is updated rather than
-// duplicated.
-func TestImportFileFromBranch_UpdatesExistingIndexEntry(t *testing.T) {
-	store, textData, _ := importTestBranch(t)
+// TestImportFileFromBranch_PreservesExistingIndex verifies that import does
+// not touch the index even when a pre-existing entry for the same path is
+// present. The index must stay as-is so that 'drift status' detects the
+// workspace file as modified (different size/hash) and 'drift save' can
+// capture it.
+func TestImportFileFromBranch_PreservesExistingIndex(t *testing.T) {
+	store, _, _ := importTestBranch(t)
 	dir := t.TempDir()
 
-	// Pre-populate the index with an entry for docs/readme.txt.
+	// Pre-populate the index with a stale entry for docs/readme.txt.
 	store.SetIndex(context.Background(), &core.Index{
 		Entries: []core.IndexEntry{
 			{Path: "docs/readme.txt", Size: 1},
@@ -211,20 +208,15 @@ func TestImportFileFromBranch_UpdatesExistingIndexEntry(t *testing.T) {
 		t.Fatalf("ImportFileFromBranch failed: %v", err)
 	}
 
+	// The index entry should remain unchanged (size 1, not the imported
+	// file's real size) so status/save detect the mismatch.
 	idx, err := store.GetIndex(context.Background())
 	if err != nil {
 		t.Fatalf("GetIndex failed: %v", err)
 	}
-	count := 0
 	for _, e := range idx.Entries {
-		if e.Path == "docs/readme.txt" {
-			count++
-			if e.Size != int64(len(textData)) {
-				t.Errorf("index size = %d, want %d", e.Size, len(textData))
-			}
+		if e.Path == "docs/readme.txt" && e.Size != 1 {
+			t.Errorf("index should be unchanged (size 1), got size %d", e.Size)
 		}
-	}
-	if count != 1 {
-		t.Errorf("expected 1 index entry for docs/readme.txt, got %d", count)
 	}
 }

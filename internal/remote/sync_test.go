@@ -94,7 +94,7 @@ func TestPush_PushesSnapshotAndChunk(t *testing.T) {
 	snapID, chunkHash := makeTestSnapshot(t, store, "test message", nil)
 	setupBranchRef(t, store, "main", snapID.Hash)
 
-	stats, err := Push(context.Background(), store, rfs, "")
+	stats, err := Push(context.Background(), store, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
@@ -138,12 +138,12 @@ func TestPush_SkipsExistingObjects(t *testing.T) {
 	setupBranchRef(t, store, "main", snapID.Hash)
 
 	// First push.
-	_, err := Push(context.Background(), store, rfs, "")
+	_, err := Push(context.Background(), store, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("first Push: %v", err)
 	}
 	// Second push should skip everything.
-	stats, err := Push(context.Background(), store, rfs, "")
+	stats, err := Push(context.Background(), store, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("second Push: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestPull_DownloadsObjects(t *testing.T) {
 	setupBranchRef(t, srcStore, "main", snapID.Hash)
 
 	// Push from source to remote.
-	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+	if _, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{}); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -180,7 +180,7 @@ func TestPull_DownloadsObjects(t *testing.T) {
 	dstStore := memory.NewMemoryStorage()
 	defer dstStore.Close()
 
-	stats, err := Pull(context.Background(), dstStore, rfs, "")
+	stats, err := Pull(context.Background(), dstStore, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestPull_SkipsExistingObjects(t *testing.T) {
 	snapID, _ := makeTestSnapshot(t, srcStore, "skip pull", nil)
 	setupBranchRef(t, srcStore, "main", snapID.Hash)
 
-	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+	if _, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{}); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestPull_SkipsExistingObjects(t *testing.T) {
 	makeTestSnapshot(t, dstStore, "skip pull", nil)
 	setupBranchRef(t, dstStore, "main", snapID.Hash)
 
-	stats, err := Pull(context.Background(), dstStore, rfs, "")
+	stats, err := Pull(context.Background(), dstStore, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestPush_PushRefDiverged(t *testing.T) {
 
 	// Push base + snapID1, set remote main = snapID1.
 	setupBranchRef(t, srcStore, "main", snapID1.Hash)
-	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+	if _, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{}); err != nil {
 		t.Fatalf("first Push: %v", err)
 	}
 
@@ -266,7 +266,7 @@ func TestPush_PushRefDiverged(t *testing.T) {
 	setupBranchRef(t, srcStore, "main", snapID2.Hash)
 
 	// Push should fail — snapID2 and snapID1 are siblings, not fast-forward.
-	_, err := Push(context.Background(), srcStore, rfs, "")
+	_, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{})
 	if err == nil {
 		t.Fatal("expected Push to fail with ref diverged, got nil")
 	}
@@ -282,7 +282,7 @@ func TestPush_FastForward(t *testing.T) {
 	// Create base, push it.
 	baseSnapID, _ := makeTestSnapshot(t, srcStore, "base", nil)
 	setupBranchRef(t, srcStore, "main", baseSnapID.Hash)
-	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+	if _, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{}); err != nil {
 		t.Fatalf("first Push: %v", err)
 	}
 
@@ -291,7 +291,7 @@ func TestPush_FastForward(t *testing.T) {
 	setupBranchRef(t, srcStore, "main", childSnapID.Hash)
 
 	// Push should fast-forward the remote ref (base is ancestor of child).
-	stats, err := Push(context.Background(), srcStore, rfs, "")
+	stats, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push fast-forward failed: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestPull_FastForward(t *testing.T) {
 	setupBranchRef(t, srcStore, "main", childSnapID.Hash)
 
 	// Push to remote.
-	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+	if _, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{}); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -334,7 +334,7 @@ func TestPull_FastForward(t *testing.T) {
 	makeTestSnapshot(t, dstStore, "base", nil)
 	setupBranchRef(t, dstStore, "main", baseSnapID.Hash)
 
-	stats, err := Pull(context.Background(), dstStore, rfs, "")
+	stats, err := Pull(context.Background(), dstStore, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestPull_RefDivergedSavedAsRemote(t *testing.T) {
 	setupBranchRef(t, srcStore, "main", snapID2.Hash)
 
 	// Push the remote version.
-	if _, err := Push(context.Background(), srcStore, rfs, ""); err != nil {
+	if _, err := Push(context.Background(), srcStore, rfs, "", SyncOptions{}); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 
@@ -376,7 +376,7 @@ func TestPull_RefDivergedSavedAsRemote(t *testing.T) {
 	makeTestSnapshot(t, dstStore, "local version", nil)
 	setupBranchRef(t, dstStore, "main", snapID1.Hash)
 
-	stats, err := Pull(context.Background(), dstStore, rfs, "")
+	stats, err := Pull(context.Background(), dstStore, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestPush_BranchScoped(t *testing.T) {
 	}
 
 	// Push only the feature branch.
-	stats, err := Push(context.Background(), store, rfs, "feature")
+	stats, err := Push(context.Background(), store, rfs, "feature", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}

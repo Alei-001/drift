@@ -36,18 +36,18 @@ var switchCmd = &cobra.Command{
 		autosaveID, fromBranch, diffCount, err := porcelain.SwitchBranch(ctx, store, cwd, name, switchCreate, switchNoAutosave, author, &cfg.Core)
 		if err != nil {
 			if errors.Is(err, porcelain.ErrUncommittedChanges) {
-				reportFailed("Switch", "switch", "--no-autosave requires a clean working tree.", "use 'drift save' first, or drop --no-autosave to auto-save.")
+				reportFailed("Switch", "switch", "--no-autosave requires a clean working tree.", "use 'drift save' first, or drop --no-autosave to auto-save.", err)
 				return silentWrap(err)
 			}
 			if errors.Is(err, porcelain.ErrBranchNotFound) {
-				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch list' to list existing branches.")
+				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch list' to list existing branches.", err)
 				return silentWrap(err)
 			}
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
-				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
+				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.", err)
 				return silentWrap(err)
 			}
-			reportFailed("Switch", "switch", "could not switch branch.", "")
+			reportFailed("Switch", "switch", "could not switch branch.", "", err)
 			return silentWrap(err)
 		}
 

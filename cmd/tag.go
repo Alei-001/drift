@@ -106,17 +106,17 @@ var tagAddCmd = &cobra.Command{
 		}
 		snap := resolveSnapshot(ctx, store, version)
 		if snap == nil {
-			reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.")
+			reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.", nil)
 			return ErrSilent
 		}
 		if err := porcelain.AddTag(ctx, store, cwd, name, snap.ID); err != nil {
 			switch {
 			case errors.Is(err, porcelain.ErrTagAlreadyExists):
-				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' already exists.", name), fmt.Sprintf("use 'drift tag delete %s' first, or pick another name.", name))
+				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' already exists.", name), fmt.Sprintf("use 'drift tag delete %s' first, or pick another name.", name), err)
 			case errors.Is(err, porcelain.ErrSnapshotNotFound):
-				reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.")
+				reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.", err)
 			default:
-				reportFailed("Tag", "tag", "could not create tag.", "")
+				reportFailed("Tag", "tag", "could not create tag.", "", err)
 			}
 			return silentWrap(err)
 		}
@@ -149,9 +149,9 @@ var tagDeleteCmd = &cobra.Command{
 		name := args[0]
 		if err := porcelain.DeleteTag(ctx, store, cwd, name); err != nil {
 			if errors.Is(err, porcelain.ErrTagNotFound) {
-				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' not found.", name), "use 'drift tag list' to see existing tags.")
+				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' not found.", name), "use 'drift tag list' to see existing tags.", err)
 			} else {
-				reportFailed("Tag", "tag", err.Error(), "")
+				reportFailed("Tag", "tag", err.Error(), "", err)
 			}
 			return ErrSilent
 		}
@@ -186,11 +186,11 @@ var tagRenameCmd = &cobra.Command{
 		if err := porcelain.RenameTag(ctx, store, cwd, oldName, newName); err != nil {
 			switch {
 			case errors.Is(err, porcelain.ErrTagNotFound):
-				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' not found.", oldName), "use 'drift tag list' to see existing tags.")
+				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' not found.", oldName), "use 'drift tag list' to see existing tags.", err)
 			case errors.Is(err, porcelain.ErrTagAlreadyExists):
-				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' already exists.", newName), fmt.Sprintf("use 'drift tag delete %s' first, or pick another name.", newName))
+				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' already exists.", newName), fmt.Sprintf("use 'drift tag delete %s' first, or pick another name.", newName), err)
 			default:
-				reportFailed("Tag", "tag", "could not rename tag.", "")
+				reportFailed("Tag", "tag", "could not rename tag.", "", err)
 			}
 			return silentWrap(err)
 		}

@@ -24,8 +24,8 @@ var lsRemoteCmd = &cobra.Command{
 
 		refs, err := porcelain.LsRemote(ctx, cwd, remoteName)
 		if err != nil {
-			reportFailed("Ls-remote", "ls-remote", "could not list remote refs.", "check remote configuration and network connectivity")
-			return ErrSilent
+			reportFailed("Ls-remote", "ls-remote", "could not list remote refs.", "check remote configuration and network connectivity", err)
+			return silentWrap(err)
 		}
 
 		if globalJSON {

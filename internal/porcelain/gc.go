@@ -61,18 +61,31 @@ func collectRoots(ctx context.Context, store storage.Storer) ([]core.Hash, error
 	return roots, nil
 }
 
-// computeReachableSet returns the set of snapshot hashes reachable from all
-// branch, tag, and detached-HEAD references by following PrevID pointers
-// backwards. It is the shared reachability primitive used by both
-// CollectGarbage (via computeReachability) and pruneAutoSnapshots, so the two
-// code paths cannot diverge on what "reachable" means.
-func computeReachableSet(ctx context.Context, store storage.Storer) (map[core.Hash]bool, error) {
-	roots, err := collectRoots(ctx, store)
-	if err != nil {
-		return nil, err
+// bfsReachable performs a BFS from all branch, tag, and detached-HEAD
+// references by following PrevID pointers backwards, returning the visited
+// set (a hash is reachable iff it was enqueued). When withCache is true, the
+// returned snapCache holds the full Snapshot objects fetched during BFS
+// (keyed by hash), letting callers like CollectGarbage avoid a second round
+// of GetSnapshot calls. When withCache is false, snapCache is nil and the
+// BFS does not retain the full Snapshot objects, reducing memory for callers
+// that only need the reachable set (e.g. pruneAutoSnapshots,
+// CountUnreachableSnapshots).
+//
+// This is the single reachability primitive; the previous separate
+// computeReachableSet and computeReachability functions were near-identical
+// copies whose only difference was whether they populated the cache. Folding
+// them into one function eliminates the risk of the two code paths diverging
+// on what "reachable" means.
+func bfsReachable(ctx context.Context, store storage.Storer, withCache bool) (visited map[core.Hash]bool, snapCache map[core.Hash]*core.Snapshot, err error) {
+	roots, rerr := collectRoots(ctx, store)
+	if rerr != nil {
+		return nil, nil, rerr
 	}
 
-	visited := make(map[core.Hash]bool)
+	visited = make(map[core.Hash]bool)
+	if withCache {
+		snapCache = make(map[core.Hash]*core.Snapshot)
+	}
 	queue := make([]core.Hash, 0, len(roots))
 
 	for _, h := range roots {
@@ -84,21 +97,24 @@ func computeReachableSet(ctx context.Context, store storage.Storer) (map[core.Ha
 
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		h := queue[0]
 		queue = queue[1:]
 
-		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: h})
-		if err != nil {
+		snap, gerr := store.GetSnapshot(ctx, core.SnapshotID{Hash: h})
+		if gerr != nil {
 			// Snapshot referenced by a ref but missing from storage: skip
 			// it but continue traversing the rest of the graph. Only
 			// ErrNotFound is skippable; any other error (e.g. corruption
 			// or an I/O failure) must propagate so the caller can decide.
-			if errors.Is(err, storage.ErrNotFound) {
+			if errors.Is(gerr, storage.ErrNotFound) {
 				continue
 			}
-			return nil, fmt.Errorf("get snapshot %s: %w", h.FullString(), err)
+			return nil, nil, fmt.Errorf("get snapshot %s: %w", h.FullString(), gerr)
+		}
+		if withCache {
+			snapCache[h] = snap
 		}
 
 		if snap.PrevID != nil && !snap.PrevID.Hash.IsZero() && !visited[snap.PrevID.Hash] {
@@ -107,64 +123,31 @@ func computeReachableSet(ctx context.Context, store storage.Storer) (map[core.Ha
 		}
 	}
 
-	return visited, nil
+	return visited, snapCache, nil
 }
 
-// computeReachability performs a BFS from all branch and tag references to
-// determine which snapshots are reachable. It returns the visited set (which
-// doubles as the reachability set — a hash is reachable iff it was enqueued),
-// the full list of stored snapshots, and a cache of the full Snapshot objects
-// fetched during the BFS (keyed by hash). The cache lets callers like
-// CollectGarbage avoid a second round of GetSnapshot calls when collecting
-// reachable chunks.
+// computeReachableSet returns the set of snapshot hashes reachable from all
+// branch, tag, and detached-HEAD references by following PrevID pointers
+// backwards. It is a thin wrapper around bfsReachable for callers that do
+// not need the snapshot cache.
+func computeReachableSet(ctx context.Context, store storage.Storer) (map[core.Hash]bool, error) {
+	visited, _, err := bfsReachable(ctx, store, false)
+	return visited, err
+}
+
+// computeReachability returns the reachable set, the full list of stored
+// snapshots, and a cache of the full Snapshot objects fetched during BFS
+// (keyed by hash). The cache lets callers like CollectGarbage avoid a second
+// round of GetSnapshot calls when collecting reachable chunks.
 func computeReachability(ctx context.Context, store storage.Storer) (map[core.Hash]bool, []*core.SnapshotSummary, map[core.Hash]*core.Snapshot, error) {
-	roots, err := collectRoots(ctx, store)
+	visited, snapCache, err := bfsReachable(ctx, store, true)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	visited := make(map[core.Hash]bool)
-	snapCache := make(map[core.Hash]*core.Snapshot)
-	queue := make([]core.Hash, 0, len(roots))
-
-	for _, h := range roots {
-		if !h.IsZero() && !visited[h] {
-			visited[h] = true
-			queue = append(queue, h)
-		}
-	}
-
-	for len(queue) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, nil, err
-		}
-		h := queue[0]
-		queue = queue[1:]
-
-		snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: h})
-		if err != nil {
-			// Snapshot referenced by a ref but missing from storage: skip
-			// it but continue traversing the rest of the graph. Only
-			// ErrNotFound is skippable; any other error (e.g. corruption
-			// or an I/O failure) must propagate so the caller can decide.
-			if errors.Is(err, storage.ErrNotFound) {
-				continue
-			}
-			return nil, nil, nil, fmt.Errorf("get snapshot %s: %w", h.FullString(), err)
-		}
-		snapCache[h] = snap
-
-		if snap.PrevID != nil && !snap.PrevID.Hash.IsZero() && !visited[snap.PrevID.Hash] {
-			visited[snap.PrevID.Hash] = true
-			queue = append(queue, snap.PrevID.Hash)
-		}
-	}
-
 	allSnapshots, err := store.ListSnapshots(ctx, nil)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("list snapshots: %w", err)
 	}
-
 	return visited, allSnapshots, snapCache, nil
 }
 

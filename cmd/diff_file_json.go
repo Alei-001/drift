@@ -16,7 +16,7 @@ import (
 func diffFileJSON(ctx context.Context, store storage.Storer, cwd string, snap1, snap2 *core.Snapshot, label1, label2, filePath string) error {
 	result := porcelain.DiffFileInSnapshots(ctx, store, cwd, snap1, snap2, filePath)
 	if result.Stderr != "" {
-		reportFailed("Diff", "diff", strings.TrimSpace(result.Stderr), "")
+		reportFailed("Diff", "diff", strings.TrimSpace(result.Stderr), "", nil)
 		return ErrSilent
 	}
 	return outputJSON(JSONEnvelope{
@@ -43,11 +43,11 @@ func diffFileJSON(ctx context.Context, store storage.Storer, cwd string, snap1, 
 func diffWorkspaceFileJSON(ctx context.Context, store storage.Storer, cwd string, snap *core.Snapshot, snapLabel, filePath string) error {
 	result, err := porcelain.DiffWorkspaceFileVsSnapshot(ctx, store, cwd, snap, filePath)
 	if err != nil {
-		reportFailed("Diff", "diff", err.Error(), "")
+		reportFailed("Diff", "diff", err.Error(), "", err)
 		return ErrSilent
 	}
 	if result.Stderr != "" {
-		reportFailed("Diff", "diff", strings.TrimSpace(result.Stderr), "")
+		reportFailed("Diff", "diff", strings.TrimSpace(result.Stderr), "", nil)
 		return ErrSilent
 	}
 	return outputJSON(JSONEnvelope{

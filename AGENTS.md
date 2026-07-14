@@ -86,8 +86,8 @@ package must NOT import `storage/backends/filesystem`.
 | Package | Sentinels |
 |---------|-----------|
 | `internal/storage/` | `ErrNotFound`, `ErrAlreadyExists`, `ErrPermission`, `ErrInvalidRef`, `ErrCorrupted`, `ErrUnsupported` |
-| `internal/porcelain/` | `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrTagNotFound`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain`, `ErrAmbiguousID`, `ErrCannotUndo`, `ErrUncommittedChanges` |
-| `internal/version/` | `ErrNetwork`, `ErrNoRelease`, `ErrNoAsset` |
+| `internal/porcelain/` | `ErrNotARepo`, `ErrLocked`, `ErrNothingToSave`, `ErrBranchNotFound`, `ErrBranchAlreadyExists`, `ErrSnapshotNotFound`, `ErrTagAlreadyExists`, `ErrTagNotFound`, `ErrCannotDeleteCurrentBranch`, `ErrCannotDeleteMain`, `ErrCannotRenameMain`, `ErrAmbiguousID`, `ErrCannotUndo`, `ErrUncommittedChanges`, `ErrFileNotFound` |
+| `internal/version/` | `ErrNetwork`, `ErrNoRelease`, `ErrNoAsset`, `ErrChecksumMismatch` |
 
 Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify errors with `errors.Is` / `errors.As` — never `strings.Contains(err.Error(), …)`. Test code may use `strings.Contains` on error messages to assert user-facing text.
 
@@ -98,10 +98,13 @@ Always wrap with `fmt.Errorf("…: %w", err)`. In production code, classify erro
   unexported fields.
 - Assert against known-good literals, not recomputed values.
 - Naming: `TestFunctionName_Scenario`.
-- `TestAcquireWorkspaceLock_StaleLockToctouRace` may fail intermittently (more
-  often on Windows due to filesystem timing). This race is a known logic bug in
-  lock acquisition (see lock.go TOCTOU window), to be fixed by atomic rename
-  replacement — not a platform-specific flake.
+- `TestAcquireWorkspaceLock_StaleLockToctouRace` exercises the cross-process
+  TOCTOU window in stale-lock replacement. The race is now closed by the
+  claim-file + atomic-rename scheme in `lock.go` (see `claimStaleLock`); the
+  test runs two goroutines in-process, which are serialized by
+  `acquireLockMu` and therefore pass deterministically. A future test using
+  real subprocesses would be needed to exercise the cross-process path
+  directly.
 
 ## Code conventions (verifiable rules)
 

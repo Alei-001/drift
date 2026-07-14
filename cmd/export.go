@@ -38,7 +38,7 @@ drift-export-<short-id>.zip in the current directory.`,
 
 		snapshot := resolveSnapshot(ctx, store, args[0])
 		if snapshot == nil {
-			reportFailed("Export", "export", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.")
+			reportFailed("Export", "export", fmt.Sprintf("snapshot '%s' not found.", args[0]), "use 'drift log' to list available snapshots.", nil)
 			return ErrSilent
 		}
 
@@ -54,7 +54,7 @@ drift-export-<short-id>.zip in the current directory.`,
 
 		result, err := porcelain.ExportSnapshot(ctx, store, snapshot.ID, output)
 		if err != nil {
-			reportFailed("Export", "export", "export failed.", "")
+			reportFailed("Export", "export", "export failed.", "", err)
 			return ErrSilent
 		}
 

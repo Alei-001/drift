@@ -123,7 +123,7 @@ func runConfigList(cmd *cobra.Command, args []string) error {
 func runConfigGet(cmd *cobra.Command, args []string) error {
 	key := args[0]
 	if _, ok := configFieldMap[key]; !ok {
-		reportFailed("Config", "config", fmt.Sprintf("unknown config key '%s'.", key), "use 'drift config list' to see available keys.")
+		reportFailed("Config", "config", fmt.Sprintf("unknown config key '%s'.", key), "use 'drift config list' to see available keys.", nil)
 		return ErrSilent
 	}
 	cwd, err := getCwd()
@@ -138,7 +138,7 @@ func runConfigGet(cmd *cobra.Command, args []string) error {
 
 	val, ok := configGetValue(cfg, key)
 	if !ok {
-		reportFailed("Config", "config", fmt.Sprintf("unknown config key '%s'.", key), "use 'drift config list' to see available keys.")
+		reportFailed("Config", "config", fmt.Sprintf("unknown config key '%s'.", key), "use 'drift config list' to see available keys.", nil)
 		return ErrSilent
 	}
 	if globalJSON {
@@ -159,7 +159,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	key, value := args[0], args[1]
 	field, ok := configFieldMap[key]
 	if !ok {
-		reportFailed("Config", "config", fmt.Sprintf("unknown config key '%s'.", key), "use 'drift config list' to see available keys.")
+		reportFailed("Config", "config", fmt.Sprintf("unknown config key '%s'.", key), "use 'drift config list' to see available keys.", nil)
 		return ErrSilent
 	}
 
@@ -175,7 +175,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	defer store.Close()
 
 	if err := porcelain.SetConfigValue(ctx, store, cfg, key, value); err != nil {
-		reportFailed("Config", "config", err.Error(), "")
+		reportFailed("Config", "config", err.Error(), "", err)
 		return ErrSilent
 	}
 

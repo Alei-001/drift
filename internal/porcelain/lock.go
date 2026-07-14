@@ -1,6 +1,7 @@
 package porcelain
 
 import (
+	cryptoRand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,10 +31,11 @@ const lockStaleTimeout = 600 * time.Second
 
 // acquireLockMu serializes stale-lock replacement within a single process.
 // Without it, two goroutines that both observe the same stale lock would race
-// on the rename-replace step: both would succeed, and the loser would silently
-// own a lock file whose content no longer matches its in-memory data.
-// Cross-process races are not serialized by this mutex; they are mitigated by
-// the small window between the stale check and the rename.
+// on the claim-file step. Cross-process races are closed by the claim-file
+// rename + post-rename PID verification: on POSIX, where rename silently
+// overwrites, the loser of the race observes its PID is not the recorded
+// owner and aborts; on Windows, rename fails if the target exists, so the
+// loser retries and eventually re-checks staleness.
 var acquireLockMu sync.Mutex
 
 // AcquireWorkspaceLock creates a workspace lock file at .drift/workspace.lock.
@@ -45,16 +47,25 @@ var acquireLockMu sync.Mutex
 // function that already holds the lock will return ErrLocked. Use the NoLock
 // variants for internal calls.
 //
-// Acquisition is race-free: the lock file is created atomically with
-// O_CREATE|O_EXCL, so two processes can never both create the lock and then
-// each believe they hold it. If a stale lock exists (older than
-// lockStaleTimeout or whose PID is no longer alive) it is replaced atomically
-// via a temp-file + os.Rename, eliminating the remove→create window present
-// in the previous remove-then-create approach where another process's freshly
-// acquired lock could be accidentally deleted by our os.Remove before our
-// O_EXCL create ran. A lock that cannot be parsed (e.g. an empty file being
-// written concurrently) is treated as held rather than stale, so a writer is
-// never clobbered mid-write.
+// Acquisition is race-free across processes:
+//
+//  1. Fast path: O_CREATE|O_EXCL atomic create. Two processes can never both
+//     create the lock when none exists.
+//  2. Stale-replacement path: the would-be acquirer writes a PID-embedded
+//     claim file (workspace.lock.claim.<pid>.<rand>) using O_CREATE|O_EXCL,
+//     re-checks that the lock is still stale, then atomically renames the
+//     claim file onto the lock path. os.Rename is atomic on the same
+//     filesystem, so exactly one of the contending processes wins the rename;
+//     the loser's rename either fails (Windows) or silently overwrites with
+//     its own content (POSIX), but the loser then observes its PID is not the
+//     recorded owner and aborts. This closes the cross-process TOCTOU window
+//     that the previous WriteFileAtomic-over-stale approach left open, where
+//     two processes could both pass isLockStale and both believe they held
+//     the lock after their respective temp-file+rename landed.
+//
+// A lock that cannot be parsed (e.g. an empty file being written concurrently)
+// is treated as held rather than stale, so a writer is never clobbered
+// mid-write.
 func AcquireWorkspaceLock(cwd string) error {
 	lockPath := filepath.Join(cwd, ".drift", "workspace.lock")
 	if err := os.MkdirAll(filepath.Dir(lockPath), fsutil.DefaultDirPerm); err != nil {
@@ -81,7 +92,7 @@ func AcquireWorkspaceLock(cwd string) error {
 	}
 
 	// The lock exists. Serialize stale-lock replacement within this process
-	// so two goroutines do not both rename over the same stale lock.
+	// so two goroutines do not both create claim files for the same lock.
 	acquireLockMu.Lock()
 	defer acquireLockMu.Unlock()
 
@@ -93,13 +104,94 @@ func AcquireWorkspaceLock(cwd string) error {
 		return fmt.Errorf("workspace is locked by another operation (PID %d): %w", existing.PID, ErrLocked)
 	}
 
-	// Stale lock: atomically replace it via temp-file + rename. This
-	// eliminates the remove→create window where another process's freshly
-	// acquired lock could be accidentally deleted by our os.Remove.
-	if err := fsutil.WriteFileAtomic(lockPath, data, fsutil.DefaultFilePerm); err != nil {
-		return fmt.Errorf("replace stale workspace lock: %w", err)
+	// Stale lock: claim it atomically via a PID-embedded claim file + rename.
+	// The claim file is created with O_CREATE|O_EXCL so concurrent acquirers
+	// pick distinct claim file names. After writing our claim, re-check the
+	// lock file: if another process already renamed its claim onto the lock,
+	// we abort (the lock is no longer the stale one we observed). Finally
+	// rename our claim onto the lock path. On POSIX rename is atomic and
+	// overwrites; on Windows it fails if the target exists, so we fall back
+	// to a remove+create retry loop bounded by claimMaxRetries.
+	return claimStaleLock(lockPath, data)
+}
+
+// claimMaxRetries bounds the CAS-style retry loop used on platforms where
+// os.Rename refuses to overwrite an existing file (Windows). Each retry
+// re-checks staleness and attempts another claim, so the loop terminates
+// either when the lock is successfully claimed or when another process has
+// legitimately replaced it.
+const claimMaxRetries = 8
+
+// claimStaleLock performs the atomic claim of a lock file that was stale at
+// the time of the caller's prior check. It writes a PID-embedded claim file,
+// re-checks staleness, then renames the claim onto the lock path. If the
+// rename fails because another acquirer won the race, the claim file is
+// removed and the error is propagated so the caller surfaces ErrLocked.
+func claimStaleLock(lockPath string, data []byte) error {
+	dir := filepath.Dir(lockPath)
+	for i := 0; i < claimMaxRetries; i++ {
+		// Unique claim file name per attempt. crypto/rand keeps it
+		// unpredictable across processes so two claimants cannot collide.
+		claimPath, err := uniqueClaimPath(dir)
+		if err != nil {
+			return fmt.Errorf("generate lock claim name: %w", err)
+		}
+		if err := createLockFile(claimPath, data); err != nil {
+			return fmt.Errorf("create lock claim: %w", err)
+		}
+
+		// Re-check the lock file: if it has been replaced by another
+		// acquirer since our stale check, abandon this claim.
+		existing, err := readWorkspaceLock(lockPath)
+		if err != nil {
+			os.Remove(claimPath)
+			return err
+		}
+		if !isLockStale(existing) {
+			os.Remove(claimPath)
+			return fmt.Errorf("workspace is locked by another operation (PID %d): %w", existing.PID, ErrLocked)
+		}
+
+		// Atomically commit our claim. On POSIX rename(2) silently
+		// overwrites the target, so two concurrent acquirers can both
+		// see their Rename succeed — the loser's content is the one
+		// that ends up on disk, but both believe they own the lock.
+		// To close this TOCTOU we re-read the lock after rename and
+		// verify our PID is the recorded owner. The loser detects the
+		// mismatch and returns ErrLocked.
+		//
+		// On Windows, os.Rename fails when the target exists, so the
+		// loser's Rename returns an error and falls through to retry.
+		if err := os.Rename(claimPath, lockPath); err == nil {
+			after, rerr := readWorkspaceLock(lockPath)
+			if rerr != nil {
+				// Lock file vanished between rename and re-read
+				// (extremely unlikely). Treat as lost race.
+				return fmt.Errorf("verify lock ownership after rename: %w: %w", rerr, ErrLocked)
+			}
+			if after.PID != os.Getpid() {
+				return fmt.Errorf("lost lock race to PID %d: %w", after.PID, ErrLocked)
+			}
+			return nil
+		}
+		// Rename failed — either another acquirer replaced the lock
+		// between our re-check and the rename, or the platform refuses
+		// to overwrite. Clean up the claim and retry the whole loop.
+		os.Remove(claimPath)
 	}
-	return nil
+	return fmt.Errorf("could not claim stale workspace lock after %d attempts: %w", claimMaxRetries, ErrLocked)
+}
+
+// uniqueClaimPath returns a unique path for a lock claim file in dir, of the
+// form "workspace.lock.claim.<pid>.<rand>" where rand is 8 hex characters
+// derived from crypto/rand.
+func uniqueClaimPath(dir string) (string, error) {
+	var buf [4]byte
+	if _, err := cryptoRand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("workspace.lock.claim.%d.%x", os.Getpid(), buf[:])
+	return filepath.Join(dir, name), nil
 }
 
 // createLockFile atomically creates the lock file with O_CREATE|O_EXCL and
@@ -186,25 +278,27 @@ func removeLockIfOwned(lockPath string, pid int) {
 // called periodically by operations that may exceed lockStaleTimeout (e.g.
 // snapshotting a very large workspace).
 //
-// TouchWorkspaceLock is best-effort: if the lock has been removed, stolen by
-// another process, or cannot be parsed, it returns nil without error. The
-// caller is not expected to act on a failed touch — a stale lock will
-// eventually be reclaimed by the timeout in AcquireWorkspaceLock.
+// If the lock has been stolen by another process (PID mismatch),
+// TouchWorkspaceLock returns ErrLockLost. The caller MUST abort the
+// operation immediately — continuing to modify the store while another
+// process holds the lock will cause corruption. A missing or unparseable
+// lock file is treated as ErrLockLost as well, since the lock should not
+// disappear while the operation holds it.
 func TouchWorkspaceLock(workDir string) error {
 	lockPath := filepath.Join(workDir, ".drift", "workspace.lock")
 	data, err := os.ReadFile(lockPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return fmt.Errorf("workspace lock disappeared during operation: %w", ErrLockLost)
 		}
 		return fmt.Errorf("read workspace lock: %w", err)
 	}
 	var lock workspaceLockData
 	if json.Unmarshal(data, &lock) != nil {
-		return nil
+		return fmt.Errorf("workspace lock corrupted during operation: %w", ErrLockLost)
 	}
 	if lock.PID != os.Getpid() {
-		return nil
+		return fmt.Errorf("workspace lock stolen by PID %d: %w", lock.PID, ErrLockLost)
 	}
 	lock.Timestamp = time.Now().Unix()
 	newData, err := json.Marshal(&lock)

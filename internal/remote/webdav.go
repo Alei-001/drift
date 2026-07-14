@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -12,6 +13,12 @@ import (
 
 	"github.com/studio-b12/gowebdav"
 )
+
+// ErrInsecureScheme is returned by NewWebDAVFS when the URL uses http://
+// and AllowInsecure is false. The porcelain layer sets AllowInsecure based
+// on DRIFT_ALLOW_INSECURE=1; the factory itself never reads env vars so
+// the security decision is explicit in the config.
+var ErrInsecureScheme = errors.New("insecure scheme: http requires explicit opt-in via DRIFT_ALLOW_INSECURE=1")
 
 // init registers the webdav protocol factory.
 func init() {
@@ -50,9 +57,10 @@ func IsInsecureScheme(cfg RemoteConfig) bool {
 // The password is read from cfg.Options["_password"] (populated by
 // resolveRemoteConfig from the user-level credentials.json).
 //
-// An http:// URL is accepted (so local test servers and trusted LANs work)
-// but callers should check IsInsecureScheme and warn the user that the
-// password is sent in cleartext.
+// An http:// URL is refused unless cfg.AllowInsecure is true. The porcelain
+// layer sets AllowInsecure based on DRIFT_ALLOW_INSECURE=1; this factory is
+// the enforcement point so new callers cannot bypass the check by forgetting
+// to call IsInsecureScheme.
 func NewWebDAVFS(cfg RemoteConfig) (RemoteFS, error) {
 	if cfg.URL == "" {
 		return nil, fmt.Errorf("webdav: URL is required")
@@ -60,6 +68,9 @@ func NewWebDAVFS(cfg RemoteConfig) (RemoteFS, error) {
 	u, err := url.Parse(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("webdav: parse URL %q: %w", cfg.URL, err)
+	}
+	if u.Scheme == "http" && !cfg.AllowInsecure {
+		return nil, fmt.Errorf("webdav: %w (url: %s)", ErrInsecureScheme, cfg.URL)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, fmt.Errorf("webdav: URL scheme must be http or https, got %q", u.Scheme)
@@ -77,8 +88,9 @@ func NewWebDAVFS(cfg RemoteConfig) (RemoteFS, error) {
 	}, nil
 }
 
-// resolve joins a relative path with the root. We keep paths as-is (relative
-// to the server root) since gowebdav operates on absolute paths.
+// resolve joins a relative path with the root. Per the RemoteFS path
+// contract, input paths have no leading slash; gowebdav requires absolute
+// paths, so resolve adds the leading "/" as an adapter responsibility.
 func (w *WebDAVFS) resolve(p string) string {
 	if p == "" || p == "." {
 		return w.rootPath
@@ -125,30 +137,6 @@ func (w *WebDAVFS) Read(ctx context.Context, p string) (io.ReadCloser, error) {
 	return rc, nil
 }
 
-// mkdirParents ensures the parent directory of resolved exists. It stats
-// first so the common "already exists" case avoids a failing MkdirAll whose
-// 405 error code is server-dependent and unreliable as an existence signal.
-func (w *WebDAVFS) mkdirParents(ctx context.Context, resolved string) error {
-	parent := path.Dir(resolved)
-	if parent == "/" || parent == "." {
-		return nil
-	}
-	if _, err := w.client.Stat(parent); err == nil {
-		return nil // parent exists
-	} else if !gowebdav.IsErrNotFound(err) {
-		return fmt.Errorf("stat parent %q: %w", parent, err)
-	}
-	if err := w.client.MkdirAll(parent, 0o755); err != nil {
-		// A concurrent create may have made the dir appear between our
-		// Stat and MkdirAll; re-stat to confirm before failing.
-		if _, sErr := w.client.Stat(parent); sErr == nil {
-			return nil
-		}
-		return fmt.Errorf("mkdir parent %q: %w", parent, err)
-	}
-	return nil
-}
-
 // Write uploads a file atomically: it first writes to <path>.partial, then
 // renames it onto the final path. This prevents a network interruption from
 // leaving a half-written object on the remote that other clients would
@@ -158,10 +146,10 @@ func (w *WebDAVFS) Write(ctx context.Context, p string, r io.Reader) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	resolved := w.resolve(p)
-	if err := w.mkdirParents(ctx, resolved); err != nil {
+	if err := ensureRemoteDir(ctx, w, path.Dir(p)); err != nil {
 		return err
 	}
+	resolved := w.resolve(p)
 	partial := resolved + ".partial"
 	if err := w.client.WriteStream(partial, r, 0o644); err != nil {
 		// Best-effort cleanup of the partial upload so it does not linger.

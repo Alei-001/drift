@@ -43,8 +43,8 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 		if pullDryRun {
 			stats, err := porcelain.PullDryRun(ctx, store, cwd, remoteName, branch, pullAll)
 			if err != nil {
-				reportFailed("Pull", "pull", "pull dry-run failed.", "check remote configuration and network connectivity")
-				return ErrSilent
+				reportFailed("Pull", "pull", "pull dry-run failed.", "check remote configuration and network connectivity", err)
+				return silentWrap(err)
 			}
 			if globalJSON {
 				return outputJSON(JSONEnvelope{
@@ -73,7 +73,7 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 
 		result, err := porcelain.PullFromRemote(ctx, store, cwd, remoteName, branch, pullAll)
 		if err != nil {
-			reportFailed("Pull", "pull", "pull failed.", "check remote configuration and network connectivity")
+			reportFailed("Pull", "pull", "pull failed.", "check remote configuration and network connectivity", err)
 			return silentWrap(err)
 		}
 		stats := result.Stats

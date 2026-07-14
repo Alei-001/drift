@@ -41,7 +41,7 @@ After importing, run 'drift save' to record the change as a new snapshot.`,
 			if errors.Is(err, porcelain.ErrFileNotFound) {
 				hint = fmt.Sprintf("use 'drift show branch:%s' to list files in this branch.", branchName)
 			}
-			reportFailed("Import", "import", "import failed.", hint)
+			reportFailed("Import", "import", "import failed.", hint, err)
 			return ErrSilent
 		}
 

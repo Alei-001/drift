@@ -47,11 +47,11 @@ var diffCmd = &cobra.Command{
 
 		if len(snapArgs) > 2 {
 			reportFailed("Diff", "diff", "too many snapshot arguments (max 2).",
-				"use -- <file> to limit diff to a single file.")
+				"use -- <file> to limit diff to a single file.", nil)
 			return ErrSilent
 		}
 		if len(fileArgs) > 1 {
-			reportFailed("Diff", "diff", "only one file may be specified after --.", "")
+			reportFailed("Diff", "diff", "only one file may be specified after --.", "", nil)
 			return ErrSilent
 		}
 
@@ -64,8 +64,8 @@ var diffCmd = &cobra.Command{
 		case 0:
 			headSnap := porcelain.ResolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
-				reportFailed("Diff", "diff", "no snapshot to compare against.",
-					"use 'drift save -m \"message\"' to create one first.")
+			reportFailed("Diff", "diff", "no snapshot to compare against.",
+				"use 'drift save -m \"message\"' to create one first.", nil)
 				return ErrSilent
 			}
 			return runDiffWorkspaceVs(ctx, store, cwd, &cfg.Core, headSnap, "head", file)
@@ -73,7 +73,7 @@ var diffCmd = &cobra.Command{
 			snap1 := resolveSnapshot(ctx, store, snapArgs[0])
 			if snap1 == nil {
 				reportFailed("Diff", "diff", fmt.Sprintf("snapshot '%s' not found.", snapArgs[0]),
-					"use 'drift log' to list available snapshots.")
+					"use 'drift log' to list available snapshots.", nil)
 				return ErrSilent
 			}
 			return runDiffWorkspaceVs(ctx, store, cwd, &cfg.Core, snap1, snapArgs[0], file)
@@ -81,13 +81,13 @@ var diffCmd = &cobra.Command{
 			snap1 := resolveSnapshot(ctx, store, snapArgs[0])
 			if snap1 == nil {
 				reportFailed("Diff", "diff", fmt.Sprintf("snapshot '%s' not found.", snapArgs[0]),
-					"use 'drift log' to list available snapshots.")
+					"use 'drift log' to list available snapshots.", nil)
 				return ErrSilent
 			}
 			snap2 := resolveSnapshot(ctx, store, snapArgs[1])
 			if snap2 == nil {
 				reportFailed("Diff", "diff", fmt.Sprintf("snapshot '%s' not found.", snapArgs[1]),
-					"use 'drift log' to list available snapshots.")
+					"use 'drift log' to list available snapshots.", nil)
 				return ErrSilent
 			}
 			return runDiffSnapshots(ctx, store, cwd, &cfg.Core, snap1, snap2, snapArgs[0], snapArgs[1], file)

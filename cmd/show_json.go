@@ -79,16 +79,16 @@ func showFileJSON(ctx context.Context, store storage.Storer, cwd string, snapsho
 	if err != nil {
 		if errors.Is(err, porcelain.ErrFileNotFound) {
 			reportFailed("Show", "show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, versionLabel),
-				fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel))
+				fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel), err)
 			return ErrSilent
 		}
 		if errors.Is(err, porcelain.ErrInvalidPath) {
 			reportFailed("Show", "show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
-				"use a relative path from the project root.")
+				"use a relative path from the project root.", err)
 			return ErrSilent
 		}
 		reportFailed("Show", "show", fmt.Sprintf("cannot read '%s' from snapshot: %s.", filePath, err),
-			"the chunk data may be missing or corrupted; use 'drift check' to verify.")
+			"the chunk data may be missing or corrupted; use 'drift check' to verify.", err)
 		return ErrSilent
 	}
 

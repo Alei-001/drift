@@ -59,7 +59,7 @@ func TestPush_ChunksBeforeSnapshots(t *testing.T) {
 	snapID, chunkHash := makeTestSnapshot(t, store, "order test", nil)
 	setupBranchRef(t, store, "main", snapID.Hash)
 
-	if _, err := Push(context.Background(), store, rfs, ""); err != nil {
+	if _, err := Push(context.Background(), store, rfs, "", SyncOptions{}); err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestPush_SnapshotReferencesMissingChunk(t *testing.T) {
 	// Update main to point at snap2.
 	setupBranchRef(t, store, "main", snap2.ID.Hash)
 
-	stats, err := Push(context.Background(), store, rfs, "")
+	stats, err := Push(context.Background(), store, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestPush_EmptyStorePushesNothing(t *testing.T) {
 	defer store.Close()
 	rfs := NewMockRemoteFS()
 
-	stats, err := Push(context.Background(), store, rfs, "")
+	stats, err := Push(context.Background(), store, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestPush_DryRunDoesNotUpload(t *testing.T) {
 	snapID, _ := makeTestSnapshot(t, store, "dry-run test", nil)
 	setupBranchRef(t, store, "main", snapID.Hash)
 
-	stats, err := PushDryRun(context.Background(), store, rfs, "")
+	stats, err := PushDryRun(context.Background(), store, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("PushDryRun failed: %v", err)
 	}

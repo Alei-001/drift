@@ -16,12 +16,21 @@ import (
 // writeFileFromChunks reconstructs a file at path by concatenating chunk data
 // in order. It writes to a temporary file first, then renames atomically. On
 // any error the temp file is removed and the original file is left untouched.
+//
+// The temp file is created with os.CreateTemp (random name + O_EXCL) to
+// prevent a TOCTOU symlink attack: a fixed, predictable temp name like
+// "<path>.drifttmp" could be pre-created as a symlink by an attacker with
+// write access to the directory, causing the write to follow the symlink and
+// clobber an arbitrary file. CreateTemp's O_EXCL flag makes the create
+// atomic, closing the window.
 func writeFileFromChunks(ctx context.Context, store storage.Storer, path string, chunks []core.Hash, perm os.FileMode) (err error) {
-	tmpPath := path + ".drifttmp"
-	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	f, err := os.CreateTemp(dir, base+".drifttmp-*")
 	if err != nil {
-		return err
+		return fmt.Errorf("create temp file: %w", err)
 	}
+	tmpPath := f.Name()
 	defer func() {
 		f.Close()
 		if err != nil {
@@ -46,6 +55,12 @@ func writeFileFromChunks(ctx context.Context, store storage.Storer, path string,
 	}
 	if err = f.Close(); err != nil {
 		return err
+	}
+	// os.CreateTemp creates the file with mode 0600. Apply the requested
+	// permission before the rename so the final file has the correct mode.
+	// This mirrors fsutil.WriteFileAtomic's Chmod-before-Rename pattern.
+	if err = os.Chmod(tmpPath, perm); err != nil {
+		return fmt.Errorf("set temp file mode: %w", err)
 	}
 	if err = os.Rename(tmpPath, path); err != nil {
 		return err
@@ -183,6 +198,12 @@ func restoreFilesToWorkspace(ctx context.Context, store storage.Storer, workDir,
 		}
 
 		perm := os.FileMode(entry.Mode & 0o777)
+		// Mask group/other write bits to prevent a malicious snapshot
+		// (entry.Mode=0o777) from creating world-writable files on
+		// restore. This applies umask 0o022 semantics uniformly,
+		// independent of the process umask (which may be 0o000 in
+		// Docker/CI environments).
+		perm &^= 0o022
 		if perm == 0 {
 			perm = fsutil.DefaultFilePerm
 		}

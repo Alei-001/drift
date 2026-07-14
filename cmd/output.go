@@ -62,7 +62,7 @@ func statusFailed(action string, errMsg string, hint string) {
 func openProjectOrReport(action, command, cwd string) (storage.Storer, *core.Config, error) {
 	store, cfg, err := porcelain.OpenProject(cwd)
 	if err != nil {
-		reportFailed(action, command, "not a drift repository.", "use 'drift init' to create one.")
+		reportFailed(action, command, "not a drift repository.", "use 'drift init' to create one.", err)
 		return nil, nil, silentWrap(err)
 	}
 	return store, cfg, nil

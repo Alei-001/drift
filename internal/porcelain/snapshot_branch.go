@@ -46,26 +46,23 @@ func countSnapshotDiff(from, to *core.Snapshot) int {
 // ResolveHeadSnapshot returns the HEAD snapshot, or nil if none exists.
 //
 // When HEAD is a symbolic reference to a branch, the branch's target snapshot
-// is returned. Although storage backends auto-resolve SymRef into Target,
-// this function re-reads the referenced branch to be robust against backends
-// that may not populate Target for symrefs, mirroring cmd.resolveHead.
+// is returned. Storer.GetRef is contractually required to fully resolve
+// symrefs: a GetRef("HEAD") call on a symref HEAD must return a Reference
+// whose Target is the final snapshot hash (not the intermediate branch ref).
+// This matches the documented contract of storage.Storer.GetRef and the
+// filesystem backend's implementation in
+// internal/storage/backends/filesystem/ref.go. Callers therefore never need
+// a second GetRef to chase symrefs. resolveHead (in resolve.go) relies on
+// the same contract; the two functions intentionally use a single GetRef.
 func ResolveHeadSnapshot(ctx context.Context, store storage.Storer) *core.Snapshot {
 	headRef, err := store.GetRef(ctx, "HEAD")
 	if err != nil {
 		return nil
 	}
-	target := headRef.Target
-	if headRef.SymRef != "" {
-		branchRef, err := store.GetRef(ctx, headRef.SymRef)
-		if err != nil {
-			return nil
-		}
-		target = branchRef.Target
-	}
-	if target.IsZero() {
+	if headRef.Target.IsZero() {
 		return nil
 	}
-	snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: target})
+	snap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: headRef.Target})
 	if err != nil {
 		return nil
 	}
@@ -208,7 +205,12 @@ func UndoLastSave(ctx context.Context, store storage.Storer, workDir string, cfg
 	}
 
 	if err := RebuildIndexFromSnapshot(ctx, store, core.SnapshotID{Hash: prevHash}); err != nil {
-		return fmt.Errorf("rebuild index: %w", err)
+		// HEAD has already been moved to prevHash (the commit point).
+		// The index is stale (still reflects the undone snapshot), but
+		// the next save will re-chunk every file and rebuild it. Tell
+		// the user explicitly so they know the undo succeeded but the
+		// index needs a follow-up save to converge.
+		return fmt.Errorf("undo committed (HEAD moved to %s) but index rebuild failed; run 'drift save' to rebuild the index: %w", prevHash.String(), err)
 	}
 
 	return nil

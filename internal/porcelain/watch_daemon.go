@@ -54,7 +54,20 @@ func StartDaemon(ctx context.Context, cwd string, interval int, keep int) (int, 
 	// spawned and report the failure. This closes the TOCTOU window that
 	// existed when the pid file was written with a rename-based atomic write
 	// (which silently clobbers an existing file).
-	f, err := os.OpenFile(pidPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	//
+	// Permission 0600 (owner-only): the PID is arguably sensitive (it
+	// identifies a runnable process for an attacker), and matches the
+	// credentials.json convention used elsewhere in drift. World/Group
+	// readability provided no benefit.
+	//
+	// Known best-effort window: cmd.Start() runs before this O_EXCL create,
+	// so a child that panics or is killed before we reach this line leaves
+	// no PID file. The orphaned child will be reaped by the OS on parent
+	// exit or by `drift watch off` failing with "no watch daemon running"
+	// (the user must then kill the orphan manually). Closing this fully
+	// would require a pre-start handshake (parent creates a placeholder
+	// PID file, child rewrites it after exec), which is a larger change.
+	f, err := os.OpenFile(pidPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		// Best-effort: the spawned daemon cannot be used without a pid file;
 		// kill it so it does not linger. A failed kill means it already exited.

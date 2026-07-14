@@ -113,27 +113,20 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 		}
 	}
 
-	// Restore target branch snapshot to workspace BEFORE moving HEAD so a
-	// restore failure leaves HEAD on the source branch. If restore fails
-	// partway the workspace may be partially modified, but the auto-save
-	// snapshot (if any) is already recorded on the source branch and the
-	// user can recover by re-running switch or restoring the auto-save.
-	// Skip if target was empty (workspace already matches the inherited
-	// snapshot via auto-save, so restoring would be redundant).
-	if !targetWasEmpty && !targetRef.Target.IsZero() {
-		targetSnap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: targetRef.Target})
-		if err != nil {
-			return "", "", 0, fmt.Errorf("get target snapshot: %w", err)
-		}
-		if err := restoreFilesToWorkspace(ctx, store, workDir, cfg.IgnoreFile, targetSnap); err != nil {
-			return "", "", 0, fmt.Errorf("restore workspace: %w", err)
-		}
-	}
-
-	// Move HEAD to the target branch only after the workspace has been
-	// restored. This is the transactional commit point: any earlier
-	// failure leaves HEAD pointing at the source branch, so the branch
-	// ref state stays consistent with whatever workspace state survived.
+	// Move HEAD to the target branch BEFORE restoring workspace files.
+	// This makes HEAD the commit point: if SetRef fails, HEAD stays on
+	// the source branch and the workspace is untouched — the user can
+	// retry switch cleanly. If SetRef succeeds but workspace restore
+	// fails, HEAD is on the target branch but the workspace is partially
+	// modified; the user can re-run switch (idempotent: HEAD is already
+	// on target, workspace gets re-restored) or run `drift restore` to
+	// complete the transition.
+	//
+	// This order matches git's checkout: HEAD moves first (atomic ref
+	// write), then the working tree is updated to match. The previous
+	// order (workspace first, HEAD last) had a window where SetRef(HEAD)
+	// failure left workspace=target but HEAD=source, causing the next
+	// save to graft target content onto source history.
 	newHeadRef := &core.Reference{
 		Name:   "HEAD",
 		Type:   core.RefTypeHead,
@@ -141,6 +134,19 @@ func SwitchBranch(ctx context.Context, store storage.Storer, workDir string, nam
 	}
 	if err := store.SetRef(ctx, "HEAD", newHeadRef); err != nil {
 		return "", "", 0, fmt.Errorf("update HEAD: %w", err)
+	}
+
+	// Restore target branch snapshot to workspace. Skip if target was
+	// empty (workspace already matches the inherited snapshot via
+	// auto-save, so restoring would be redundant).
+	if !targetWasEmpty && !targetRef.Target.IsZero() {
+		targetSnap, err := store.GetSnapshot(ctx, core.SnapshotID{Hash: targetRef.Target})
+		if err != nil {
+			return "", "", 0, fmt.Errorf("get target snapshot: %w", err)
+		}
+		if err := restoreFilesToWorkspace(ctx, store, workDir, cfg.IgnoreFile, targetSnap); err != nil {
+			return "", "", 0, fmt.Errorf("restore workspace (HEAD already on %s; re-run switch or drift restore to complete): %w", name, err)
+		}
 	}
 
 	var fromSnap, toSnap *core.Snapshot

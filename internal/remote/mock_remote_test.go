@@ -14,6 +14,10 @@ import (
 
 // MockRemoteFS is an in-memory RemoteFS implementation for testing sync
 // logic without a real protocol backend. It is safe for concurrent use.
+//
+// MockRemoteFS uses "/"-prefixed paths internally (like WebDAV); its
+// normalize() method adapts the RemoteFS path contract (no leading slash)
+// to this internal representation, mirroring how WebDAVFS.resolve works.
 type MockRemoteFS struct {
 	mu    sync.Mutex
 	files map[string]*mockFile

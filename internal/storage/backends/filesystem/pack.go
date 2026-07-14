@@ -230,6 +230,12 @@ func (fs *FSStorage) readChunkFromPack(name string, entry packEntry, hash core.H
 	if entry.length > maxPackEntryLength {
 		return nil, fmt.Errorf("pack %s: entry length %d exceeds max %d: %w", name, entry.length, maxPackEntryLength, storage.ErrCorrupted)
 	}
+	// entry.length must be at least ChunkHeaderSize (1 byte) to hold the
+	// flag byte. A length of 0 would cause buf[0] to panic below; a
+	// corrupt .idx file with a zero-length entry indicates index damage.
+	if entry.length < storage.ChunkHeaderSize {
+		return nil, fmt.Errorf("pack %s: entry length %d below header size %d: %w", name, entry.length, storage.ChunkHeaderSize, storage.ErrCorrupted)
+	}
 	if entry.offset < 0 || entry.offset+int64(entry.length) > packFileSize {
 		return nil, fmt.Errorf("pack %s: entry offset %d length %d exceeds pack size %d: %w", name, entry.offset, entry.length, packFileSize, storage.ErrCorrupted)
 	}

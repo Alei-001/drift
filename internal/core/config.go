@@ -41,6 +41,16 @@ type CoreConfig struct {
 	IgnoreFile       string `json:"ignore_file"`
 	AutoSaveInterval int    `json:"auto_save_interval"`
 	AutoSaveKeep     int    `json:"auto_save_keep"`
+	// TrustMtime, when true, enables the (size, mtime) fast path in
+	// CreateSnapshot: a file whose size and mtime match the index entry is
+	// reused without re-chunking. This is a performance optimization that
+	// trades correctness for speed — tools that preserve mtime while
+	// changing content (cp -p, rsync --times, editor atomic-save that
+	// restores mtime) would silently cause stale chunks to be reused.
+	// Defaults to false (safe): every save re-chunks every file. Users who
+	// understand the risk and need the speedup can set this true via
+	// config.json or DRIFT_TRUST_MTIME=1.
+	TrustMtime bool `json:"trust_mtime,omitempty"`
 }
 
 // ConfigVersion is the current on-disk config schema version. Bump when the
@@ -120,6 +130,7 @@ const (
 	envAutoSaveInterval = "DRIFT_AUTO_SAVE_INTERVAL"
 	envAutoSaveKeep     = "DRIFT_AUTO_SAVE_KEEP"
 	envZstdLevel        = "DRIFT_ZSTD_LEVEL"
+	envTrustMtime       = "DRIFT_TRUST_MTIME"
 )
 
 // ApplyEnvOverrides replaces config fields with the corresponding DRIFT_*
@@ -141,6 +152,11 @@ func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv(envZstdLevel); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Core.CompressionLevel = n
+		}
+	}
+	if v := os.Getenv(envTrustMtime); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			c.Core.TrustMtime = b
 		}
 	}
 }

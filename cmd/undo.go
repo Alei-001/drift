@@ -42,11 +42,11 @@ var undoCmd = &cobra.Command{
 
 		if err := porcelain.UndoLastSave(ctx, store, cwd, &cfg.Core); err != nil {
 			if errors.Is(err, porcelain.ErrCannotUndo) {
-				reportFailed("Undo", "undo", "no snapshot to undo.", "HEAD is already at the initial snapshot.")
+				reportFailed("Undo", "undo", "no snapshot to undo.", "HEAD is already at the initial snapshot.", err)
 				return ErrSilent
 			}
 			if errors.Is(err, porcelain.ErrUncommittedChanges) {
-				reportFailed("Undo", "undo", "uncommitted changes would be lost.", "use 'drift save' or 'drift restore' first.")
+				reportFailed("Undo", "undo", "uncommitted changes would be lost.", "use 'drift save' or 'drift restore' first.", err)
 				return silentWrap(err)
 			}
 			return err

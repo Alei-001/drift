@@ -165,14 +165,38 @@ func (fs *FSStorage) buildChunkPayload(data []byte, tryCompress bool) (payload [
 	return payload, storage.ChunkFlagCompressed
 }
 
+// maxDecompressedChunkSize bounds the decompressed output of a single chunk
+// to prevent a zstd decompression bomb (high-compression-ratio payload) from
+// exhausting memory. The chunker's MaxChunkSize is the legitimate upper
+// bound on a chunk's decompressed size; we use a generous ceiling above that.
+const maxDecompressedChunkSize = 64 << 20 // 64 MB
+
 // decompressFromReader reads zstd-compressed data from r and returns the
 // decoded bytes. Acquires zstdMu internally so it is safe for concurrent
 // use with other zstd operations.
+//
+// The decompressed output is capped at maxDecompressedChunkSize to prevent
+// a decompression bomb from exhausting memory: a small compressed input
+// could otherwise expand to an unbounded buffer via io.ReadAll.
 func (fs *FSStorage) decompressFromReader(r io.Reader) ([]byte, error) {
 	fs.zstdMu.Lock()
 	defer fs.zstdMu.Unlock()
 	if err := fs.zstdDecoder.Reset(r); err != nil {
 		return nil, err
 	}
-	return io.ReadAll(fs.zstdDecoder)
+	// LimitReader on the decoder's output caps the decompressed size.
+	// If the decompressed data exceeds the limit, ReadAll returns an
+	// error from the LimitedReader, which we map to ErrCorrupted.
+	limited := &io.LimitedReader{R: fs.zstdDecoder, N: maxDecompressedChunkSize + 1}
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		if err == io.EOF && limited.N == 0 {
+			return nil, fmt.Errorf("decompressed chunk exceeds max size %d: %w", maxDecompressedChunkSize, storage.ErrCorrupted)
+		}
+		return nil, err
+	}
+	if int64(len(data)) > maxDecompressedChunkSize {
+		return nil, fmt.Errorf("decompressed chunk exceeds max size %d: %w", maxDecompressedChunkSize, storage.ErrCorrupted)
+	}
+	return data, nil
 }

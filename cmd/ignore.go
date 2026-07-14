@@ -115,7 +115,7 @@ var ignoreRemoveCmd = &cobra.Command{
 		ignorePath := filepath.Join(cwd, ".driftignore")
 		pattern := args[0]
 		if err := fsutil.RemoveIgnoreRule(ignorePath, pattern); err != nil {
-			reportFailed("Ignore", "ignore", fmt.Sprintf("pattern '%s' not found.", pattern), "use 'drift ignore list' to see current rules.")
+			reportFailed("Ignore", "ignore", fmt.Sprintf("pattern '%s' not found.", pattern), "use 'drift ignore list' to see current rules.", err)
 			return ErrSilent
 		}
 		if !globalQuiet {

@@ -129,7 +129,7 @@ func diffWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cf
 func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *core.Snapshot, label1, label2 string) error {
 	stats, err := porcelain.ComputeStatSnapshots(ctx, store, snap1, snap2)
 	if err != nil {
-		reportFailed("Diff", "diff", err.Error(), "")
+		reportFailed("Diff", "diff", err.Error(), "", err)
 		return ErrSilent
 	}
 	return outputStatJSON(label1, label2, stats)
@@ -140,7 +140,7 @@ func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, sna
 func diffStatWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
 	stats, err := porcelain.ComputeStatWorkspace(ctx, store, cwd, cfg, snap)
 	if err != nil {
-		reportFailed("Diff", "diff", err.Error(), "")
+		reportFailed("Diff", "diff", err.Error(), "", err)
 		return ErrSilent
 	}
 	return outputStatJSON(snapLabel, "workspace", stats)

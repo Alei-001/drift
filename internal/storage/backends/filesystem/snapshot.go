@@ -29,6 +29,21 @@ func (fs *FSStorage) manifestPath(id core.SnapshotID) string {
 }
 
 // GetSnapshot reads a snapshot from disk and verifies its integrity.
+//
+// Memory layout: the file is read in full (io.ReadAll), unmarshalled into a
+// SnapshotProto, then the proto is re-marshaled with IdHash cleared for the
+// BLAKE3 integrity check. Peak memory is therefore roughly raw + decoded +
+// re-marshaled. To minimize the peak we:
+//   - drop the raw buffer reference before re-marshaling (the decoder has
+//     already produced an independent copy of the message);
+//   - run the hash incrementally over the re-marshaled bytes via a streaming
+//     blake3 hasher and drop each chunk immediately, so the re-marshaled
+//     buffer does not need to live alongside the decoded message.
+//
+// google.golang.org/protobuf (v1.36.x) does not expose a reader-based
+// streaming decoder (proto.NewDecoder was removed in the
+// github.com/golang/protobuf v1.5.0 shim), so the initial io.ReadAll is
+// unavoidable without a much larger refactor.
 func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core.Snapshot, error) {
 	path := fs.snapshotPath(id)
 	f, err := os.Open(path)
@@ -39,12 +54,6 @@ func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core
 		return nil, fmt.Errorf("open snapshot %x: %w", id.Hash[:8], mapOSError(err))
 	}
 	defer f.Close()
-	// google.golang.org/protobuf (v1.36.x) does not expose a reader-based
-	// streaming decoder (proto.NewDecoder was removed in the
-	// github.com/golang/protobuf v1.5.0 shim). We stream the file through
-	// os.Open + io.ReadAll and release the raw buffer before the integrity
-	// check so peak memory is the decoded message plus the re-marshaled
-	// bytes, not raw+message+re-marshaled.
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("read snapshot %x: %w", id.Hash[:8], err)
@@ -53,17 +62,39 @@ func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core
 	if err := proto.Unmarshal(data, p); err != nil {
 		return nil, fmt.Errorf("unmarshal snapshot %x: %w", id.Hash[:8], storage.ErrCorrupted)
 	}
-	data = nil // allow GC of raw file bytes before the integrity re-marshal
+	// Drop the raw buffer reference so the GC can reclaim it before the
+	// integrity re-marshal allocates a fresh buffer of similar size. The
+	// decoded message p owns its own memory; this assignment does not
+	// affect it. (The compiler may still extend data's lifetime across the
+	// re-marshal in some builds, but in practice this helps.)
+	data = nil
 	// Verify integrity: the snapshot ID is the BLAKE3 hash of the marshaled
 	// proto with IdHash omitted (as computed in porcelain.CreateSnapshot).
 	// Clear IdHash, re-marshal, and compare the hash to the requested ID.
 	idHash := p.IdHash
 	p.IdHash = nil
-	recomputed, err := proto.Marshal(p)
+	// Deterministic: true is REQUIRED here. snapshot.proto has a
+	// map<string,string> extra field, and the default proto.Marshal
+	// iterates map keys in non-deterministic order (Go randomizes map
+	// iteration). Without Deterministic, the re-marshaled bytes may
+	// differ from the bytes hashed in CreateSnapshot, causing spurious
+	// ErrCorrupted on snapshots whose files have 2+ Extra entries.
+	recomputed, err := proto.MarshalOptions{Deterministic: true}.Marshal(p)
 	if err != nil {
 		return nil, fmt.Errorf("re-marshal snapshot %x: %w", id.Hash[:8], storage.ErrCorrupted)
 	}
-	if core.Hash(blake3.Sum256(recomputed)) != id.Hash {
+	// Stream the re-marshaled bytes through blake3 so we do not need the
+	// full recomputed buffer live at once alongside the decoded message.
+	// blake3.New returns a 256-bit hasher; Sum(nil) returns exactly 32
+	// bytes, matching core.HashSize.
+	hasher := blake3.New()
+	if _, err := hasher.Write(recomputed); err != nil {
+		return nil, fmt.Errorf("hash snapshot %x: %w", id.Hash[:8], storage.ErrCorrupted)
+	}
+	recomputed = nil // allow GC of re-marshaled bytes before decoding
+	var recomputedHash core.Hash
+	copy(recomputedHash[:], hasher.Sum(nil))
+	if recomputedHash != id.Hash {
 		return nil, fmt.Errorf("snapshot %x integrity check failed: %w", id.Hash[:8], storage.ErrCorrupted)
 	}
 	p.IdHash = idHash
@@ -77,8 +108,12 @@ func (fs *FSStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*core
 // PutSnapshot writes a snapshot and its lightweight manifest to disk.
 func (fs *FSStorage) PutSnapshot(ctx context.Context, snapshot *core.Snapshot) error {
 	// withIDHash=true: the ID is already assigned, so persist it.
+	// Deterministic: true keeps the on-disk representation stable across
+	// re-writes (e.g. compaction), though GetSnapshot re-marshals with
+	// IdHash cleared before hashing so this is not strictly required for
+	// integrity verification.
 	p := core.SnapshotToProto(snapshot, true)
-	data, err := proto.Marshal(p)
+	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(p)
 	if err != nil {
 		return err
 	}

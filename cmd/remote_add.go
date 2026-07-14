@@ -55,7 +55,7 @@ var remoteAddCmd = &cobra.Command{
 		for _, o := range options {
 			parts := strings.SplitN(o, "=", 2)
 			if len(parts) != 2 {
-				reportFailed("Remote add", "remote add", fmt.Sprintf("invalid --option %q (expected key=value).", o), "use --option key=value, repeatable.")
+				reportFailed("Remote add", "remote add", fmt.Sprintf("invalid --option %q (expected key=value).", o), "use --option key=value, repeatable.", nil)
 				return ErrSilent
 			}
 			optMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
@@ -65,25 +65,27 @@ var remoteAddCmd = &cobra.Command{
 		interactive := url == "" || user == ""
 		if interactive {
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				reportFailed("Remote add", "remote add", "interactive mode requires a terminal.", "provide --url and --user via flags.")
+				reportFailed("Remote add", "remote add", "interactive mode requires a terminal.", "provide --url and --user via flags.", nil)
 				return ErrSilent
 			}
 			reader := bufio.NewReader(os.Stdin)
-			if remoteType == "" {
-				remoteType = "webdav"
-			}
-			fmt.Printf("Protocol (webdav/smb) [%s]: ", remoteType)
-			line, _ := reader.ReadString('\n')
-			line = strings.TrimSpace(line)
-			if line != "" {
-				remoteType = line
+			var line string
+			for remoteType == "" {
+				fmt.Print("Protocol (webdav/smb): ")
+				line, _ = reader.ReadString('\n')
+				line = strings.TrimSpace(line)
+				if line == "webdav" || line == "smb" {
+					remoteType = line
+					break
+				}
+				fmt.Fprintln(os.Stderr, "error: protocol is required (must be webdav or smb)")
 			}
 			if url == "" {
 				fmt.Print("URL: ")
 				line, _ = reader.ReadString('\n')
 				url = strings.TrimSpace(line)
 				if url == "" {
-					reportFailed("Remote add", "remote add", "URL is required.", "")
+					reportFailed("Remote add", "remote add", "URL is required.", "", nil)
 					return ErrSilent
 				}
 			}
@@ -92,7 +94,7 @@ var remoteAddCmd = &cobra.Command{
 				line, _ = reader.ReadString('\n')
 				user = strings.TrimSpace(line)
 				if user == "" {
-					reportFailed("Remote add", "remote add", "username is required.", "")
+					reportFailed("Remote add", "remote add", "username is required.", "", nil)
 					return ErrSilent
 				}
 			}
@@ -101,7 +103,7 @@ var remoteAddCmd = &cobra.Command{
 				passBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Println() // newline after password prompt
 				if err != nil {
-					reportFailed("Remote add", "remote add", fmt.Sprintf("read password: %s.", err), "")
+					reportFailed("Remote add", "remote add", fmt.Sprintf("read password: %s.", err), "", err)
 					return ErrSilent
 				}
 				password = string(passBytes)
@@ -109,7 +111,7 @@ var remoteAddCmd = &cobra.Command{
 			// For SMB, prompt for domain if not provided.
 			if remoteType == "smb" && optMap["domain"] == "" {
 				fmt.Print("Domain (optional, press Enter to skip): ")
-				line, _ := reader.ReadString('\n')
+				line, _ = reader.ReadString('\n')
 				domain := strings.TrimSpace(line)
 				if domain != "" {
 					optMap["domain"] = domain
@@ -118,7 +120,7 @@ var remoteAddCmd = &cobra.Command{
 			// Ask whether to save password.
 			if !noSavePassword {
 				fmt.Print("Save password to user-level credentials.json? [Y/n]: ")
-				line, _ := reader.ReadString('\n')
+				line, _ = reader.ReadString('\n')
 				answer := strings.TrimSpace(strings.ToLower(line))
 				if answer != "n" && answer != "no" {
 					noSavePassword = false
@@ -129,7 +131,12 @@ var remoteAddCmd = &cobra.Command{
 		}
 
 		if remoteType == "" {
-			remoteType = "webdav"
+			reportFailed("Remote add", "remote add", "protocol type is required.", "specify --type webdav or --type smb.", nil)
+			return ErrSilent
+		}
+		if remoteType != "webdav" && remoteType != "smb" {
+			reportFailed("Remote add", "remote add", fmt.Sprintf("unsupported protocol type %q.", remoteType), "use --type webdav or --type smb.", nil)
+			return ErrSilent
 		}
 
 		cfg := remote.RemoteConfig{
@@ -147,12 +154,12 @@ var remoteAddCmd = &cobra.Command{
 		if password != "" && !noSavePassword {
 			host, err := remote.HostFromURL(url)
 			if err != nil {
-				reportFailed("Remote add", "remote add", "could not parse URL for credentials.", "check that --url is a valid remote URL.")
+				reportFailed("Remote add", "remote add", "could not parse URL for credentials.", "check that --url is a valid remote URL.", err)
 				return ErrSilent
 			}
 			cred, err := remote.LoadCredentials()
 			if err != nil {
-				reportFailed("Remote add", "remote add", "could not load existing credentials.", "")
+				reportFailed("Remote add", "remote add", "could not load existing credentials.", "", err)
 				return ErrSilent
 			}
 			cred.AddOrUpdateCredential(remote.Credential{
@@ -162,7 +169,7 @@ var remoteAddCmd = &cobra.Command{
 				Password: password,
 			})
 			if err := remote.SaveCredentials(cred); err != nil {
-				reportFailed("Remote add", "remote add", "could not save credentials.", "check that the user-level config directory is writable.")
+				reportFailed("Remote add", "remote add", "could not save credentials.", "check that the user-level config directory is writable.", err)
 				return ErrSilent
 			}
 			credentialsSaved = true
@@ -174,7 +181,7 @@ var remoteAddCmd = &cobra.Command{
 			return err
 		}
 		if _, err := rf.FindRemote(name); err == nil {
-			reportFailed("Remote add", "remote add", fmt.Sprintf("remote %q already exists", name), "use 'drift remote set-url' to update the URL of an existing remote.")
+			reportFailed("Remote add", "remote add", fmt.Sprintf("remote %q already exists", name), "use 'drift remote set-url' to update the URL of an existing remote.", nil)
 			return ErrSilent
 		}
 		rf.AddOrUpdateRemote(cfg)
@@ -234,7 +241,7 @@ var remoteAddCmd = &cobra.Command{
 }
 
 func init() {
-	remoteAddCmd.Flags().String("type", "webdav", "protocol type (webdav|smb)")
+	remoteAddCmd.Flags().String("type", "", "protocol type (webdav|smb, required)")
 	remoteAddCmd.Flags().String("url", "", "remote URL")
 	remoteAddCmd.Flags().String("user", "", "username")
 	remoteAddCmd.Flags().String("password", "", "password (saved to user-level credentials.json)")

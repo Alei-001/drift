@@ -27,7 +27,11 @@ func (ms *MemoryStorage) GetSnapshot(ctx context.Context, id core.SnapshotID) (*
 	// proto with IdHash omitted) and compare to the requested ID. This
 	// catches in-memory corruption or a snapshot stored under the wrong key.
 	p := core.SnapshotToProto(clone, false)
-	recomputed, err := proto.Marshal(p)
+	// Deterministic: true ensures map fields (Extra) are serialized in
+	// sorted key order, matching the hash computed in CreateSnapshot.
+	// Without this, snapshots with 2+ Extra entries would intermittently
+	// fail integrity verification due to non-deterministic map iteration.
+	recomputed, err := proto.MarshalOptions{Deterministic: true}.Marshal(p)
 	if err != nil {
 		return nil, fmt.Errorf("re-marshal snapshot %s: %w", id.Hash.FullString(), storage.ErrCorrupted)
 	}

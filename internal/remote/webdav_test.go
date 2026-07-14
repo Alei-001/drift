@@ -2,11 +2,9 @@ package remote
 
 import (
 	"context"
-	"io"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
@@ -29,12 +27,11 @@ func startWebDAVTestServer(t *testing.T) (string, func()) {
 	}
 }
 
-// TestWebDAV_BasicCRUD verifies the WebDAVFS can Stat/Write/Read/List/Remove
-// against a real local WebDAV server.
-func TestWebDAV_BasicCRUD(t *testing.T) {
-	srvURL, cleanup := startWebDAVTestServer(t)
-	defer cleanup()
-
+// newWebDAVTestFS creates a fresh WebDAVFS connected to a local test
+// server. It is the factory passed to RunRemoteFSConformance.
+func newWebDAVTestFS(t *testing.T) (RemoteFS, func()) {
+	t.Helper()
+	srvURL, srvCleanup := startWebDAVTestServer(t)
 	cfg := RemoteConfig{
 		Name: "test",
 		Type: "webdav",
@@ -43,60 +40,25 @@ func TestWebDAV_BasicCRUD(t *testing.T) {
 		Options: map[string]string{
 			"_password": "secret",
 		},
+		// httptest.NewServer returns http://127.0.0.1:port; the test
+		// server is local so AllowInsecure is safe.
+		AllowInsecure: true,
 	}
 	rfs, err := NewWebDAVFS(cfg)
 	if err != nil {
+		srvCleanup()
 		t.Fatalf("NewWebDAVFS: %v", err)
 	}
-	defer rfs.Close()
-	ctx := context.Background()
+	return rfs, func() {
+		rfs.Close()
+		srvCleanup()
+	}
+}
 
-	// Write a file.
-	if err := rfs.Write(ctx, "testdir/hello.txt", strings.NewReader("hello webdav")); err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-
-	// Stat it.
-	info, err := rfs.Stat(ctx, "testdir/hello.txt")
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
-	if info.Size != int64(len("hello webdav")) {
-		t.Errorf("Size = %d, want %d", info.Size, len("hello webdav"))
-	}
-	if info.IsDir {
-		t.Error("expected file, not dir")
-	}
-
-	// Read it back.
-	rc, err := rfs.Read(ctx, "testdir/hello.txt")
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	data, _ := io.ReadAll(rc)
-	rc.Close()
-	if string(data) != "hello webdav" {
-		t.Errorf("Read = %q, want %q", string(data), "hello webdav")
-	}
-
-	// List the directory.
-	entries, err := rfs.List(ctx, "testdir")
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Errorf("List returned %d entries, want 1", len(entries))
-	}
-
-	// Remove it.
-	if err := rfs.Remove(ctx, "testdir/hello.txt"); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-	// Stat should now return ErrNotExist.
-	_, err = rfs.Stat(ctx, "testdir/hello.txt")
-	if err == nil || !strings.Contains(err.Error(), "not exist") {
-		t.Errorf("expected ErrNotExist after remove, got %v", err)
-	}
+// TestWebDAVConformance runs the shared RemoteFS conformance suite against
+// a real local WebDAV server (golang.org/x/net/webdav + httptest).
+func TestWebDAVConformance(t *testing.T) {
+	RunRemoteFSConformance(t, "webdav", newWebDAVTestFS)
 }
 
 // TestWebDAV_PushPullEndToEnd verifies the full push/pull flow over a real
@@ -114,6 +76,9 @@ func TestWebDAV_PushPullEndToEnd(t *testing.T) {
 		Options: map[string]string{
 			"_password": "secret",
 		},
+		// httptest.NewServer returns http://127.0.0.1:port; the test
+		// server is local so AllowInsecure is safe.
+		AllowInsecure: true,
 	}
 
 	// Source store: has a snapshot + chunk.
@@ -129,7 +94,7 @@ func TestWebDAV_PushPullEndToEnd(t *testing.T) {
 	}
 	defer rfsPush.Close()
 
-	stats, err := Push(context.Background(), srcStore, rfsPush, "")
+	stats, err := Push(context.Background(), srcStore, rfsPush, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}
@@ -148,7 +113,7 @@ func TestWebDAV_PushPullEndToEnd(t *testing.T) {
 	}
 	defer rfsPull.Close()
 
-	stats, err = Pull(context.Background(), dstStore, rfsPull, "")
+	stats, err = Pull(context.Background(), dstStore, rfsPull, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}

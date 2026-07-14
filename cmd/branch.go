@@ -104,10 +104,10 @@ var branchCreateCmd = &cobra.Command{
 		tipID, err := porcelain.CreateBranch(ctx, store, cwd, name)
 		if err != nil {
 			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
-				reportFailed("Branch", "branch", fmt.Sprintf("'%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.")
+				reportFailed("Branch", "branch", fmt.Sprintf("'%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.", err)
 				return silentWrap(err)
 			}
-			reportFailed("Branch", "branch", "could not create branch.", "")
+			reportFailed("Branch", "branch", "could not create branch.", "", err)
 			return silentWrap(err)
 		}
 		sid := "no commits yet"
@@ -145,13 +145,13 @@ var branchDeleteCmd = &cobra.Command{
 		if err := porcelain.DeleteBranch(ctx, store, cwd, name); err != nil {
 			switch {
 			case errors.Is(err, porcelain.ErrBranchNotFound):
-				reportFailed("Branch", "branch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch list' to list existing branches.")
+				reportFailed("Branch", "branch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch list' to list existing branches.", err)
 			case errors.Is(err, porcelain.ErrCannotDeleteCurrentBranch):
-				reportFailed("Branch", "branch", fmt.Sprintf("cannot delete the current branch '%s'.", name), "switch to another branch first with 'drift switch'.")
+				reportFailed("Branch", "branch", fmt.Sprintf("cannot delete the current branch '%s'.", name), "switch to another branch first with 'drift switch'.", err)
 			case errors.Is(err, porcelain.ErrCannotDeleteMain):
-				reportFailed("Branch", "branch", fmt.Sprintf("cannot delete '%s'.", name), "'main' is the default branch and cannot be removed.")
+				reportFailed("Branch", "branch", fmt.Sprintf("cannot delete '%s'.", name), "'main' is the default branch and cannot be removed.", err)
 			default:
-				reportFailed("Branch", "branch", "could not delete branch.", "")
+				reportFailed("Branch", "branch", "could not delete branch.", "", err)
 			}
 			return silentWrap(err)
 		}
@@ -194,7 +194,7 @@ var branchRenameCmd = &cobra.Command{
 				return fmt.Errorf("read HEAD: %w", err)
 			}
 			if headRef.SymRef == "" {
-				reportFailed("Branch", "branch", "HEAD is detached; specify both old and new branch names.", "use 'drift branch rename <old> <new>' instead.")
+				reportFailed("Branch", "branch", "HEAD is detached; specify both old and new branch names.", "use 'drift branch rename <old> <new>' instead.", nil)
 				return ErrSilent
 			}
 			oldName = strings.TrimPrefix(headRef.SymRef, "heads/")
@@ -206,13 +206,13 @@ var branchRenameCmd = &cobra.Command{
 		if err := porcelain.RenameBranch(ctx, store, cwd, oldName, newName); err != nil {
 			switch {
 			case errors.Is(err, porcelain.ErrBranchNotFound):
-				reportFailed("Branch", "branch", fmt.Sprintf("branch '%s' not found.", oldName), "use 'drift branch list' to list existing branches.")
+				reportFailed("Branch", "branch", fmt.Sprintf("branch '%s' not found.", oldName), "use 'drift branch list' to list existing branches.", err)
 			case errors.Is(err, porcelain.ErrBranchAlreadyExists):
-				reportFailed("Branch", "branch", fmt.Sprintf("branch '%s' already exists.", newName), "use 'drift branch list' to list existing branches.")
+				reportFailed("Branch", "branch", fmt.Sprintf("branch '%s' already exists.", newName), "use 'drift branch list' to list existing branches.", err)
 			case errors.Is(err, porcelain.ErrCannotRenameMain):
-				reportFailed("Branch", "branch", fmt.Sprintf("cannot rename '%s'.", oldName), "'main' is the default branch and cannot be renamed.")
+				reportFailed("Branch", "branch", fmt.Sprintf("cannot rename '%s'.", oldName), "'main' is the default branch and cannot be renamed.", err)
 			default:
-				reportFailed("Branch", "branch", "could not rename branch.", "")
+				reportFailed("Branch", "branch", "could not rename branch.", "", err)
 			}
 			return silentWrap(err)
 		}

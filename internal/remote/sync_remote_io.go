@@ -21,6 +21,34 @@ import (
 
 // --- path helpers ---
 
+// ensureRemoteDir ensures dir exists on rfs, creating it if necessary.
+// It stats first so the common "already exists" case avoids a failing
+// MkdirAll whose error code is server-dependent. A re-stat after MkdirAll
+// failure handles the race where a concurrent creator made the dir appear
+// between our Stat and MkdirAll.
+//
+// dir is a relative path per the RemoteFS path contract (no leading slash).
+func ensureRemoteDir(ctx context.Context, rfs RemoteFS, dir string) error {
+	if dir == "" || dir == "." || dir == "/" {
+		return nil
+	}
+	if info, err := rfs.Stat(ctx, dir); err == nil {
+		if !info.IsDir {
+			return fmt.Errorf("path %q exists but is not a directory", dir)
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat %q: %w", dir, err)
+	}
+	if err := rfs.MkdirAll(ctx, dir); err != nil {
+		if _, sErr := rfs.Stat(ctx, dir); sErr == nil {
+			return nil
+		}
+		return fmt.Errorf("mkdir %q: %w", dir, err)
+	}
+	return nil
+}
+
 func snapshotRemotePath(id core.SnapshotID) string {
 	h := id.Hash.FullString()
 	return path.Join(storage.SnapshotsDir, h[:2], h[2:])
