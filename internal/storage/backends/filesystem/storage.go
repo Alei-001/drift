@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -190,7 +191,7 @@ func (fs *FSStorage) decompressFromReader(r io.Reader) ([]byte, error) {
 	limited := &io.LimitedReader{R: fs.zstdDecoder, N: maxDecompressedChunkSize + 1}
 	data, err := io.ReadAll(limited)
 	if err != nil {
-		if err == io.EOF && limited.N == 0 {
+		if errors.Is(err, io.EOF) && limited.N == 0 {
 			return nil, fmt.Errorf("decompressed chunk exceeds max size %d: %w", maxDecompressedChunkSize, storage.ErrCorrupted)
 		}
 		return nil, err
