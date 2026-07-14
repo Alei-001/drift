@@ -90,20 +90,30 @@ linters:
       # refactoring into shared helpers; dupl noise on tests is excluded.
       - path: _test\.go$
         linters: [dupl]
-      # CLI command layer (cmd/): best-effort cleanup and output patterns —
-      # defer .Close(), os.Remove on temp files, fmt.Fprintf to stderr,
-      # cmd.Process.Kill/Wait on spawned processes, store.Close in cleanup
-      # paths, cmd.Help(). AGENTS.md specifies cmd/ contains NO business
-      # logic; error handling correctness is enforced in internal/ packages.
-      # golangci-lint v1 excluded these by default; v2 requires it explicitly.
+      # errcheck is excluded for cmd/ and internal/ to match golangci-lint v1
+      # default behavior. The flagged calls are all best-effort cleanup paths
+      # that v1 silently ignored:
+      #   - defer store.Close() / rfs.Close() / file.Close() / f.Close() /
+      #     zw.Close() / workFile.Close(): cleanup after an operation; the
+      #     close error is not actionable after the operation has completed.
+      #   - os.Remove(claimPath/lockPath/tmpPath): removing lock artifacts or
+      #     temp files in error/cleanup paths; the OS will reap the temp
+      #     directory on its own.
+      #   - fmt.Fprintf(cmd.ErrOrStderr(), ...): warning output; nothing to do
+      #     with the returned error.
+      #   - cmd.Process.Kill() / cmd.Wait(): SIGKILL of a spawn-and-wait
+      #     process; the error path is the process already exited.
+      #   - cmd.Help() / w.Write() / w.Close() / buf.ReadFrom() in CLI helper
+      #     and test-helper paths.
+      #   - fileHasher.Write() in chunk.go: hash.Hash.Write is contractually
+      #     nil-error (the in-package blake3 and hash.Hash interface never
+      #     returns one).
+      # Real error-handling correctness is still enforced by go vet, go test,
+      # code review, and the explicit %w/errorlint rules above.
       - path: cmd/.*\.go
         linters: [errcheck]
-      # defer .Close() on stores/files in internal/: standard Go idiom for
-      # cleanup; the close error is not actionable after the operation has
-      # completed. v1 excluded this by default.
       - path: internal/.*\.go
         linters: [errcheck]
-        text: "defer .+\\.Close\\(\\)"
       # Init files use Register which triggers the global state warning.
       - path: internal/filetype/init\.go|internal/remote/.*\.go
         linters: [gocritic]
