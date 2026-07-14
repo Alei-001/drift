@@ -64,8 +64,8 @@ var diffCmd = &cobra.Command{
 		case 0:
 			headSnap := porcelain.ResolveHeadSnapshot(ctx, store)
 			if headSnap == nil {
-			reportFailed("Diff", "diff", "no snapshot to compare against.",
-				"use 'drift save -m \"message\"' to create one first.", nil)
+				reportFailed("Diff", "diff", "no snapshot to compare against.",
+					"use 'drift save -m \"message\"' to create one first.", nil)
 				return ErrSilent
 			}
 			return runDiffWorkspaceVs(ctx, store, cwd, &cfg.Core, headSnap, "head", file)

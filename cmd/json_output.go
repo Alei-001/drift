@@ -15,8 +15,8 @@ import (
 // error is available, so scripts can access the real error cause.
 type JSONEnvelope struct {
 	Command     string      `json:"command"`
-	Status      string      `json:"status"`               // ok / failed / warning / active
-	Error       string      `json:"error,omitempty"`      // error message when status == "failed"
+	Status      string      `json:"status"`                 // ok / failed / warning / active
+	Error       string      `json:"error,omitempty"`        // error message when status == "failed"
 	ErrorDetail string      `json:"error_detail,omitempty"` // verbose: underlying error cause
 	Data        interface{} `json:"data,omitempty"`
 	Hint        *string     `json:"hint"`

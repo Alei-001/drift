@@ -39,6 +39,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install syft
+        # SBOM generation (see .goreleaser.yml `sboms:`) shells out to syft.
+        # Install it so the release build can catalog artifacts.
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:

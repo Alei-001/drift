@@ -212,7 +212,7 @@ func TestCreateSnapshot_SetRefFailureOnFirstCommitDoesNotCreateBranch(t *testing
 		SymRef: "heads/main",
 	})
 	store.SetIndex(ctx, &core.Index{
-		Entries:   []core.IndexEntry{},
+		Entries: []core.IndexEntry{},
 	})
 
 	dir := t.TempDir()

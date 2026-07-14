@@ -8,12 +8,14 @@
 #   - package boundaries enforced (depguard): remote must not import the
 #     filesystem backend; it uses shared constants from storage/layout.go
 #     and storage/chunk_format.go instead.
+
+version: "2"
+
 run:
-  timeout: 5m
   go: "1.25"
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck          # unchecked errors
     - errorlint         # %w vs %v, sentinel comparison
@@ -36,53 +38,52 @@ linters:
     - dupl              # duplicate code detection
     - goconst           # repeated literal detection
     - exhaustive        # switch exhaustiveness on enums
-
-linters-settings:
-  errorlint:
-    errorf: true        # require %w for wrapping
-    asserts: true       # require errors.Is for sentinel comparison
-    comparison: true    # require errors.Is for direct comparison
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
-  revive:
-    severity: warning
+  settings:
+    errorlint:
+      errorf: true        # require %w for wrapping
+      asserts: true       # require errors.Is for sentinel comparison
+      comparison: true    # require errors.Is for direct comparison
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+    revive:
+      severity: warning
+      rules:
+        - name: initialisms
+          arguments: ["ID", "URL", "HTTP", "FS", "MIME", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTPS", "IP", "JSON", "LHS", "QPS", "RAM", "RHS", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "UID", "UUID", "URI", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS"]
+    gocyclo:
+      # Flag functions whose cyclomatic complexity exceeds this threshold.
+      # 15 keeps functions focused; the project also caps file length at 300
+      # lines (AGENTS.md rule 9; see docs/CODE_STANDARDS.md).
+      min-complexity: 15
+    depguard:
+      rules:
+        # Enforce the AGENTS.md layer boundary: the remote sync package must
+        # NOT import storage/backends/filesystem. It depends only on storage
+        # (interface + shared layout/chunk-format constants) and core.
+        no-filesystem-in-remote:
+          files:
+            - "**/internal/remote/**/*.go"
+          deny:
+            - pkg: "github.com/Alei-001/drift/internal/storage/backends/filesystem"
+              desc: "remote must not import the filesystem backend; use shared constants from storage/layout.go and storage/chunk_format.go instead"
+  exclusions:
     rules:
-      - name: initialisms
-        arguments: ["ID", "URL", "HTTP", "FS", "MIME", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTPS", "IP", "JSON", "LHS", "QPS", "RAM", "RHS", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "UID", "UUID", "URI", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS"]
-
-  gocyclo:
-    # Flag functions whose cyclomatic complexity exceeds this threshold.
-    # 15 keeps functions focused; the project also caps file length at 300
-    # lines (AGENTS.md rule 9; see docs/CODE_STANDARDS.md).
-    min-complexity: 15
-  depguard:
-    rules:
-      # Enforce the AGENTS.md layer boundary: the remote sync package must
-      # NOT import storage/backends/filesystem. It depends only on storage
-      # (interface + shared layout/chunk-format constants) and core.
-      no-filesystem-in-remote:
-        files:
-          - "**/internal/remote/**/*.go"
-        deny:
-          - pkg: "github.com/Alei-001/drift/internal/storage/backends/filesystem"
-            desc: "remote must not import the filesystem backend; use shared constants from storage/layout.go and storage/chunk_format.go instead"
+      # Generated protobuf code is exempt from all style rules.
+      - path: \.pb\.go$
+        linters: [all]
+      # Test files may use strings.Contains on errors (per AGENTS.md).
+      - path: _test\.go$
+        linters: [errorlint]
+        text: "type assertion"
+      # Init files use Register which triggers the global state warning.
+      - path: internal/filetype/init\.go|internal/remote/.*\.go
+        linters: [gocritic]
+        text: "wrapperFunc|globalState"
 
 issues:
-  exclude-rules:
-    # Generated protobuf code is exempt from all style rules.
-    - path: \.pb\.go$
-      linters: [all]
-    # Test files may use strings.Contains on errors (per AGENTS.md).
-    - path: _test\.go$
-      linters: [errorlint]
-      text: "type assertion"
-    # Init files use Register which triggers the global state warning.
-    - path: internal/filetype/init\.go|internal/remote/.*\.go
-      linters: [gocritic]
-      text: "wrapperFunc|globalState"
   max-issues-per-linter: 0
   max-same-issues: 0
   fix: false

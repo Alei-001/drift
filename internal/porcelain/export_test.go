@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
@@ -191,9 +192,20 @@ func TestExportSnapshot_UnwritableOutputPath(t *testing.T) {
 	store := memory.NewMemoryStorage()
 	snapID := exportTestSnapshot(t, store, 0x05)
 
-	// On Windows, a path containing an invalid character like '<' will
-	// cause os.Create to fail. On Unix, /dev/null/x is not writable.
-	outPath := filepath.Join(t.TempDir(), "bad<name", "export.zip")
+	var outPath string
+	if runtime.GOOS == "windows" {
+		// On Windows, a path containing an invalid character like '<' will
+		// cause os.MkdirAll/os.Create to fail.
+		outPath = filepath.Join(t.TempDir(), "bad<name", "export.zip")
+	} else {
+		// On Unix, use a path under a regular file: MkdirAll fails with
+		// ENOTDIR because a parent path component is a file, not a directory.
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+			t.Fatalf("create blocker: %v", err)
+		}
+		outPath = filepath.Join(blocker, "export.zip")
+	}
 	_, err := ExportSnapshot(context.Background(), store, snapID, outPath)
 	if err == nil {
 		t.Fatal("expected error for unwritable path, got nil")

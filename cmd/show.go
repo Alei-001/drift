@@ -96,8 +96,8 @@ var showCmd = &cobra.Command{
 
 		snapshot := resolveSnapshot(ctx, store, versionLabel)
 		if snapshot == nil {
-		reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
-			"use 'drift log' to list available snapshots.", nil)
+			reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
+				"use 'drift log' to list available snapshots.", nil)
 			return ErrSilent
 		}
 

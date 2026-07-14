@@ -32,12 +32,12 @@ type ChunkRef struct {
 
 // IntegrityReport contains the results of a full repository integrity check.
 type IntegrityReport struct {
-	TotalBlocks        int
-	Corrupt            int
-	Missing            int
-	SnapshotCorrupt    int
-	FileHashMismatch   int
-	VerboseRefs        []ChunkRef // populated only when verbose=true
+	TotalBlocks      int
+	Corrupt          int
+	Missing          int
+	SnapshotCorrupt  int
+	FileHashMismatch int
+	VerboseRefs      []ChunkRef // populated only when verbose=true
 }
 
 // VerifyIntegrity verifies the integrity of all chunks in the repository by

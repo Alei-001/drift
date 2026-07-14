@@ -15,9 +15,9 @@ import (
 
 // workspaceLockData is the JSON payload stored in the workspace lock file.
 type workspaceLockData struct {
-	PID       int    `json:"pid"`
-	Timestamp int64  `json:"timestamp"`
-	StartTime int64  `json:"start_time,omitempty"`
+	PID       int   `json:"pid"`
+	Timestamp int64 `json:"timestamp"`
+	StartTime int64 `json:"start_time,omitempty"`
 }
 
 // lockStaleTimeout is how long a lock may live before being considered stale.
