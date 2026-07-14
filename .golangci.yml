@@ -50,9 +50,10 @@ linters:
         - style
     revive:
       severity: warning
-      rules:
-        - name: initialisms
-          arguments: ["ID", "URL", "HTTP", "FS", "MIME", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTPS", "IP", "JSON", "LHS", "QPS", "RAM", "RHS", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "UID", "UUID", "URI", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS"]
+      # In golangci-lint v2, the old `initialisms` rule was merged into
+      # `var-naming`. Acronym conventions (ID, URL, HTTP, etc.) are enforced
+      # by AGENTS.md rule 1 and code review; revive runs with its default
+      # ruleset here.
     gocyclo:
       # Flag functions whose cyclomatic complexity exceeds this threshold.
       # 15 keeps functions focused; the project also caps file length at 300
