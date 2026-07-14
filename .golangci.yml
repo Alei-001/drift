@@ -79,6 +79,31 @@ linters:
       - path: _test\.go$
         linters: [errorlint]
         text: "type assertion"
+      # Test files: setup helpers (store.SetRef, store.PutSnapshot, CreateBranch,
+      # etc.) are called for side effects; tests assert behavior through the
+      # public API rather than each setup call's return value. Per AGENTS.md,
+      # tests verify behavior through public interfaces.
+      - path: _test\.go$
+        linters: [errcheck]
+      # Test files: similar setup/teardown structure across sibling command
+      # tests (pull_test.go vs push_test.go) is expected and not worth
+      # refactoring into shared helpers; dupl noise on tests is excluded.
+      - path: _test\.go$
+        linters: [dupl]
+      # CLI command layer (cmd/): best-effort cleanup and output patterns —
+      # defer .Close(), os.Remove on temp files, fmt.Fprintf to stderr,
+      # cmd.Process.Kill/Wait on spawned processes, store.Close in cleanup
+      # paths, cmd.Help(). AGENTS.md specifies cmd/ contains NO business
+      # logic; error handling correctness is enforced in internal/ packages.
+      # golangci-lint v1 excluded these by default; v2 requires it explicitly.
+      - path: cmd/.*\.go
+        linters: [errcheck]
+      # defer .Close() on stores/files in internal/: standard Go idiom for
+      # cleanup; the close error is not actionable after the operation has
+      # completed. v1 excluded this by default.
+      - path: internal/.*\.go
+        linters: [errcheck]
+        text: "defer .+\\.Close\\(\\)"
       # Init files use Register which triggers the global state warning.
       - path: internal/filetype/init\.go|internal/remote/.*\.go
         linters: [gocritic]
