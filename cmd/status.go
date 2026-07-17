@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/branch"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"fmt"
 	"os"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -29,9 +30,9 @@ var statusCmd = &cobra.Command{
 		// Resolve the current branch name once; empty means detached HEAD.
 		// Surface it in human and JSON output so users always know where they
 		// stand without running 'drift branch list'.
-		currentBranch := porcelain.ResolveCurrentBranchName(ctx, store)
+		currentBranch := branch.ResolveCurrentBranchName(ctx, store)
 
-		changes, err := porcelain.DetectChanges(ctx, store, cwd, &cfg.Core)
+		changes, err := snapkg.DetectChanges(ctx, store, cwd, &cfg.Core)
 		if err != nil {
 			reportFailed("Status", "status", "could not get status.", "", err)
 			return ErrSilent

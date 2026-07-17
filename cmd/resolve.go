@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"context"
 	"errors"
 	"fmt"
@@ -9,8 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 // resolveCmd resolves a version reference to a snapshot ID.
@@ -35,17 +36,17 @@ concrete snapshot ID before calling other commands.`,
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Resolve", "resolve", cwd)
+		st, _, err := openProjectOrReport("Resolve", "resolve", cwd)
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer st.Close()
 
 		ref := args[0]
-		snap, err := porcelain.ResolveSnapshotRef(ctx, store, ref)
+		snap, err := snapkg.ResolveSnapshotRef(ctx, st, ref)
 		if err != nil {
 			hint := "use 'drift log' to list available snapshots."
-			if errors.Is(err, porcelain.ErrAmbiguousID) {
+			if errors.Is(err, errs.ErrAmbiguousID) {
 				hint = "use a longer hash prefix to disambiguate."
 			}
 			reportFailed("Resolve", "resolve",
@@ -98,14 +99,14 @@ type resolveData struct {
 // Ambiguous-prefix details are printed to stderr to match the historical
 // behavior. The caller is responsible for reporting a user-facing error on nil.
 //
-// This is a thin wrapper over porcelain.ResolveSnapshotRef so that existing
+// This is a thin wrapper over snapkg.ResolveSnapshotRef so that existing
 // callers (which expect a *core.Snapshot with nil signalling "not found")
-// do not need to change. New code should call porcelain.ResolveSnapshotRef
+// do not need to change. New code should call snapkg.ResolveSnapshotRef
 // directly to inspect the error.
-func resolveSnapshot(ctx context.Context, store storage.Storer, id string) *core.Snapshot {
-	snap, err := porcelain.ResolveSnapshotRef(ctx, store, id)
+func resolveSnapshot(ctx context.Context, st *store.StoreSet, id string) *core.Snapshot {
+	snap, err := snapkg.ResolveSnapshotRef(ctx, st, id)
 	if err != nil {
-		if errors.Is(err, porcelain.ErrAmbiguousID) {
+		if errors.Is(err, errs.ErrAmbiguousID) {
 			fmt.Fprintln(os.Stderr, err.Error())
 		}
 		return nil

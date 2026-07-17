@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/project"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 // configField describes a user-configurable key exposed by 'drift config'.
@@ -174,7 +174,7 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	if err := porcelain.SetConfigValue(ctx, store, cfg, key, value); err != nil {
+	if err := project.SetConfigValue(ctx, store, cfg, key, value); err != nil {
 		reportFailed("Config", "config", err.Error(), "", err)
 		return ErrSilent
 	}

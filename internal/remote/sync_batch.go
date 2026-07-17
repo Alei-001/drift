@@ -8,7 +8,7 @@ import (
 	"path"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 // listRemoteChunkHashes lists the remote chunks directory for the given
@@ -34,7 +34,7 @@ func listRemoteChunkHashes(ctx context.Context, rfs RemoteFS, chunkHashes []core
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		dirPath := path.Join(storage.ChunksDir, prefix)
+		dirPath := path.Join(store.ChunksDir, prefix)
 		entries, err := rfs.List(ctx, dirPath)
 		if err != nil {
 			// Directory not existing on the remote is normal — it means
@@ -73,9 +73,9 @@ func listRemoteChunkHashes(ctx context.Context, rfs RemoteFS, chunkHashes []core
 // many chunks. A ListChunks failure is returned rather than silently
 // producing an empty set, which would cause pull to re-download every
 // chunk and could mask a real storage problem.
-func listLocalChunkHashes(ctx context.Context, store storage.Storer) (map[core.Hash]bool, error) {
+func listLocalChunkHashes(ctx context.Context, st *store.StoreSet) (map[core.Hash]bool, error) {
 	existing := make(map[core.Hash]bool)
-	hashes, err := store.ListChunks(ctx)
+	hashes, err := st.Chunks.ListChunks(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list local chunks: %w", err)
 	}

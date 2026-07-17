@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/sync"
 	"fmt"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +39,7 @@ config is per-repo behavior that each machine may customize independently.`,
 		defer store.Close()
 
 		if pushDryRun {
-			stats, err := porcelain.PushDryRun(ctx, store, cwd, remoteName, branch, pushAll)
+			stats, err := sync.PushDryRun(ctx, store, cwd, remoteName, branch, pushAll)
 			if err != nil {
 				reportFailed("Push", "push", "push dry-run failed.", "check remote configuration and network connectivity", err)
 				return silentWrap(err)
@@ -68,7 +68,7 @@ config is per-repo behavior that each machine may customize independently.`,
 			return nil
 		}
 
-		result, err := porcelain.PushToRemote(ctx, store, cwd, remoteName, branch, pushAll)
+		result, err := sync.PushToRemote(ctx, store, cwd, remoteName, branch, pushAll)
 		if err != nil {
 			reportFailed("Push", "push", "push failed.", "check remote configuration and network connectivity", err)
 			return silentWrap(err)

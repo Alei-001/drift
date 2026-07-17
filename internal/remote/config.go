@@ -3,6 +3,7 @@ package remote
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -110,4 +111,20 @@ func (rf *RemotesFile) RemoveRemote(name string) bool {
 		}
 	}
 	return false
+}
+
+// IsInsecureScheme returns true when cfg.URL uses http:// (cleartext).
+// Production callers should refuse cleartext unless the user explicitly
+// opts in via DRIFT_ALLOW_INSECURE=1. The check is exported so the
+// porcelain and CLI layers can apply the same logic without importing
+// protocol-specific packages.
+func IsInsecureScheme(cfg RemoteConfig) bool {
+	if cfg.URL == "" {
+		return false
+	}
+	u, err := url.Parse(cfg.URL)
+	if err != nil {
+		return false
+	}
+	return u.Scheme == "http"
 }

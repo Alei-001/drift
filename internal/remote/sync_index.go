@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 // rebuildIndex reconstructs the local index from the given snapshot tip.
 // Called after a pull that advances the current branch.
-func rebuildIndex(ctx context.Context, store storage.Storer, tip core.SnapshotID) error {
-	snap, err := store.GetSnapshot(ctx, tip)
+func rebuildIndex(ctx context.Context, st *store.StoreSet, tip core.SnapshotID) error {
+	snap, err := st.Snapshots.GetSnapshot(ctx, tip)
 	if err != nil {
 		return fmt.Errorf("get snapshot: %w", err)
 	}
@@ -30,13 +30,13 @@ func rebuildIndex(ctx context.Context, store storage.Storer, tip core.SnapshotID
 			Hash:    entry.Hash,
 		})
 	}
-	return store.SetIndex(ctx, newIndex)
+	return st.Index.SetIndex(ctx, newIndex)
 }
 
 // currentBranchName returns the current branch name (e.g. "main"), or "" on
 // error or detached HEAD. For internal use within the remote package only.
-func currentBranchName(ctx context.Context, store storage.Storer) string {
-	head, err := store.GetRef(ctx, "HEAD")
+func currentBranchName(ctx context.Context, st *store.StoreSet) string {
+	head, err := st.Refs.GetRef(ctx, "HEAD")
 	if err != nil || head.SymRef == "" {
 		return ""
 	}
@@ -45,12 +45,12 @@ func currentBranchName(ctx context.Context, store storage.Storer) string {
 
 // currentBranchTip resolves HEAD → branch ref → snapshot ID.
 // Returns a zero SnapshotID on error (e.g. fresh repo with no commits).
-func currentBranchTip(ctx context.Context, store storage.Storer) (core.SnapshotID, error) {
-	head, err := store.GetRef(ctx, "HEAD")
+func currentBranchTip(ctx context.Context, st *store.StoreSet) (core.SnapshotID, error) {
+	head, err := st.Refs.GetRef(ctx, "HEAD")
 	if err != nil || head.SymRef == "" {
 		return core.SnapshotID{}, fmt.Errorf("HEAD is not a symbolic ref")
 	}
-	ref, err := store.GetRef(ctx, head.SymRef)
+	ref, err := st.Refs.GetRef(ctx, head.SymRef)
 	if err != nil {
 		return core.SnapshotID{}, err
 	}

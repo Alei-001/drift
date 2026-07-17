@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"context"
 	"fmt"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 // diffFilesSummary is the change tally for file-level diff JSON output.
@@ -72,10 +72,10 @@ type diffFileData struct {
 }
 
 // diffSnapshotsJSON emits a file-level diff between two snapshots as a JSON
-// envelope. Classification is delegated to porcelain.DiffSnapshots; this
+// envelope. Classification is delegated to snapkg.DiffSnapshots; this
 // function only wraps the result in the JSON envelope.
-func diffSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *core.Snapshot, label1, label2 string) error {
-	result := porcelain.DiffSnapshots(snap1, snap2)
+func diffSnapshotsJSON(ctx context.Context, st *store.StoreSet, snap1, snap2 *core.Snapshot, label1, label2 string) error {
+	result := snapkg.DiffSnapshots(snap1, snap2)
 	return outputJSON(JSONEnvelope{
 		Command: "diff",
 		Status:  "ok",
@@ -97,10 +97,10 @@ func diffSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *
 }
 
 // diffWorkspaceJSON emits a file-level workspace-vs-snapshot diff as a JSON
-// envelope. Classification is delegated to porcelain.DiffWorkspaceVsSnapshot;
+// envelope. Classification is delegated to snapkg.DiffWorkspaceVsSnapshot;
 // this function only wraps the result in the JSON envelope.
-func diffWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
-	result, err := porcelain.DiffWorkspaceVsSnapshot(ctx, cwd, snap, cfg)
+func diffWorkspaceJSON(ctx context.Context, st *store.StoreSet, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
+	result, err := snapkg.DiffWorkspaceVsSnapshot(ctx, cwd, snap, cfg)
 	if err != nil {
 		return fmt.Errorf("walk workspace: %w", err)
 	}
@@ -125,9 +125,9 @@ func diffWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cf
 }
 
 // diffStatSnapshotsJSON emits a --stat diff between two snapshots as JSON.
-// The per-file computation is delegated to porcelain.ComputeStatSnapshots.
-func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, snap2 *core.Snapshot, label1, label2 string) error {
-	stats, err := porcelain.ComputeStatSnapshots(ctx, store, snap1, snap2)
+// The per-file computation is delegated to snapkg.ComputeStatSnapshots.
+func diffStatSnapshotsJSON(ctx context.Context, st *store.StoreSet, snap1, snap2 *core.Snapshot, label1, label2 string) error {
+	stats, err := snapkg.ComputeStatSnapshots(ctx, st, snap1, snap2)
 	if err != nil {
 		reportFailed("Diff", "diff", err.Error(), "", err)
 		return ErrSilent
@@ -136,9 +136,9 @@ func diffStatSnapshotsJSON(ctx context.Context, store storage.Storer, snap1, sna
 }
 
 // diffStatWorkspaceJSON emits a --stat workspace-vs-snapshot diff as JSON.
-// The per-file computation is delegated to porcelain.ComputeStatWorkspace.
-func diffStatWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
-	stats, err := porcelain.ComputeStatWorkspace(ctx, store, cwd, cfg, snap)
+// The per-file computation is delegated to snapkg.ComputeStatWorkspace.
+func diffStatWorkspaceJSON(ctx context.Context, st *store.StoreSet, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel string) error {
+	stats, err := snapkg.ComputeStatWorkspace(ctx, st, cwd, cfg, snap)
 	if err != nil {
 		reportFailed("Diff", "diff", err.Error(), "", err)
 		return ErrSilent
@@ -149,7 +149,7 @@ func diffStatWorkspaceJSON(ctx context.Context, store storage.Storer, cwd string
 // outputStatJSON converts FileStat results into a JSON envelope. OldSize and
 // NewSize are only included for binary files, matching the schema where text
 // files show insertions/deletions and binary files show sizes.
-func outputStatJSON(base, target string, stats []porcelain.FileStat) error {
+func outputStatJSON(base, target string, stats []snapkg.FileStat) error {
 	files := make([]diffStatFile, 0, len(stats))
 	totalIns, totalDel := 0, 0
 	for _, s := range stats {

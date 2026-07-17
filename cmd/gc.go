@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/gc"
 	"fmt"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +37,7 @@ func runGC(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	report, err := porcelain.CollectGarbage(ctx, store, cwd, gcDryRun, gcKeepAuto)
+	report, err := gc.CollectGarbage(ctx, store, cwd, gcDryRun, gcKeepAuto)
 	if err != nil {
 		reportFailed("GC", "gc", "garbage collection failed.", "", err)
 		return ErrSilent

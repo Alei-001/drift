@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/project"
+	"github.com/Alei-001/drift/internal/errs"
 	"context"
 	"errors"
 	"fmt"
@@ -13,7 +15,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/Alei-001/drift/internal/remote"
 	"github.com/Alei-001/drift/internal/util/logutil"
 	"github.com/Alei-001/drift/internal/version"
@@ -134,19 +135,19 @@ func classifyError(err error) int {
 	// Check specific error types first — silentWrap makes the error
 	// match both ErrSilent and the underlying sentinel, so we must
 	// test the more specific types before the generic ErrSilent catch.
-	if errors.Is(err, porcelain.ErrNotARepo) {
+	if errors.Is(err, errs.ErrNotARepo) {
 		return ExitNotRepo
 	}
 	if errors.Is(err, version.ErrNetwork) || errors.Is(err, remote.ErrNetwork) {
 		return ExitNetwork
 	}
-	if errors.Is(err, porcelain.ErrLocked) ||
-		errors.Is(err, porcelain.ErrBranchAlreadyExists) ||
-		errors.Is(err, porcelain.ErrTagAlreadyExists) ||
-		errors.Is(err, porcelain.ErrCannotDeleteCurrentBranch) ||
-		errors.Is(err, porcelain.ErrCannotDeleteMain) ||
-		errors.Is(err, porcelain.ErrCannotRenameMain) ||
-		errors.Is(err, porcelain.ErrUncommittedChanges) {
+	if errors.Is(err, project.ErrLocked) ||
+		errors.Is(err, errs.ErrBranchAlreadyExists) ||
+		errors.Is(err, errs.ErrTagAlreadyExists) ||
+		errors.Is(err, errs.ErrCannotDeleteCurrentBranch) ||
+		errors.Is(err, errs.ErrCannotDeleteMain) ||
+		errors.Is(err, errs.ErrCannotRenameMain) ||
+		errors.Is(err, errs.ErrUncommittedChanges) {
 		return ExitConflict
 	}
 	if isUsageError(err) {

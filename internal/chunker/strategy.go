@@ -10,7 +10,7 @@ package chunker
 //     implementation. It is a pure function — stateless, no interface.
 //
 //   DefaultSelector
-//     A convenience adapter that satisfies filetype.ChunkerSelector by
+//     A convenience adapter that satisfies engine.ChunkerSelector by
 //     delegating to BinaryChunkerFor. Use it in new engine scaffolding so the
 //     engine compiles before you write a custom ChunkerFor, or for any engine
 //     whose chunking needs are identical to the binary default.
@@ -21,41 +21,41 @@ package chunker
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
-// binaryLargeThreshold and binaryHugeThreshold are the file-size cutoffs that
-// select which chunking strategy to use. They are unexported because no
-// external package needs to reference them — BinaryChunkerFor encapsulates
-// the entire size-based dispatch.
+// binaryChunkThresholds are the file-size cutoffs that select which FastCDC
+// parameters to use. All tiers use content-defined chunking — the deduplication
+// guarantee is never lost, regardless of file size.
 const (
-	binaryLargeThreshold = 50 * 1024 * 1024  // 50 MB
-	binaryHugeThreshold  = 500 * 1024 * 1024 // 500 MB
+	binaryMediumThreshold = 50 * 1024 * 1024  // 50 MB
+	binaryLargeThreshold  = 200 * 1024 * 1024 // 200 MB
+	binaryHugeThreshold   = 1 * 1024 * 1024 * 1024 // 1 GB
 )
 
 // BinaryChunkerFor returns a Chunker tuned for binary file content of the
-// given size. It is the canonical building block for image, video, and binary
-// filetype engines.
+// given size. All tiers use FastCDC content-defined chunking so that the
+// core deduplication guarantee is never lost — identical content always
+// produces identical chunk hashes, regardless of file size.
 //
-//   - size < 50 MB  → FastCDC with default params (128/256/512 KB)
-//   - 50 MB ≤ size < 500 MB → FastCDC with params scaled 4× (fewer, larger chunks)
-//   - size ≥ 500 MB → FixedChunker at avgSize×8 to cap chunk-count overhead
+//   - size < 50 MB  → FastCDC 128K/256K/512K
+//   - 50 MB ≤ size < 200 MB → FastCDC 256K/512K/1M
+//   - 200 MB ≤ size < 1 GB → FastCDC 512K/1M/2M
+//   - size ≥ 1 GB → FastCDC 1M/2M/4M
 func BinaryChunkerFor(fileSize int64) Chunker {
 	minSize, avgSize, maxSize := fastCDCDefaultMinSize, fastCDCDefaultAvgSize, fastCDCDefaultMaxSize
 
 	switch {
-	case fileSize < binaryLargeThreshold:
+	case fileSize < binaryMediumThreshold:
 		return NewFastCDCChunkerWithParams(minSize, avgSize, maxSize)
+	case fileSize < binaryLargeThreshold:
+		return NewFastCDCChunkerWithParams(minSize*2, avgSize*2, maxSize*2)
 	case fileSize < binaryHugeThreshold:
-		// Scale all three proportionally to keep the min/avg/max ratio
-		// while producing fewer, larger chunks for big files.
 		return NewFastCDCChunkerWithParams(minSize*4, avgSize*4, maxSize*4)
 	default:
-		// For huge files, use fixed chunking with a size derived from
-		// the default avg, scaled up to reduce chunk count.
-		return NewFixedChunker(avgSize * 8)
+		return NewFastCDCChunkerWithParams(minSize*8, avgSize*8, maxSize*8)
 	}
 }
 
 // DefaultSelector is a convenience adapter that satisfies the
-// filetype.ChunkerSelector interface by delegating to BinaryChunkerFor.
+// engine.ChunkerSelector interface by delegating to BinaryChunkerFor.
 // Use it in engine scaffolding or for any engine whose chunking requirements
 // match the binary defaults. Engines with custom size thresholds (e.g. text)
 // should implement ChunkerFor directly instead of using DefaultSelector.

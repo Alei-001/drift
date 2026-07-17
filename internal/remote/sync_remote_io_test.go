@@ -8,20 +8,19 @@ import (
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage"
-	"github.com/Alei-001/drift/internal/storage/backends/memory"
+	"github.com/Alei-001/drift/internal/store"
+	"github.com/Alei-001/drift/internal/store/memory"
 	"github.com/zeebo/blake3"
 )
 
-// failingListChunksStore wraps a memory store and forces ListChunks to return
-// an error. All other methods delegate to the embedded Storer so the store
-// remains fully functional except for ListChunks.
-type failingListChunksStore struct {
-	storage.Storer
+// failingChunkStorer wraps a ChunkStorer and forces ListChunks to return
+// an error. All other methods delegate to the embedded ChunkStorer.
+type failingChunkStorer struct {
+	store.ChunkStorer
 	listErr error
 }
 
-func (s *failingListChunksStore) ListChunks(ctx context.Context) ([]core.Hash, error) {
+func (s *failingChunkStorer) ListChunks(ctx context.Context) ([]core.Hash, error) {
 	return nil, s.listErr
 }
 
@@ -30,13 +29,12 @@ func (s *failingListChunksStore) ListChunks(ctx context.Context) ([]core.Hash, e
 // swallowed into an empty set. Silently swallowing would cause pull to
 // re-download every chunk and could mask a real storage problem.
 func TestListLocalChunkHashes_ErrorPropagation(t *testing.T) {
-	store := &failingListChunksStore{
-		Storer:  memory.NewMemoryStorage(),
-		listErr: errors.New("simulated ListChunks I/O failure"),
-	}
-	defer store.Close()
+	ms := memory.NewMemoryStorage()
+	ss := store.NewStoreSet(ms)
+	ss.Chunks = &failingChunkStorer{ChunkStorer: ss.Chunks, listErr: errors.New("simulated ListChunks I/O failure")}
+	defer ss.Close()
 
-	_, err := listLocalChunkHashes(context.Background(), store)
+	_, err := listLocalChunkHashes(context.Background(), ss)
 	if err == nil {
 		t.Fatal("expected error from listLocalChunkHashes when ListChunks fails, got nil")
 	}
@@ -51,7 +49,7 @@ func TestListLocalChunkHashes_ErrorPropagation(t *testing.T) {
 // TestListLocalChunkHashes_EmptyStoreReturnsEmptySet verifies the normal path:
 // a store with no chunks returns an empty (non-nil) set without error.
 func TestListLocalChunkHashes_EmptyStoreReturnsEmptySet(t *testing.T) {
-	store := memory.NewMemoryStorage()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
 	defer store.Close()
 
 	result, err := listLocalChunkHashes(context.Background(), store)
@@ -66,13 +64,13 @@ func TestListLocalChunkHashes_EmptyStoreReturnsEmptySet(t *testing.T) {
 // TestListLocalChunkHashes_ReturnsExistingChunks verifies that chunks stored
 // in the local store are returned as a set.
 func TestListLocalChunkHashes_ReturnsExistingChunks(t *testing.T) {
-	store := memory.NewMemoryStorage()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
 	defer store.Close()
 
 	ctx := context.Background()
 	chunkData := []byte("test chunk data")
 	chunkHash := core.Hash(blake3.Sum256(chunkData))
-	if err := store.PutChunk(ctx, &core.Chunk{
+	if err := store.Chunks.PutChunk(ctx, &core.Chunk{
 		Hash: chunkHash,
 		Size: uint32(len(chunkData)),
 		Data: chunkData,
@@ -96,7 +94,7 @@ func TestListLocalChunkHashes_ReturnsExistingChunks(t *testing.T) {
 // broken local chain.
 func TestPushRef_FastForwardCheckError(t *testing.T) {
 	// Source store: has a snapshot that will be pushed to the remote.
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -117,7 +115,7 @@ func TestPushRef_FastForwardCheckError(t *testing.T) {
 
 	// Local store: empty — does NOT have the snapshot for snapID.Hash.
 	// isAncestor will call GetSnapshot and fail with ErrNotFound.
-	localStore := memory.NewMemoryStorage()
+	localStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer localStore.Close()
 
 	ref := &core.Reference{
@@ -140,7 +138,7 @@ func TestPushRef_FastForwardCheckError(t *testing.T) {
 // TestPushRef_NewRefWrites verifies the normal path: when no remote ref
 // exists, pushRef writes it and returns updated=true.
 func TestPushRef_NewRefWrites(t *testing.T) {
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -177,7 +175,7 @@ func TestPushRef_NewRefWrites(t *testing.T) {
 // TestPushRef_SameTargetSkips verifies that when the remote ref already has
 // the same target, pushRef skips (returns updated=false, no error).
 func TestPushRef_SameTargetSkips(t *testing.T) {
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 

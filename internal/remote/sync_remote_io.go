@@ -13,7 +13,7 @@ import (
 	"sync"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 	"github.com/klauspost/compress/zstd"
 	"github.com/zeebo/blake3"
 	"google.golang.org/protobuf/proto"
@@ -28,7 +28,7 @@ import (
 // between our Stat and MkdirAll.
 //
 // dir is a relative path per the RemoteFS path contract (no leading slash).
-func ensureRemoteDir(ctx context.Context, rfs RemoteFS, dir string) error {
+func EnsureRemoteDir(ctx context.Context, rfs RemoteFS, dir string) error {
 	if dir == "" || dir == "." || dir == "/" {
 		return nil
 	}
@@ -51,21 +51,21 @@ func ensureRemoteDir(ctx context.Context, rfs RemoteFS, dir string) error {
 
 func snapshotRemotePath(id core.SnapshotID) string {
 	h := id.Hash.FullString()
-	return path.Join(storage.SnapshotsDir, h[:2], h[2:])
+	return path.Join(store.SnapshotsDir, h[:2], h[2:])
 }
 
 func manifestRemotePath(id core.SnapshotID) string {
 	h := id.Hash.FullString()
-	return path.Join(storage.ManifestsDir, h[:2], h[2:])
+	return path.Join(store.ManifestsDir, h[:2], h[2:])
 }
 
 func chunkRemotePath(h core.Hash) string {
 	hex := h.FullString()
-	return path.Join(storage.ChunksDir, hex[:2], hex[2:])
+	return path.Join(store.ChunksDir, hex[:2], hex[2:])
 }
 
 func refRemotePath(name string) string {
-	return path.Join(storage.RefsDir, name)
+	return path.Join(store.RefsDir, name)
 }
 
 // --- push object helpers ---
@@ -74,11 +74,11 @@ func refRemotePath(name string) string {
 // first check rfs.Stat(snapshotRemotePath(id)) to skip snapshots already
 // present; pushSnapshot itself always (over)writes, which is safe for
 // content-addressed storage but wasteful if the object already exists.
-func pushSnapshot(ctx context.Context, store storage.Storer, rfs RemoteFS, id core.SnapshotID) error {
+func pushSnapshot(ctx context.Context, st *store.StoreSet, rfs RemoteFS, id core.SnapshotID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	snap, err := store.GetSnapshot(ctx, id)
+	snap, err := st.Snapshots.GetSnapshot(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get snapshot: %w", err)
 	}
@@ -94,11 +94,11 @@ func pushSnapshot(ctx context.Context, store storage.Storer, rfs RemoteFS, id co
 // The manifest is small, so callers may upload it unconditionally even when
 // the snapshot already exists on the remote (see P1-9: manifest existence
 // is checked independently of snapshot existence).
-func pushManifest(ctx context.Context, store storage.Storer, rfs RemoteFS, id core.SnapshotID) error {
+func pushManifest(ctx context.Context, st *store.StoreSet, rfs RemoteFS, id core.SnapshotID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	snap, err := store.GetSnapshot(ctx, id)
+	snap, err := st.Snapshots.GetSnapshot(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get snapshot for manifest: %w", err)
 	}
@@ -110,11 +110,11 @@ func pushManifest(ctx context.Context, store storage.Storer, rfs RemoteFS, id co
 	return rfs.Write(ctx, manifestRemotePath(id), bytes.NewReader(data))
 }
 
-func pushChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.Hash) error {
+func pushChunk(ctx context.Context, st *store.StoreSet, rfs RemoteFS, h core.Hash) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	chunk, err := store.GetChunk(ctx, h)
+	chunk, err := st.Chunks.GetChunk(ctx, h)
 	if err != nil {
 		return fmt.Errorf("get chunk: %w", err)
 	}
@@ -129,13 +129,13 @@ func pushChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.H
 		}
 		defer releaseZstdEncoder(enc)
 		compressed := enc.EncodeAll(chunk.Data, nil)
-		header = storage.ChunkFlagCompressed
-		payload = make([]byte, 0, storage.ChunkHeaderSize+len(compressed))
+		header = store.ChunkFlagCompressed
+		payload = make([]byte, 0, store.ChunkHeaderSize+len(compressed))
 		payload = append(payload, header)
 		payload = append(payload, compressed...)
 	} else {
 		header = 0
-		payload = make([]byte, 0, storage.ChunkHeaderSize+len(chunk.Data))
+		payload = make([]byte, 0, store.ChunkHeaderSize+len(chunk.Data))
 		payload = append(payload, header)
 		payload = append(payload, chunk.Data...)
 	}
@@ -165,7 +165,7 @@ var ErrNetwork = errors.New("network error")
 // workspace-modifying commands, and content-addressed storage means a lost
 // ref update only loses the tip pointer (no object corruption). For
 // multi-client setups, users should coordinate pushes externally.
-func pushRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.Reference) (bool, error) {
+func pushRef(ctx context.Context, st *store.StoreSet, rfs RemoteFS, ref *core.Reference) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -202,11 +202,11 @@ func pushRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.
 	// target, the local branch is simply ahead — allow the push.
 	existingHash, parseErr := parseHashHex(existingHashStr)
 	if parseErr == nil {
-		ok, ancErr := isAncestor(ctx, store, ref.Target, existingHash)
+		ok, ancErr := isAncestor(ctx, st, ref.Target, existingHash)
 		if ancErr != nil {
 			// Cannot determine ancestry (e.g. the local chain is broken
 			// or the remote's existing target snapshot is missing from
-			// the local store). Surface the underlying error rather than
+			// the local st). Surface the underlying error rather than
 			// silently collapsing it into "diverged", so the user can
 			// distinguish a real divergence from a broken local chain.
 			return false, fmt.Errorf("fast-forward check against %s: %w", existingHash.FullString(), ancErr)
@@ -223,7 +223,7 @@ func pushRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.
 
 // --- pull object helpers ---
 
-func pullSnapshot(ctx context.Context, store storage.Storer, rfs RemoteFS, id core.SnapshotID) error {
+func pullSnapshot(ctx context.Context, st *store.StoreSet, rfs RemoteFS, id core.SnapshotID) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -256,20 +256,20 @@ func pullSnapshot(ctx context.Context, store storage.Storer, rfs RemoteFS, id co
 	computed := core.Hash(blake3.Sum256(hashData))
 	if computed != id.Hash {
 		return fmt.Errorf("snapshot %s integrity check failed: expected %s, got %s: %w",
-			id.Hash.FullString()[:8], id.Hash.FullString(), computed.FullString(), storage.ErrCorrupted)
+			id.Hash.FullString()[:8], id.Hash.FullString(), computed.FullString(), store.ErrCorrupted)
 	}
 	snap, err := core.SnapshotFromProto(p)
 	if err != nil {
 		return fmt.Errorf("decode snapshot: %w", err)
 	}
 	snap.ID = id
-	if err := store.PutSnapshot(ctx, snap); err != nil {
+	if err := st.Snapshots.PutSnapshot(ctx, snap); err != nil {
 		return fmt.Errorf("put snapshot: %w", err)
 	}
 	return nil
 }
 
-func pullChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.Hash) error {
+func pullChunk(ctx context.Context, st *store.StoreSet, rfs RemoteFS, h core.Hash) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -282,14 +282,14 @@ func pullChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.H
 	if err != nil {
 		return fmt.Errorf("read chunk bytes: %w", err)
 	}
-	if len(data) < storage.ChunkHeaderSize {
-		return fmt.Errorf("chunk too short: %w", storage.ErrCorrupted)
+	if len(data) < store.ChunkHeaderSize {
+		return fmt.Errorf("chunk too short: %w", store.ErrCorrupted)
 	}
 	header := data[0]
-	payload := data[storage.ChunkHeaderSize:]
+	payload := data[store.ChunkHeaderSize:]
 	var chunkData []byte
 	var flags core.ChunkFlag
-	if header&storage.ChunkFlagCompressed != 0 {
+	if header&store.ChunkFlagCompressed != 0 {
 		dec, err := acquireZstdDecoder()
 		if err != nil {
 			return fmt.Errorf("zstd decoder: %w", err)
@@ -297,7 +297,7 @@ func pullChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.H
 		defer releaseZstdDecoder(dec)
 		decoded, err := dec.DecodeAll(payload, nil)
 		if err != nil {
-			return fmt.Errorf("decode chunk: %w", storage.ErrCorrupted)
+			return fmt.Errorf("decode chunk: %w", store.ErrCorrupted)
 		}
 		chunkData = decoded
 		flags = core.ChunkFlagCompressed
@@ -312,7 +312,7 @@ func pullChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.H
 	computed := core.Hash(blake3.Sum256(chunkData))
 	if computed != h {
 		return fmt.Errorf("chunk %x integrity check failed: expected %s, got %s: %w",
-			h[:8], h.FullString(), computed.FullString(), storage.ErrCorrupted)
+			h[:8], h.FullString(), computed.FullString(), store.ErrCorrupted)
 	}
 	chunk := &core.Chunk{
 		Hash:  h,
@@ -320,17 +320,17 @@ func pullChunk(ctx context.Context, store storage.Storer, rfs RemoteFS, h core.H
 		Data:  chunkData,
 		Flags: flags,
 	}
-	return store.PutChunk(ctx, chunk)
+	return st.Chunks.PutChunk(ctx, chunk)
 }
 
-func pullRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.Reference) (updated bool, diverged bool, err error) {
-	localRef, err := store.GetRef(ctx, ref.Name)
+func pullRef(ctx context.Context, st *store.StoreSet, rfs RemoteFS, ref *core.Reference) (updated bool, diverged bool, err error) {
+	localRef, err := st.Refs.GetRef(ctx, ref.Name)
 	if err != nil {
-		if !errors.Is(err, storage.ErrNotFound) {
+		if !errors.Is(err, store.ErrNotFound) {
 			return false, false, fmt.Errorf("get local ref: %w", err)
 		}
 		// Local ref doesn't exist, write it directly.
-		if err := store.SetRef(ctx, ref.Name, ref); err != nil {
+		if err := st.Refs.SetRef(ctx, ref.Name, ref); err != nil {
 			return false, false, fmt.Errorf("set ref: %w", err)
 		}
 		return true, false, nil
@@ -341,21 +341,21 @@ func pullRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.
 	// Fast-forward: if local target is zero (fresh branch) or an ancestor of
 	// the remote target, the remote is simply ahead — update the local ref.
 	if localRef.Target.IsZero() {
-		if err := store.SetRef(ctx, ref.Name, ref); err != nil {
+		if err := st.Refs.SetRef(ctx, ref.Name, ref); err != nil {
 			return false, false, fmt.Errorf("fast-forward ref: %w", err)
 		}
 		return true, false, nil
 	}
-	ok, ancErr := isAncestor(ctx, store, ref.Target, localRef.Target)
+	ok, ancErr := isAncestor(ctx, st, ref.Target, localRef.Target)
 	if ancErr != nil {
 		// Cannot determine ancestry (e.g. the local chain is broken
-		// or a snapshot is missing from the local store). Return an
+		// or a snapshot is missing from the local st). Return an
 		// error rather than silently treating the ref as diverged —
 		// the user should investigate and retry.
 		return false, false, fmt.Errorf("fast-forward check ref %q: %w", ref.Name, ancErr)
 	}
 	if ok {
-		if err := store.SetRef(ctx, ref.Name, ref); err != nil {
+		if err := st.Refs.SetRef(ctx, ref.Name, ref); err != nil {
 			return false, false, fmt.Errorf("fast-forward ref: %w", err)
 		}
 		return true, false, nil
@@ -365,11 +365,11 @@ func pullRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.
 	// different target, disambiguate by appending the short remote hash so a
 	// second divergent pull does not clobber the first (P2-e).
 	remoteName := ref.Name + ".remote"
-	if existing, err := store.GetRef(ctx, remoteName); err == nil {
+	if existing, err := st.Refs.GetRef(ctx, remoteName); err == nil {
 		if existing.Target != ref.Target {
 			remoteName = ref.Name + ".remote." + ref.Target.FullString()[:8]
 		}
-	} else if !errors.Is(err, storage.ErrNotFound) {
+	} else if !errors.Is(err, store.ErrNotFound) {
 		return false, false, fmt.Errorf("check existing diverged ref: %w", err)
 	}
 	remoteRef := &core.Reference{
@@ -377,7 +377,7 @@ func pullRef(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.
 		Type:   ref.Type,
 		Target: ref.Target,
 	}
-	if err := store.SetRef(ctx, remoteName, remoteRef); err != nil {
+	if err := st.Refs.SetRef(ctx, remoteName, remoteRef); err != nil {
 		return false, false, fmt.Errorf("set diverged ref: %w", err)
 	}
 	return false, true, nil
@@ -391,7 +391,7 @@ func listRemoteSnapshots(ctx context.Context, rfs RemoteFS) ([]core.SnapshotID, 
 	// secondary index that may lag behind, so listing snapshots/ avoids
 	// missing snapshots whose manifest has not been uploaded yet.
 	var ids []core.SnapshotID
-	level1, err := rfs.List(ctx, storage.SnapshotsDir)
+	level1, err := rfs.List(ctx, store.SnapshotsDir)
 	if err != nil {
 		return nil, fmt.Errorf("list snapshots: %w", err)
 	}
@@ -461,12 +461,12 @@ func readRemoteSnapshot(ctx context.Context, rfs RemoteFS, id core.SnapshotID) (
 // which broke when SMB resolved a subPath into e.Path.
 func listRemoteRefs(ctx context.Context, rfs RemoteFS) ([]*core.Reference, error) {
 	var refs []*core.Reference
-	top, err := rfs.List(ctx, storage.RefsDir)
+	top, err := rfs.List(ctx, store.RefsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return refs, nil
 		}
-		return nil, fmt.Errorf("list %s: %w", storage.RefsDir, err)
+		return nil, fmt.Errorf("list %s: %w", store.RefsDir, err)
 	}
 	for _, d1 := range top {
 		if err := ctx.Err(); err != nil {

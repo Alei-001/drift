@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"bytes"
 	"context"
 	"errors"
@@ -12,8 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 // isVersionRef reports whether s looks like a snapshot version reference
@@ -61,11 +62,11 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Show", "show", cwd)
+		st, _, err := openProjectOrReport("Show", "show", cwd)
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer st.Close()
 
 		if len(args) == 0 {
 			return cmd.Help()
@@ -94,7 +95,7 @@ var showCmd = &cobra.Command{
 			filePath = args[1]
 		}
 
-		snapshot := resolveSnapshot(ctx, store, versionLabel)
+		snapshot := resolveSnapshot(ctx, st, versionLabel)
 		if snapshot == nil {
 			reportFailed("Show", "show", fmt.Sprintf("snapshot not found: %s.", versionLabel),
 				"use 'drift log' to list available snapshots.", nil)
@@ -102,18 +103,18 @@ var showCmd = &cobra.Command{
 		}
 
 		if filePath == "" {
-			return showFileList(ctx, store, snapshot, versionLabel)
+			return showFileList(ctx, st, snapshot, versionLabel)
 		}
-		return showFile(ctx, store, cwd, snapshot, versionLabel, filePath)
+		return showFile(ctx, st, cwd, snapshot, versionLabel, filePath)
 	},
 }
 
 // showFileList prints the list of files in a snapshot with type info.
 // The status line uses versionLabel (the user-supplied reference) so the
 // output matches the input syntax rather than the resolved short ID.
-func showFileList(ctx context.Context, store storage.Storer, snap *core.Snapshot, versionLabel string) error {
+func showFileList(ctx context.Context, st *store.StoreSet, snap *core.Snapshot, versionLabel string) error {
 	if globalJSON {
-		return showFileListJSON(ctx, store, snap, versionLabel)
+		return showFileListJSON(ctx, st, snap, versionLabel)
 	}
 	// Quiet mode: suppress file listing output.
 	if globalQuiet {
@@ -141,7 +142,7 @@ func showFileList(ctx context.Context, store storage.Storer, snap *core.Snapshot
 			return err
 		}
 		f := &snap.Files[i]
-		typeLabel := porcelain.DetectFileTypeLabel(ctx, store, f)
+		typeLabel := snapkg.DetectFileTypeLabel(ctx, st, f)
 		fmt.Printf("  %-*s%*s   %s\n", pathWidth, f.Path, sizeColWidth, formatSize(f.Size), typeLabel)
 	}
 
@@ -153,19 +154,19 @@ func showFileList(ctx context.Context, store storage.Storer, snap *core.Snapshot
 // showFile displays a single file from a snapshot: text content is streamed
 // to stdout, binary/image files show metadata. versionLabel is used in the
 // status line so the output matches the user's input reference.
-func showFile(ctx context.Context, store storage.Storer, cwd string, snapshot *core.Snapshot, versionLabel, filePath string) error {
+func showFile(ctx context.Context, st *store.StoreSet, cwd string, snapshot *core.Snapshot, versionLabel, filePath string) error {
 	if globalJSON {
-		return showFileJSON(ctx, store, cwd, snapshot, versionLabel, filePath)
+		return showFileJSON(ctx, st, cwd, snapshot, versionLabel, filePath)
 	}
 
-	result, err := porcelain.ReadSnapshotFile(ctx, store, snapshot, cwd, filePath)
+	result, err := snapkg.ReadSnapshotFile(ctx, st, snapshot, cwd, filePath)
 	if err != nil {
-		if errors.Is(err, porcelain.ErrFileNotFound) {
+		if errors.Is(err, errs.ErrFileNotFound) {
 			reportFailed("Show", "show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, versionLabel),
 				fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel), err)
 			return ErrSilent
 		}
-		if errors.Is(err, porcelain.ErrInvalidPath) {
+		if errors.Is(err, errs.ErrInvalidPath) {
 			reportFailed("Show", "show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
 				"use a relative path from the project root.", err)
 			return ErrSilent

@@ -1,14 +1,16 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/gc"
+	"github.com/Alei-001/drift/internal/branch"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -43,21 +45,21 @@ changes of a single snapshot.`,
 		if err != nil {
 			return err
 		}
-		store, _, err := openProjectOrReport("Log", "log", cwd)
+		st, _, err := openProjectOrReport("Log", "log", cwd)
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer st.Close()
 
 		if logDetail != "" {
-			return logDetailMode(ctx, store, logDetail)
+			return logDetailMode(ctx, st, logDetail)
 		}
 
 		// branchMap (snapshot hash -> branch names whose tip points at it) is
 		// used to decorate the branch column. Only snapshots that ARE a branch
 		// tip get a label — inherited commits remain blank so the user can
 		// see where branches diverge (git --decorate semantics).
-		branchMap, err := porcelain.ResolveBranchTips(ctx, store)
+		branchMap, err := branch.ResolveBranchTips(ctx, st)
 		if err != nil {
 			return err
 		}
@@ -66,7 +68,7 @@ changes of a single snapshot.`,
 		// reflects the authoritative tag state. Tags added after the save via
 		// 'drift tag add' only exist as refs (the snapshot is immutable), so
 		// reading s.Tags alone would miss them. We merge both sources below.
-		tagMap, err := porcelain.ResolveTagTips(ctx, store)
+		tagMap, err := branch.ResolveTagTips(ctx, st)
 		if err != nil {
 			return err
 		}
@@ -75,8 +77,8 @@ changes of a single snapshot.`,
 		var labelBranch string
 
 		if logAll {
-			// --all: list every snapshot in the store, regardless of branch.
-			snapshots, err = store.ListSnapshots(ctx, &storage.ListOptions{})
+			// --all: list every snapshot in the st, regardless of branch.
+			snapshots, err = st.Snapshots.ListSnapshots(ctx, &store.ListOptions{})
 			if err != nil {
 				return err
 			}
@@ -84,16 +86,16 @@ changes of a single snapshot.`,
 			// Default or --branch: walk the PrevID chain from the branch tip.
 			labelBranch = logBranch
 			if labelBranch == "" {
-				labelBranch = porcelain.ResolveCurrentBranchName(ctx, store)
+				labelBranch = branch.ResolveCurrentBranchName(ctx, st)
 			}
-			startHash, err := resolveBranchTipHash(ctx, store, logBranch)
+			startHash, err := resolveBranchTipHash(ctx, st, logBranch)
 			if err != nil {
 				return err
 			}
 			if startHash.IsZero() {
 				return reportNoSnapshots(ctx, logBranch, logAll)
 			}
-			snapshots, err = porcelain.WalkSnapshotChain(ctx, store, startHash)
+			snapshots, err = branch.WalkSnapshotChain(ctx, st, startHash)
 			if err != nil {
 				return err
 			}
@@ -102,7 +104,7 @@ changes of a single snapshot.`,
 		// Filter auto-saves unless --all.
 		var filtered []*core.SnapshotSummary
 		for _, s := range snapshots {
-			if !logAll && strings.HasPrefix(s.Message, porcelain.AutoSavePrefix) {
+			if !logAll && strings.HasPrefix(s.Message, gc.AutoSavePrefix) {
 				continue
 			}
 			filtered = append(filtered, s)
@@ -111,7 +113,7 @@ changes of a single snapshot.`,
 		// Sort newest-first: by timestamp descending. When timestamps are
 		// equal (common for rapid successive saves), use the PrevID chain —
 		// if snapshot A's PrevID points to snapshot B, then A is newer.
-		porcelain.SortSnapshotSummariesNewestFirst(filtered)
+		snapkg.SortSnapshotSummariesNewestFirst(filtered)
 
 		// Apply limit after filtering (both global and branch paths).
 		if logLimit > 0 && len(filtered) > logLimit {
@@ -123,7 +125,7 @@ changes of a single snapshot.`,
 		}
 
 		if globalJSON {
-			return logJSONMode(ctx, store, filtered, branchMap, tagMap)
+			return logJSONMode(ctx, st, filtered, branchMap, tagMap)
 		}
 
 		// Quiet mode: success produces no output (exit code is authoritative).
@@ -153,7 +155,7 @@ changes of a single snapshot.`,
 				return err
 			}
 			timeStr := time.Unix(s.Timestamp, 0).Format("2006-01-02 15:04")
-			add, mod, del := porcelain.CountSnapshotChanges(ctx, store, s)
+			add, mod, del := snapkg.CountSnapshotChanges(ctx, st, s)
 			changes := formatChangesCompact(add, mod, del)
 
 			msg := s.Message
@@ -171,7 +173,7 @@ changes of a single snapshot.`,
 			tagCol := formatTagColumn(s.Tags, tagMap[s.ID.Hash.String()])
 
 			suffix := ""
-			if strings.HasPrefix(s.Message, porcelain.AutoSavePrefix) {
+			if strings.HasPrefix(s.Message, gc.AutoSavePrefix) {
 				suffix = "    . dimmed"
 			}
 			fmt.Printf("%s  %s  %-*s  %-*s  %-*s  %s%s\n",
@@ -189,15 +191,15 @@ changes of a single snapshot.`,
 // at. If branchName is empty, it resolves HEAD (following symref to the
 // current branch). Returns a zero hash if no tip is set. Reports an error and
 // returns ErrSilent if a named branch does not exist.
-func resolveBranchTipHash(ctx context.Context, store storage.Storer, branchName string) (core.Hash, error) {
+func resolveBranchTipHash(ctx context.Context, st *store.StoreSet, branchName string) (core.Hash, error) {
 	if branchName == "" {
-		headRef, err := store.GetRef(ctx, "HEAD")
+		headRef, err := st.Refs.GetRef(ctx, "HEAD")
 		if err != nil {
 			return core.Hash{}, nil
 		}
 		target := headRef.Target
 		if headRef.SymRef != "" {
-			bRef, err := store.GetRef(ctx, headRef.SymRef)
+			bRef, err := st.Refs.GetRef(ctx, headRef.SymRef)
 			if err != nil {
 				return core.Hash{}, nil
 			}
@@ -205,7 +207,7 @@ func resolveBranchTipHash(ctx context.Context, store storage.Storer, branchName 
 		}
 		return target, nil
 	}
-	ref, err := store.GetRef(ctx, "heads/"+branchName)
+	ref, err := st.Refs.GetRef(ctx, "heads/"+branchName)
 	if err != nil {
 		reportFailed("Log", "log", fmt.Sprintf("branch '%s' not found.", branchName), "use 'drift branch list' to list existing branches.", err)
 		return core.Hash{}, ErrSilent
@@ -229,20 +231,20 @@ func reportNoSnapshots(ctx context.Context, branchName string, all bool) error {
 // logDetailMode prints the file-change detail for a single snapshot. In JSON
 // mode it emits an envelope; in quiet mode it produces no output; otherwise
 // it prints the human-readable snapshot header, file list, and summary.
-func logDetailMode(ctx context.Context, store storage.Storer, id string) error {
-	snapshot := resolveSnapshot(ctx, store, id)
+func logDetailMode(ctx context.Context, st *store.StoreSet, id string) error {
+	snapshot := resolveSnapshot(ctx, st, id)
 	if snapshot == nil {
 		reportFailed("Log", "log", fmt.Sprintf("snapshot not found: %s.", id), "use 'drift log' to list available snapshots.", nil)
 		return ErrSilent
 	}
 
-	add, mod, del, err := porcelain.SnapshotFileDiff(ctx, store, snapshot)
+	add, mod, del, err := snapkg.SnapshotFileDiff(ctx, st, snapshot)
 	if err != nil {
 		return err
 	}
 
 	if globalJSON {
-		return logDetailJSONMode(ctx, store, snapshot, add, mod, del)
+		return logDetailJSONMode(ctx, st, snapshot, add, mod, del)
 	}
 
 	// Quiet mode: success produces no output.
@@ -253,7 +255,7 @@ func logDetailMode(ctx context.Context, store storage.Storer, id string) error {
 	fmt.Printf(">>> Snapshot %s\n", snapshot.ShortID())
 	timeStr := time.Unix(snapshot.Timestamp, 0).Format("2006-01-02 15:04")
 	fmt.Printf("%s  %s\n", timeStr, snapshot.Message)
-	printFileListWithLineCount(add, mod, del, store)
+	printFileListWithLineCount(add, mod, del, st)
 	total := len(add) + len(mod) + len(del)
 	summaryLine(total, len(add), len(mod), len(del))
 	return nil

@@ -8,15 +8,15 @@ import (
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage"
-	"github.com/Alei-001/drift/internal/storage/backends/memory"
+	"github.com/Alei-001/drift/internal/store"
+	"github.com/Alei-001/drift/internal/store/memory"
 	"github.com/zeebo/blake3"
 	"google.golang.org/protobuf/proto"
 )
 
 // makeTestSnapshot builds a snapshot with one file entry referencing one chunk.
 // The snapshot is stored in the given store. Returns the snapshot and chunk hash.
-func makeTestSnapshot(t *testing.T, store storage.Storer, msg string, prevID *core.SnapshotID) (core.SnapshotID, core.Hash) {
+func makeTestSnapshot(t *testing.T, st *store.StoreSet, msg string, prevID *core.SnapshotID) (core.SnapshotID, core.Hash) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -28,7 +28,7 @@ func makeTestSnapshot(t *testing.T, store storage.Storer, msg string, prevID *co
 		Data:  chunkData,
 		Flags: core.ChunkFlagNone,
 	}
-	if err := store.PutChunk(ctx, chunk); err != nil {
+	if err := st.Chunks.PutChunk(ctx, chunk); err != nil {
 		t.Fatalf("PutChunk: %v", err)
 	}
 
@@ -58,13 +58,13 @@ func makeTestSnapshot(t *testing.T, store storage.Storer, msg string, prevID *co
 		t.Fatalf("marshal snapshot: %v", err)
 	}
 	snap.ID = core.SnapshotID{Hash: core.Hash(blake3.Sum256(marshaled))}
-	if err := store.PutSnapshot(ctx, snap); err != nil {
+	if err := st.Snapshots.PutSnapshot(ctx, snap); err != nil {
 		t.Fatalf("PutSnapshot: %v", err)
 	}
 	return snap.ID, chunkHash
 }
 
-func setupBranchRef(t *testing.T, store storage.Storer, branch string, target core.Hash) {
+func setupBranchRef(t *testing.T, st *store.StoreSet, branch string, target core.Hash) {
 	t.Helper()
 	ctx := context.Background()
 	ref := &core.Reference{
@@ -72,14 +72,14 @@ func setupBranchRef(t *testing.T, store storage.Storer, branch string, target co
 		Type:   core.RefTypeBranch,
 		Target: target,
 	}
-	if err := store.SetRef(ctx, "heads/"+branch, ref); err != nil {
+	if err := st.Refs.SetRef(ctx, "heads/"+branch, ref); err != nil {
 		t.Fatalf("SetRef %s: %v", branch, err)
 	}
 	headRef := &core.Reference{
 		Name:   "HEAD",
 		SymRef: "heads/" + branch,
 	}
-	if err := store.SetRef(ctx, "HEAD", headRef); err != nil {
+	if err := st.Refs.SetRef(ctx, "HEAD", headRef); err != nil {
 		t.Fatalf("SetRef HEAD: %v", err)
 	}
 }
@@ -87,14 +87,14 @@ func setupBranchRef(t *testing.T, store storage.Storer, branch string, target co
 // TestPush_PushesSnapshotAndChunk verifies push uploads snapshots, manifests,
 // and chunks to the remote.
 func TestPush_PushesSnapshotAndChunk(t *testing.T) {
-	store := memory.NewMemoryStorage()
-	defer store.Close()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
+	defer st.Close()
 	rfs := NewMockRemoteFS()
 
-	snapID, chunkHash := makeTestSnapshot(t, store, "test message", nil)
-	setupBranchRef(t, store, "main", snapID.Hash)
+	snapID, chunkHash := makeTestSnapshot(t, st, "test message", nil)
+	setupBranchRef(t, st, "main", snapID.Hash)
 
-	stats, err := Push(context.Background(), store, rfs, "", SyncOptions{})
+	stats, err := Push(context.Background(), st, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
@@ -130,20 +130,20 @@ func TestPush_PushesSnapshotAndChunk(t *testing.T) {
 
 // TestPush_SkipsExistingObjects verifies push skips objects already on the remote.
 func TestPush_SkipsExistingObjects(t *testing.T) {
-	store := memory.NewMemoryStorage()
-	defer store.Close()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
+	defer st.Close()
 	rfs := NewMockRemoteFS()
 
-	snapID, chunkHash := makeTestSnapshot(t, store, "skip test", nil)
-	setupBranchRef(t, store, "main", snapID.Hash)
+	snapID, chunkHash := makeTestSnapshot(t, st, "skip test", nil)
+	setupBranchRef(t, st, "main", snapID.Hash)
 
 	// First push.
-	_, err := Push(context.Background(), store, rfs, "", SyncOptions{})
+	_, err := Push(context.Background(), st, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("first Push: %v", err)
 	}
 	// Second push should skip everything.
-	stats, err := Push(context.Background(), store, rfs, "", SyncOptions{})
+	stats, err := Push(context.Background(), st, rfs, "", SyncOptions{})
 	if err != nil {
 		t.Fatalf("second Push: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestPush_SkipsExistingObjects(t *testing.T) {
 // TestPull_DownloadsObjects verifies pull downloads snapshots and chunks.
 func TestPull_DownloadsObjects(t *testing.T) {
 	// Source store: has snapshot + chunk.
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -177,7 +177,7 @@ func TestPull_DownloadsObjects(t *testing.T) {
 	}
 
 	// Destination store: empty.
-	dstStore := memory.NewMemoryStorage()
+	dstStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer dstStore.Close()
 
 	stats, err := Pull(context.Background(), dstStore, rfs, "", SyncOptions{})
@@ -192,7 +192,7 @@ func TestPull_DownloadsObjects(t *testing.T) {
 	}
 
 	// Verify snapshot exists in destination.
-	snap, err := dstStore.GetSnapshot(context.Background(), snapID)
+	snap, err := dstStore.Snapshots.GetSnapshot(context.Background(), snapID)
 	if err != nil {
 		t.Errorf("GetSnapshot on dst: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestPull_DownloadsObjects(t *testing.T) {
 		t.Errorf("snap.Message = %q, want %q", snap.Message, "pull test")
 	}
 	// Verify chunk exists in destination.
-	chunk, err := dstStore.GetChunk(context.Background(), chunkHash)
+	chunk, err := dstStore.Chunks.GetChunk(context.Background(), chunkHash)
 	if err != nil {
 		t.Errorf("GetChunk on dst: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestPull_DownloadsObjects(t *testing.T) {
 
 // TestPull_SkipsExistingObjects verifies pull skips objects already local.
 func TestPull_SkipsExistingObjects(t *testing.T) {
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -223,7 +223,7 @@ func TestPull_SkipsExistingObjects(t *testing.T) {
 	}
 
 	// Pre-populate destination with the same snapshot.
-	dstStore := memory.NewMemoryStorage()
+	dstStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer dstStore.Close()
 	makeTestSnapshot(t, dstStore, "skip pull", nil)
 	setupBranchRef(t, dstStore, "main", snapID.Hash)
@@ -240,7 +240,7 @@ func TestPull_SkipsExistingObjects(t *testing.T) {
 // TestPush_PushRefDiverged verifies push fails when a remote ref points to a
 // target that is NOT an ancestor of the local target (true divergence).
 func TestPush_PushRefDiverged(t *testing.T) {
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -275,7 +275,7 @@ func TestPush_PushRefDiverged(t *testing.T) {
 // TestPush_FastForward verifies push succeeds when the remote ref target is an
 // ancestor of the local target (local is simply ahead).
 func TestPush_FastForward(t *testing.T) {
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -314,7 +314,7 @@ func TestPush_FastForward(t *testing.T) {
 // TestPull_FastForward verifies pull fast-forwards the local ref when the
 // remote is ahead (local target is an ancestor of remote target).
 func TestPull_FastForward(t *testing.T) {
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -329,7 +329,7 @@ func TestPull_FastForward(t *testing.T) {
 	}
 
 	// Destination: has base, main points to base (behind remote).
-	dstStore := memory.NewMemoryStorage()
+	dstStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer dstStore.Close()
 	makeTestSnapshot(t, dstStore, "base", nil)
 	setupBranchRef(t, dstStore, "main", baseSnapID.Hash)
@@ -346,7 +346,7 @@ func TestPull_FastForward(t *testing.T) {
 	}
 
 	// Verify local ref now points to child.
-	localRef, err := dstStore.GetRef(context.Background(), "heads/main")
+	localRef, err := dstStore.Refs.GetRef(context.Background(), "heads/main")
 	if err != nil {
 		t.Fatalf("GetRef: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestPull_FastForward(t *testing.T) {
 
 // TestPull_RefDivergedSavedAsRemote verifies pull saves diverged refs as <name>.remote.
 func TestPull_RefDivergedSavedAsRemote(t *testing.T) {
-	srcStore := memory.NewMemoryStorage()
+	srcStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer srcStore.Close()
 	rfs := NewMockRemoteFS()
 
@@ -371,7 +371,7 @@ func TestPull_RefDivergedSavedAsRemote(t *testing.T) {
 	}
 
 	// Destination has a different ref target (diverged).
-	dstStore := memory.NewMemoryStorage()
+	dstStore := store.NewStoreSet(memory.NewMemoryStorage())
 	defer dstStore.Close()
 	makeTestSnapshot(t, dstStore, "local version", nil)
 	setupBranchRef(t, dstStore, "main", snapID1.Hash)
@@ -385,7 +385,7 @@ func TestPull_RefDivergedSavedAsRemote(t *testing.T) {
 	}
 
 	// Verify the .remote ref was saved.
-	remoteRef, err := dstStore.GetRef(context.Background(), "heads/main.remote")
+	remoteRef, err := dstStore.Refs.GetRef(context.Background(), "heads/main.remote")
 	if err != nil {
 		t.Errorf("expected heads/main.remote ref, got error: %v", err)
 	}
@@ -396,22 +396,22 @@ func TestPull_RefDivergedSavedAsRemote(t *testing.T) {
 
 // TestPush_BranchScoped verifies --branch flag limits push scope.
 func TestPush_BranchScoped(t *testing.T) {
-	store := memory.NewMemoryStorage()
-	defer store.Close()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
+	defer st.Close()
 	rfs := NewMockRemoteFS()
 
 	// Create two branches with different snapshots.
-	snapID1, _ := makeTestSnapshot(t, store, "branch-a", nil)
-	setupBranchRef(t, store, "main", snapID1.Hash)
+	snapID1, _ := makeTestSnapshot(t, st, "branch-a", nil)
+	setupBranchRef(t, st, "main", snapID1.Hash)
 
-	snapID2, _ := makeTestSnapshot(t, store, "branch-b", nil)
+	snapID2, _ := makeTestSnapshot(t, st, "branch-b", nil)
 	refB := &core.Reference{Name: "heads/feature", Type: core.RefTypeBranch, Target: snapID2.Hash}
-	if err := store.SetRef(context.Background(), "heads/feature", refB); err != nil {
+	if err := st.Refs.SetRef(context.Background(), "heads/feature", refB); err != nil {
 		t.Fatalf("SetRef feature: %v", err)
 	}
 
 	// Push only the feature branch.
-	stats, err := Push(context.Background(), store, rfs, "feature", SyncOptions{})
+	stats, err := Push(context.Background(), st, rfs, "feature", SyncOptions{})
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}

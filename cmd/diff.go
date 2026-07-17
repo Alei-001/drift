@@ -1,13 +1,13 @@
 package cmd
 
 import (
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"context"
 	"fmt"
 	"os"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -30,11 +30,11 @@ var diffCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		store, cfg, err := openProjectOrReport("Diff", "diff", cwd)
+		st, cfg, err := openProjectOrReport("Diff", "diff", cwd)
 		if err != nil {
 			return err
 		}
-		defer store.Close()
+		defer st.Close()
 
 		dashIdx := cmd.ArgsLenAtDash()
 		var snapArgs, fileArgs []string
@@ -62,50 +62,50 @@ var diffCmd = &cobra.Command{
 
 		switch len(snapArgs) {
 		case 0:
-			headSnap := porcelain.ResolveHeadSnapshot(ctx, store)
+			headSnap := snapkg.ResolveHeadSnapshot(ctx, st)
 			if headSnap == nil {
 				reportFailed("Diff", "diff", "no snapshot to compare against.",
 					"use 'drift save -m \"message\"' to create one first.", nil)
 				return ErrSilent
 			}
-			return runDiffWorkspaceVs(ctx, store, cwd, &cfg.Core, headSnap, "head", file)
+			return runDiffWorkspaceVs(ctx, st, cwd, &cfg.Core, headSnap, "head", file)
 		case 1:
-			snap1 := resolveSnapshot(ctx, store, snapArgs[0])
+			snap1 := resolveSnapshot(ctx, st, snapArgs[0])
 			if snap1 == nil {
 				reportFailed("Diff", "diff", fmt.Sprintf("snapshot '%s' not found.", snapArgs[0]),
 					"use 'drift log' to list available snapshots.", nil)
 				return ErrSilent
 			}
-			return runDiffWorkspaceVs(ctx, store, cwd, &cfg.Core, snap1, snapArgs[0], file)
+			return runDiffWorkspaceVs(ctx, st, cwd, &cfg.Core, snap1, snapArgs[0], file)
 		default:
-			snap1 := resolveSnapshot(ctx, store, snapArgs[0])
+			snap1 := resolveSnapshot(ctx, st, snapArgs[0])
 			if snap1 == nil {
 				reportFailed("Diff", "diff", fmt.Sprintf("snapshot '%s' not found.", snapArgs[0]),
 					"use 'drift log' to list available snapshots.", nil)
 				return ErrSilent
 			}
-			snap2 := resolveSnapshot(ctx, store, snapArgs[1])
+			snap2 := resolveSnapshot(ctx, st, snapArgs[1])
 			if snap2 == nil {
 				reportFailed("Diff", "diff", fmt.Sprintf("snapshot '%s' not found.", snapArgs[1]),
 					"use 'drift log' to list available snapshots.", nil)
 				return ErrSilent
 			}
-			return runDiffSnapshots(ctx, store, cwd, &cfg.Core, snap1, snap2, snapArgs[0], snapArgs[1], file)
+			return runDiffSnapshots(ctx, st, cwd, &cfg.Core, snap1, snap2, snapArgs[0], snapArgs[1], file)
 		}
 	},
 }
 
 // runDiffWorkspaceVs handles workspace-vs-snapshot diff. The status line is
 // printed here (using the user-supplied label) and porcelain prints the body.
-func runDiffWorkspaceVs(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel, file string) error {
+func runDiffWorkspaceVs(ctx context.Context, st *store.StoreSet, cwd string, cfg *core.CoreConfig, snap *core.Snapshot, snapLabel, file string) error {
 	if globalJSON {
 		if file != "" {
-			return diffWorkspaceFileJSON(ctx, store, cwd, snap, snapLabel, file)
+			return diffWorkspaceFileJSON(ctx, st, cwd, snap, snapLabel, file)
 		}
 		if diffStatOnly {
-			return diffStatWorkspaceJSON(ctx, store, cwd, cfg, snap, snapLabel)
+			return diffStatWorkspaceJSON(ctx, st, cwd, cfg, snap, snapLabel)
 		}
-		return diffWorkspaceJSON(ctx, store, cwd, cfg, snap, snapLabel)
+		return diffWorkspaceJSON(ctx, st, cwd, cfg, snap, snapLabel)
 	}
 	// Quiet mode: suppress all diff output (status line + body).
 	if globalQuiet {
@@ -113,7 +113,7 @@ func runDiffWorkspaceVs(ctx context.Context, store storage.Storer, cwd string, c
 	}
 	if file != "" {
 		fmt.Printf(">>> Diff %s -> workspace %s\n", snapLabel, file)
-		result, err := porcelain.DiffWorkspaceFileVsSnapshot(ctx, store, cwd, snap, file)
+		result, err := snapkg.DiffWorkspaceFileVsSnapshot(ctx, st, cwd, snap, file)
 		if err != nil {
 			return err
 		}
@@ -122,10 +122,10 @@ func runDiffWorkspaceVs(ctx context.Context, store storage.Storer, cwd string, c
 	}
 	if diffStatOnly {
 		fmt.Printf(">>> Diff %s -> workspace (stat)\n", snapLabel)
-		return diffStatWorkspace(ctx, store, cwd, cfg, snap)
+		return diffStatWorkspace(ctx, st, cwd, cfg, snap)
 	}
 	fmt.Printf(">>> Diff %s -> workspace\n", snapLabel)
-	result, err := porcelain.DiffWorkspaceVsSnapshot(ctx, cwd, snap, cfg)
+	result, err := snapkg.DiffWorkspaceVsSnapshot(ctx, cwd, snap, cfg)
 	if err != nil {
 		return err
 	}
@@ -134,15 +134,15 @@ func runDiffWorkspaceVs(ctx context.Context, store storage.Storer, cwd string, c
 }
 
 // runDiffSnapshots handles snapshot-vs-snapshot diff.
-func runDiffSnapshots(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap1, snap2 *core.Snapshot, label1, label2, file string) error {
+func runDiffSnapshots(ctx context.Context, st *store.StoreSet, cwd string, cfg *core.CoreConfig, snap1, snap2 *core.Snapshot, label1, label2, file string) error {
 	if globalJSON {
 		if file != "" {
-			return diffFileJSON(ctx, store, cwd, snap1, snap2, label1, label2, file)
+			return diffFileJSON(ctx, st, cwd, snap1, snap2, label1, label2, file)
 		}
 		if diffStatOnly {
-			return diffStatSnapshotsJSON(ctx, store, snap1, snap2, label1, label2)
+			return diffStatSnapshotsJSON(ctx, st, snap1, snap2, label1, label2)
 		}
-		return diffSnapshotsJSON(ctx, store, snap1, snap2, label1, label2)
+		return diffSnapshotsJSON(ctx, st, snap1, snap2, label1, label2)
 	}
 	// Quiet mode: suppress all diff output (status line + body).
 	if globalQuiet {
@@ -150,23 +150,23 @@ func runDiffSnapshots(ctx context.Context, store storage.Storer, cwd string, cfg
 	}
 	if file != "" {
 		fmt.Printf(">>> Diff %s -> %s %s\n", label1, label2, file)
-		result := porcelain.DiffFileInSnapshots(ctx, store, cwd, snap1, snap2, file)
+		result := snapkg.DiffFileInSnapshots(ctx, st, cwd, snap1, snap2, file)
 		printContentDiff(result)
 		return nil
 	}
 	if diffStatOnly {
 		fmt.Printf(">>> Diff %s -> %s (stat)\n", label1, label2)
-		return diffStatSnapshots(ctx, store, snap1, snap2)
+		return diffStatSnapshots(ctx, st, snap1, snap2)
 	}
 	fmt.Printf(">>> Diff %s -> %s\n", label1, label2)
-	result := porcelain.DiffSnapshots(snap1, snap2)
+	result := snapkg.DiffSnapshots(snap1, snap2)
 	printFileDiff(result)
 	return nil
 }
 
 // printFileDiff prints the file-level diff body: the added/modified/deleted
 // file lists and a summary line. The status line is emitted by the caller.
-func printFileDiff(result porcelain.FileDiffResult) {
+func printFileDiff(result snapkg.FileDiffResult) {
 	total := len(result.Added) + len(result.Modified) + len(result.Deleted)
 	if total == 0 {
 		fmt.Println()
@@ -187,7 +187,7 @@ func printFileDiff(result porcelain.FileDiffResult) {
 }
 
 // printContentDiff prints a content-level diff result to stdout/stderr.
-func printContentDiff(result porcelain.ContentDiffResult) {
+func printContentDiff(result snapkg.ContentDiffResult) {
 	if result.Stderr != "" {
 		fmt.Fprint(os.Stderr, result.Stderr)
 	}

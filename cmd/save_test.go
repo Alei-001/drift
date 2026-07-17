@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/project"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,7 +105,7 @@ func TestSave_Locked(t *testing.T) {
 	saveMessage = "should fail"
 	err := runCmd(saveCmd, nil)
 	// The save command may return ErrSilent (lock reported) or a wrapped
-	// porcelain.ErrLocked. Either way it must be non-nil.
+	// project.ErrLocked. Either way it must be non-nil.
 	if err == nil {
 		t.Fatal("expected error from save on locked workspace, got nil")
 	}

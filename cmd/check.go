@@ -1,13 +1,14 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/gc"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 var (
@@ -40,7 +41,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
-	report, err := porcelain.VerifyIntegrity(ctx, store, cwd, checkFilter, checkVerbose)
+	report, err := snapkg.VerifyIntegrity(ctx, store, cwd, checkFilter, checkVerbose)
 	if err != nil {
 		reportFailed("Check", "check", "integrity check failed.", "", err)
 		return ErrSilent
@@ -61,7 +62,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				hintParts = append(hintParts, "corrupt snapshots have damaged metadata. Use 'drift gc' to clean up unreachable snapshots.")
 			}
 		} else {
-			unreachable, uerr := porcelain.CountUnreachableSnapshots(ctx, store, cwd)
+			unreachable, uerr := gc.CountUnreachableSnapshots(ctx, store, cwd)
 			if uerr == nil && unreachable > 0 {
 				hintParts = append(hintParts, fmt.Sprintf("%d unreachable snapshots detected. use 'drift gc --dry-run' to review.", unreachable))
 			}
@@ -99,7 +100,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s:%s  chunk %d  %s\n", r.SnapID, r.FilePath, r.Idx, r.Status)
 			}
 		}
-		unreachable, err := porcelain.CountUnreachableSnapshots(ctx, store, cwd)
+		unreachable, err := gc.CountUnreachableSnapshots(ctx, store, cwd)
 		if err != nil {
 			slog.Warn("count unreachable snapshots failed", "error", err)
 		} else if unreachable > 0 {

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"bytes"
 	"context"
 	"errors"
@@ -9,8 +11,7 @@ import (
 	"time"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 type showFileListEntry struct {
@@ -47,14 +48,14 @@ type showOpenData struct {
 	File    string `json:"file"`
 }
 
-func showFileListJSON(ctx context.Context, store storage.Storer, snap *core.Snapshot, versionLabel string) error {
+func showFileListJSON(ctx context.Context, st *store.StoreSet, snap *core.Snapshot, versionLabel string) error {
 	files := make([]showFileListEntry, 0, len(snap.Files))
 	for i := range snap.Files {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		f := &snap.Files[i]
-		typeLabel := porcelain.DetectFileTypeLabel(ctx, store, f)
+		typeLabel := snapkg.DetectFileTypeLabel(ctx, st, f)
 		entry := showFileListEntry{Path: f.Path, Size: f.Size}
 		if strings.HasPrefix(typeLabel, "image (") && strings.HasSuffix(typeLabel, ")") {
 			entry.Type = "image"
@@ -74,15 +75,15 @@ func showFileListJSON(ctx context.Context, store storage.Storer, snap *core.Snap
 	})
 }
 
-func showFileJSON(ctx context.Context, store storage.Storer, cwd string, snapshot *core.Snapshot, versionLabel, filePath string) error {
-	result, err := porcelain.ReadSnapshotFile(ctx, store, snapshot, cwd, filePath)
+func showFileJSON(ctx context.Context, st *store.StoreSet, cwd string, snapshot *core.Snapshot, versionLabel, filePath string) error {
+	result, err := snapkg.ReadSnapshotFile(ctx, st, snapshot, cwd, filePath)
 	if err != nil {
-		if errors.Is(err, porcelain.ErrFileNotFound) {
+		if errors.Is(err, errs.ErrFileNotFound) {
 			reportFailed("Show", "show", fmt.Sprintf("'%s' not found in snapshot %s.", filePath, versionLabel),
 				fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", versionLabel), err)
 			return ErrSilent
 		}
-		if errors.Is(err, porcelain.ErrInvalidPath) {
+		if errors.Is(err, errs.ErrInvalidPath) {
 			reportFailed("Show", "show", fmt.Sprintf("cannot resolve path '%s'.", filePath),
 				"use a relative path from the project root.", err)
 			return ErrSilent

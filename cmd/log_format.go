@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/gc"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 // formatBranchColumn formats the branch-tip list for the log table column.
@@ -47,7 +47,7 @@ func formatBranchColumn(names []string) string {
 // message prefix. Used to decide whether the label should mention auto-saves.
 func includesAutoSaves(snaps []*core.SnapshotSummary) bool {
 	for _, s := range snaps {
-		if strings.HasPrefix(s.Message, porcelain.AutoSavePrefix) {
+		if strings.HasPrefix(s.Message, gc.AutoSavePrefix) {
 			return true
 		}
 	}

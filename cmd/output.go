@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/project"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"context"
 	"errors"
 	"fmt"
@@ -8,8 +10,7 @@ import (
 	"strings"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 	"github.com/Alei-001/drift/internal/util/format"
 )
 
@@ -57,15 +58,15 @@ func statusFailed(action string, errMsg string, hint string) {
 
 // openProjectOrReport opens the drift project at cwd. On failure it reports
 // the error via reportFailed (JSON-aware) and returns ErrSilent so the caller
-// can `return ErrSilent` directly. On success it returns the store and cfg.
+// can `return ErrSilent` directly. On success it returns the store set and cfg.
 // command is the JSON "command" field value (e.g. "log", "branch").
-func openProjectOrReport(action, command, cwd string) (storage.Storer, *core.Config, error) {
-	store, cfg, err := porcelain.OpenProject(cwd)
+func openProjectOrReport(action, command, cwd string) (*store.StoreSet, *core.Config, error) {
+	st, cfg, err := project.OpenProject(cwd)
 	if err != nil {
 		reportFailed(action, command, "not a drift repository.", "use 'drift init' to create one.", err)
 		return nil, nil, silentWrap(err)
 	}
-	return store, cfg, nil
+	return st, cfg, nil
 }
 
 // -- File list formatting --
@@ -84,7 +85,7 @@ func printFileListWithSize(added, modified []core.FileEntry, deleted []string) {
 	}
 }
 
-// printFileListSimple prints file list without sizes (for restore).
+// printFileListSimple prints file list without sizes (for rest).
 func printFileListSimple(added, modified []core.FileEntry, deleted []string) {
 	fmt.Println()
 	for _, f := range added {
@@ -99,14 +100,14 @@ func printFileListSimple(added, modified []core.FileEntry, deleted []string) {
 }
 
 // printFileListWithLineCount prints file list with sizes and line counts (for log -v).
-func printFileListWithLineCount(added, modified []core.FileEntry, deleted []string, store storage.Storer) {
+func printFileListWithLineCount(added, modified []core.FileEntry, deleted []string, st *store.StoreSet) {
 	ctx := context.Background()
 	fmt.Println()
 	for _, f := range added {
 		fmt.Printf("  +  %s      %s\n", f.Path, formatSize(f.Size))
 	}
 	for _, f := range modified {
-		lines := porcelain.CountFileLines(ctx, store, f)
+		lines := snapkg.CountFileLines(ctx, st, f)
 		if lines > 0 {
 			fmt.Printf("  ~  %s      %s  (%d lines)\n", f.Path, formatSize(f.Size), lines)
 		} else {

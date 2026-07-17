@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/branch"
 	"errors"
 	"strings"
 	"testing"

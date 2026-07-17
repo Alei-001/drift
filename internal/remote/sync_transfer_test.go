@@ -8,7 +8,8 @@ import (
 	"testing"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage/backends/memory"
+	"github.com/Alei-001/drift/internal/store"
+	"github.com/Alei-001/drift/internal/store/memory"
 	"github.com/zeebo/blake3"
 	"google.golang.org/protobuf/proto"
 )
@@ -52,7 +53,7 @@ func (r *recordingRemoteFS) Writes() []string {
 // remote, every chunk it references is already there — a concurrent pull
 // never sees a half-complete snapshot.
 func TestPush_ChunksBeforeSnapshots(t *testing.T) {
-	store := memory.NewMemoryStorage()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
 	defer store.Close()
 	rfs := newRecordingRemoteFS()
 
@@ -94,7 +95,7 @@ func TestPush_ChunksBeforeSnapshots(t *testing.T) {
 // chunks referenced by snapshots, even when a chunk is shared across multiple
 // snapshots (deduplication).
 func TestPush_SnapshotReferencesMissingChunk(t *testing.T) {
-	store := memory.NewMemoryStorage()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
 	defer store.Close()
 	rfs := newRecordingRemoteFS()
 
@@ -122,7 +123,7 @@ func TestPush_SnapshotReferencesMissingChunk(t *testing.T) {
 	snap2Proto := core.SnapshotToProto(snap2, false)
 	marshaled := mustMarshalProto(t, snap2Proto)
 	snap2.ID = core.SnapshotID{Hash: core.Hash(mustBlake3(t, marshaled))}
-	store.PutSnapshot(context.Background(), snap2)
+	store.Snapshots.PutSnapshot(context.Background(), snap2)
 
 	// Update main to point at snap2.
 	setupBranchRef(t, store, "main", snap2.ID.Hash)
@@ -151,7 +152,7 @@ func TestPush_SnapshotReferencesMissingChunk(t *testing.T) {
 // TestPush_EmptyStorePushesNothing verifies that pushing an empty store
 // (no snapshots, no refs) produces zero-upload stats without error.
 func TestPush_EmptyStorePushesNothing(t *testing.T) {
-	store := memory.NewMemoryStorage()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
 	defer store.Close()
 	rfs := NewMockRemoteFS()
 
@@ -168,7 +169,7 @@ func TestPush_EmptyStorePushesNothing(t *testing.T) {
 // TestPush_DryRunDoesNotUpload verifies that PushDryRun does not upload
 // anything to the remote while still reporting what would be uploaded.
 func TestPush_DryRunDoesNotUpload(t *testing.T) {
-	store := memory.NewMemoryStorage()
+	store := store.NewStoreSet(memory.NewMemoryStorage())
 	defer store.Close()
 	rfs := newRecordingRemoteFS()
 

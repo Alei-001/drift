@@ -1,13 +1,13 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/watch"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +50,7 @@ var watchOnCmd = &cobra.Command{
 		}
 		store.Close()
 		_ = cfg // validated; the daemon reopens the project itself
-		pid, err := porcelain.StartDaemon(ctx, cwd, watchInterval, watchKeep)
+		pid, err := watch.StartDaemon(ctx, cwd, watchInterval, watchKeep)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "use 'drift watch off' to stop it first.")
 			return ErrSilent
@@ -75,7 +75,7 @@ var watchOffCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		autoSaves, pruned, err := porcelain.StopDaemon(ctx, cwd)
+		autoSaves, pruned, err := watch.StopDaemon(ctx, cwd)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "")
 			return ErrSilent
@@ -101,7 +101,7 @@ var watchStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		state, active, err := porcelain.DaemonStatus(ctx, cwd)
+		state, active, err := watch.DaemonStatus(ctx, cwd)
 		if err != nil {
 			return err
 		}
@@ -161,12 +161,12 @@ var watchDaemonCmd = &cobra.Command{
 			// not see a stale PID. Best-effort: only remove if the file
 			// contains OUR pid, to avoid clobbering a different daemon that
 			// won the start race.
-			porcelain.RemoveStalePidFile(cwd, os.Getpid())
+			watch.RemoveStalePidFile(cwd, os.Getpid())
 			return err
 		}
 		defer store.Close()
 		slog.Info("watch daemon project opened, entering loop")
-		porcelain.RunDaemonLoop(ctx, store, cwd, watchInterval, watchKeep, &cfg.Core)
+		watch.RunDaemonLoop(ctx, store, cwd, watchInterval, watchKeep, &cfg.Core)
 		slog.Info("watch daemon exited")
 		return nil
 	},
@@ -186,7 +186,7 @@ var watchPauseCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if _, err := porcelain.PauseDaemon(ctx, cwd); err != nil {
+		if _, err := watch.PauseDaemon(ctx, cwd); err != nil {
 			statusFailed("Watch", err.Error(), "use 'drift watch on' to start watching.")
 			return ErrSilent
 		}
@@ -212,7 +212,7 @@ var watchResumeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		state, err := porcelain.ResumeDaemon(ctx, cwd)
+		state, err := watch.ResumeDaemon(ctx, cwd)
 		if err != nil {
 			statusFailed("Watch", err.Error(), "use 'drift watch on' to start watching.")
 			return ErrSilent

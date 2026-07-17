@@ -11,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 	"github.com/schollz/progressbar/v3"
 )
 
@@ -71,19 +71,19 @@ func LsRemote(ctx context.Context, rfs RemoteFS) ([]*core.Reference, error) {
 //
 // If branch is non-empty, only that branch's snapshot chain and its chunks
 // are synced, plus the branch ref itself.
-func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
+func Push(ctx context.Context, st *store.StoreSet, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	stats := &SyncStats{}
 
-	snapHashes, chunkHashes, refs, err := collectPushScope(ctx, store, branch)
+	snapHashes, chunkHashes, refs, err := collectPushScope(ctx, st, branch)
 	if err != nil {
 		return nil, fmt.Errorf("collect push scope: %w", err)
 	}
 
 	// 1. Upload chunks first so snapshots always reference existing chunks.
-	if err := pushChunksConcurrent(ctx, store, rfs, chunkHashes, stats, opts); err != nil {
+	if err := pushChunksConcurrent(ctx, st, rfs, chunkHashes, stats, opts); err != nil {
 		return nil, err
 	}
 
@@ -99,7 +99,7 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("stat remote snapshot %s: %w", id.Hash.String(), err)
 		}
-		if err := pushSnapshot(ctx, store, rfs, id); err != nil {
+		if err := pushSnapshot(ctx, st, rfs, id); err != nil {
 			return nil, fmt.Errorf("push snapshot %s: %w", id.Hash.String(), err)
 		}
 		stats.SnapshotsUploaded++
@@ -118,7 +118,7 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("stat remote manifest %s: %w", id.Hash.String(), err)
 		}
-		if err := pushManifest(ctx, store, rfs, id); err != nil {
+		if err := pushManifest(ctx, st, rfs, id); err != nil {
 			return nil, fmt.Errorf("push manifest %s: %w", id.Hash.String(), err)
 		}
 		stats.ManifestsUploaded++
@@ -130,7 +130,7 @@ func Push(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		updated, err := pushRef(ctx, store, rfs, ref)
+		updated, err := pushRef(ctx, st, rfs, ref)
 		if err != nil {
 			if errors.Is(err, errRefDiverged) {
 				return nil, fmt.Errorf("ref %q diverged: pull first: %w", ref.Name, err)
@@ -161,14 +161,14 @@ func partialPullErr(err error, stats *SyncStats) error {
 //
 // If branch is non-empty, only that branch's snapshot chain and its chunks
 // are synced, plus the branch ref itself.
-func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
+func Pull(ctx context.Context, st *store.StoreSet, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	stats := &SyncStats{}
 
 	// Determine old tip (before pull) to detect tip change.
-	oldTip, _ := currentBranchTip(ctx, store)
+	oldTip, _ := currentBranchTip(ctx, st)
 
 	snapHashes, chunkHashes, refs, err := collectPullScope(ctx, rfs, branch)
 	if err != nil {
@@ -189,20 +189,20 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		// returns ErrNotFound quickly after a stat, so the cost is one
 		// extra stat per snapshot — acceptable until profiling shows
 		// otherwise.
-		if _, err := store.GetSnapshot(ctx, id); err == nil {
+		if _, err := st.Snapshots.GetSnapshot(ctx, id); err == nil {
 			stats.SnapshotsSkipped++
 			continue
-		} else if !errors.Is(err, storage.ErrNotFound) {
+		} else if !errors.Is(err, store.ErrNotFound) {
 			return stats, partialPullErr(fmt.Errorf("check local snapshot %s: %w", id.Hash.String(), err), stats)
 		}
-		if err := pullSnapshot(ctx, store, rfs, id); err != nil {
+		if err := pullSnapshot(ctx, st, rfs, id); err != nil {
 			return stats, partialPullErr(fmt.Errorf("pull snapshot %s: %w", id.Hash.String(), err), stats)
 		}
 		stats.SnapshotsUploaded++
 	}
 
 	// Download chunks concurrently with progress reporting.
-	if err := pullChunksConcurrent(ctx, store, rfs, chunkHashes, stats, opts); err != nil {
+	if err := pullChunksConcurrent(ctx, st, rfs, chunkHashes, stats, opts); err != nil {
 		return stats, partialPullErr(err, stats)
 	}
 
@@ -211,7 +211,7 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 		if err := ctx.Err(); err != nil {
 			return stats, partialPullErr(err, stats)
 		}
-		updated, diverged, err := pullRef(ctx, store, rfs, ref)
+		updated, diverged, err := pullRef(ctx, st, rfs, ref)
 		if err != nil {
 			return stats, partialPullErr(fmt.Errorf("pull ref %q: %w", ref.Name, err), stats)
 		}
@@ -224,13 +224,13 @@ func Pull(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string
 	}
 
 	// Rebuild index if current branch tip changed.
-	newTip, err := currentBranchTip(ctx, store)
+	newTip, err := currentBranchTip(ctx, st)
 	if err == nil && newTip.Hash != oldTip.Hash && !newTip.Hash.IsZero() {
-		if err := rebuildIndex(ctx, store, newTip); err != nil {
+		if err := rebuildIndex(ctx, st, newTip); err != nil {
 			return stats, partialPullErr(fmt.Errorf("rebuild index: %w", err), stats)
 		}
 		stats.IndexRebuilt = true
-		stats.BranchTipChanged = currentBranchName(ctx, store)
+		stats.BranchTipChanged = currentBranchName(ctx, st)
 	}
 
 	return stats, nil
@@ -252,7 +252,7 @@ const (
 // classifyRefPush runs the read-only portion of pushRef (stat target, read
 // existing remote ref, fast-forward check) without writing anything. It
 // mirrors pushRef's logic so dry-run stats are accurate.
-func classifyRefPush(ctx context.Context, store storage.Storer, rfs RemoteFS, ref *core.Reference) (refPushStatus, error) {
+func classifyRefPush(ctx context.Context, st *store.StoreSet, rfs RemoteFS, ref *core.Reference) (refPushStatus, error) {
 	snapPath := snapshotRemotePath(core.SnapshotID{Hash: ref.Target})
 	if _, err := rfs.Stat(ctx, snapPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -281,7 +281,7 @@ func classifyRefPush(ctx context.Context, store storage.Storer, rfs RemoteFS, re
 	if parseErr != nil {
 		return refDiverge, nil
 	}
-	ok, ancErr := isAncestor(ctx, store, ref.Target, existingHash)
+	ok, ancErr := isAncestor(ctx, st, ref.Target, existingHash)
 	if ancErr != nil {
 		return 0, fmt.Errorf("fast-forward check against %s: %w", existingHash.FullString(), ancErr)
 	}
@@ -293,13 +293,13 @@ func classifyRefPush(ctx context.Context, store storage.Storer, rfs RemoteFS, re
 
 // PushDryRun collects the push scope and returns stats without actually
 // uploading anything. The remote is only read (for existence checks).
-func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
+func PushDryRun(ctx context.Context, st *store.StoreSet, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	stats := &SyncStats{}
 
-	snapHashes, chunkHashes, refs, err := collectPushScope(ctx, store, branch)
+	snapHashes, chunkHashes, refs, err := collectPushScope(ctx, st, branch)
 	if err != nil {
 		return nil, fmt.Errorf("collect push scope: %w", err)
 	}
@@ -339,7 +339,7 @@ func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		status, err := classifyRefPush(ctx, store, rfs, ref)
+		status, err := classifyRefPush(ctx, st, rfs, ref)
 		if err != nil {
 			return nil, fmt.Errorf("classify ref %q: %w", ref.Name, err)
 		}
@@ -353,7 +353,7 @@ func PushDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 
 // PullDryRun collects the pull scope and returns stats without actually
 // downloading anything. The remote is only read (for listing).
-func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
+func PullDryRun(ctx context.Context, st *store.StoreSet, rfs RemoteFS, branch string, opts SyncOptions) (*SyncStats, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -368,15 +368,15 @@ func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if _, err := store.GetSnapshot(ctx, id); err == nil {
+		if _, err := st.Snapshots.GetSnapshot(ctx, id); err == nil {
 			stats.SnapshotsSkipped++
-		} else if errors.Is(err, storage.ErrNotFound) {
+		} else if errors.Is(err, store.ErrNotFound) {
 			stats.SnapshotsUploaded++
 		}
 	}
 
 	// Batch check: list local chunks once instead of per-chunk HasChunk.
-	localChunkSet, err := listLocalChunkHashes(ctx, store)
+	localChunkSet, err := listLocalChunkHashes(ctx, st)
 	if err != nil {
 		return nil, fmt.Errorf("list local chunks: %w", err)
 	}
@@ -398,7 +398,7 @@ func PullDryRun(ctx context.Context, store storage.Storer, rfs RemoteFS, branch 
 // before uploading, replacing N per-chunk Stat calls with at most 256 List
 // calls (typically far fewer). On the first error the derived context is
 // cancelled so no new workers are launched and in-flight workers exit early.
-func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats, opts SyncOptions) error {
+func pushChunksConcurrent(ctx context.Context, st *store.StoreSet, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats, opts SyncOptions) error {
 	chunkTotal := len(chunkHashes)
 	if chunkTotal == 0 {
 		return nil
@@ -431,13 +431,13 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 	missingDirs := make(map[string]bool)
 	for _, ch := range toUpload {
 		hex := ch.FullString()
-		missingDirs[path.Join(storage.ChunksDir, hex[:2])] = true
+		missingDirs[path.Join(store.ChunksDir, hex[:2])] = true
 	}
 	for dir := range missingDirs {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := ensureRemoteDir(ctx, rfs, dir); err != nil {
+		if err := EnsureRemoteDir(ctx, rfs, dir); err != nil {
 			return fmt.Errorf("pre-create chunk dir %q: %w", dir, err)
 		}
 	}
@@ -464,7 +464,7 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 		go func(h core.Hash) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := pushChunk(ctx, store, rfs, h); err != nil {
+			if err := pushChunk(ctx, st, rfs, h); err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = fmt.Errorf("push chunk %s: %w", h.String(), err)
@@ -489,14 +489,14 @@ func pushChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 // downloading, replacing N per-chunk HasChunk calls with a single call. On
 // the first error the derived context is cancelled so no new workers are
 // launched and in-flight workers exit early.
-func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats, opts SyncOptions) error {
+func pullChunksConcurrent(ctx context.Context, st *store.StoreSet, rfs RemoteFS, chunkHashes []core.Hash, stats *SyncStats, opts SyncOptions) error {
 	chunkTotal := len(chunkHashes)
 	if chunkTotal == 0 {
 		return nil
 	}
 
 	// Batch check: list local chunks once instead of per-chunk HasChunk.
-	localChunkSet, err := listLocalChunkHashes(ctx, store)
+	localChunkSet, err := listLocalChunkHashes(ctx, st)
 	if err != nil {
 		return fmt.Errorf("list local chunks: %w", err)
 	}
@@ -536,7 +536,7 @@ func pullChunksConcurrent(ctx context.Context, store storage.Storer, rfs RemoteF
 		go func(h core.Hash) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := pullChunk(ctx, store, rfs, h); err != nil {
+			if err := pullChunk(ctx, st, rfs, h); err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = fmt.Errorf("pull chunk %s: %w", h.String(), err)

@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/sync"
 	"fmt"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ var lsRemoteCmd = &cobra.Command{
 			return err
 		}
 
-		refs, err := porcelain.LsRemote(ctx, cwd, remoteName)
+		refs, err := sync.LsRemote(ctx, cwd, remoteName)
 		if err != nil {
 			reportFailed("Ls-remote", "ls-remote", "could not list remote refs.", "check remote configuration and network connectivity", err)
 			return silentWrap(err)

@@ -1,13 +1,14 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/project"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -51,7 +52,7 @@ func resetFlags() {
 func setupTestRepo(t *testing.T) string {
 	t.Helper()
 	workDir := t.TempDir()
-	if err := porcelain.InitProject(workDir); err != nil {
+	if err := project.InitProject(workDir); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
 	resetFlags()
@@ -98,12 +99,12 @@ func saveSnapshot(t *testing.T, workDir, filename, content, message string) stri
 		}
 	})
 	// Read back the HEAD snapshot's short ID via porcelain.
-	store, _, err := porcelain.OpenProject(workDir)
+	store, _, err := project.OpenProject(workDir)
 	if err != nil {
 		t.Fatalf("OpenProject: %v", err)
 	}
 	defer store.Close()
-	snap := porcelain.ResolveHeadSnapshot(context.Background(), store)
+	snap := snapkg.ResolveHeadSnapshot(context.Background(), store)
 	if snap == nil {
 		t.Fatal("ResolveHeadSnapshot returned nil after save")
 	}

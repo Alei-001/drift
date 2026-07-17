@@ -1,14 +1,14 @@
 package cmd
 
 import (
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 // logJSONEntry is one row of the 'drift log --json' output. The schema
@@ -34,13 +34,13 @@ type logJSONData struct {
 // merging embedded snapshot tags with tag refs added later via 'tag add'),
 // branch (string of comma-separated branch tips), and changes formatted as
 // "+A ~M -D". No status line is printed to stdout — only the JSON envelope.
-func logJSONMode(ctx context.Context, store storage.Storer, snapshots []*core.SnapshotSummary, branchMap, tagMap map[string][]string) error {
+func logJSONMode(ctx context.Context, st *store.StoreSet, snapshots []*core.SnapshotSummary, branchMap, tagMap map[string][]string) error {
 	entries := make([]logJSONEntry, 0, len(snapshots))
 	for _, s := range snapshots {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		add, mod, del := porcelain.CountSnapshotChanges(ctx, store, s)
+		add, mod, del := snapkg.CountSnapshotChanges(ctx, st, s)
 		tags := mergeTags(s.Tags, tagMap[s.ID.Hash.String()])
 		entry := logJSONEntry{
 			ID:      s.ShortID(),
@@ -97,7 +97,7 @@ type logDetailJSONData struct {
 // envelope, mirroring the human --detail view: added/modified file entries
 // with sizes and line counts (for modified text files), deleted paths, and a
 // summary tally.
-func logDetailJSONMode(ctx context.Context, store storage.Storer, snapshot *core.Snapshot, added, modified []core.FileEntry, deleted []string) error {
+func logDetailJSONMode(ctx context.Context, st *store.StoreSet, snapshot *core.Snapshot, added, modified []core.FileEntry, deleted []string) error {
 	addEntries := make([]logDetailJSONFile, 0, len(added))
 	for _, f := range added {
 		addEntries = append(addEntries, logDetailJSONFile{Path: f.Path, Size: f.Size})
@@ -105,7 +105,7 @@ func logDetailJSONMode(ctx context.Context, store storage.Storer, snapshot *core
 	modEntries := make([]logDetailJSONFile, 0, len(modified))
 	for _, f := range modified {
 		entry := logDetailJSONFile{Path: f.Path, Size: f.Size}
-		if lines := porcelain.CountFileLines(ctx, store, f); lines > 0 {
+		if lines := snapkg.CountFileLines(ctx, st, f); lines > 0 {
 			entry.Lines = lines
 		}
 		modEntries = append(modEntries, entry)

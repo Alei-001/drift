@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"errors"
 	"fmt"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -40,12 +41,12 @@ var undoCmd = &cobra.Command{
 		// operation so we can report it to the user.
 		removed := resolveSnapshot(ctx, store, "head")
 
-		if err := porcelain.UndoLastSave(ctx, store, cwd, &cfg.Core); err != nil {
-			if errors.Is(err, porcelain.ErrCannotUndo) {
+		if err := snapkg.UndoLastSave(ctx, store, cwd, &cfg.Core); err != nil {
+			if errors.Is(err, errs.ErrCannotUndo) {
 				reportFailed("Undo", "undo", "no snapshot to undo.", "HEAD is already at the initial snapshot.", err)
 				return ErrSilent
 			}
-			if errors.Is(err, porcelain.ErrUncommittedChanges) {
+			if errors.Is(err, errs.ErrUncommittedChanges) {
 				reportFailed("Undo", "undo", "uncommitted changes would be lost.", "use 'drift save' or 'drift restore' first.", err)
 				return silentWrap(err)
 			}

@@ -1,11 +1,11 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/project"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +37,7 @@ var initCmd = &cobra.Command{
 			return ErrSilent
 		}
 
-		if err := porcelain.InitProject(target); err != nil {
+		if err := project.InitProject(target); err != nil {
 			return err
 		}
 		if globalJSON {

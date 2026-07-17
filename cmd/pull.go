@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/sync"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"fmt"
 	"strings"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +42,7 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 		defer store.Close()
 
 		if pullDryRun {
-			stats, err := porcelain.PullDryRun(ctx, store, cwd, remoteName, branch, pullAll)
+			stats, err := sync.PullDryRun(ctx, store, cwd, remoteName, branch, pullAll)
 			if err != nil {
 				reportFailed("Pull", "pull", "pull dry-run failed.", "check remote configuration and network connectivity", err)
 				return silentWrap(err)
@@ -71,7 +72,7 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 			return nil
 		}
 
-		result, err := porcelain.PullFromRemote(ctx, store, cwd, remoteName, branch, pullAll)
+		result, err := sync.PullFromRemote(ctx, store, cwd, remoteName, branch, pullAll)
 		if err != nil {
 			reportFailed("Pull", "pull", "pull failed.", "check remote configuration and network connectivity", err)
 			return silentWrap(err)
@@ -106,9 +107,9 @@ running 'drift restore head'). Without --restore, use 'drift restore head'.`,
 		}
 
 		if pullRestore && stats.IndexRebuilt {
-			snapshot := porcelain.ResolveHeadSnapshot(ctx, store)
+			snapshot := snapkg.ResolveHeadSnapshot(ctx, store)
 			if snapshot != nil {
-				if _, err := porcelain.RestoreSnapshot(ctx, store, cwd, snapshot.ID, "", false, &cfg.Core); err != nil {
+				if _, err := snapkg.RestoreSnapshot(ctx, store, cwd, snapshot.ID, "", false, &cfg.Core); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: restore failed: %v (run 'drift restore head' manually)\n", err)
 				} else {
 					statusOK("Working directory restored")

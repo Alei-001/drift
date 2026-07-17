@@ -7,12 +7,12 @@ import (
 	"os"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 )
 
 // collectPushScope returns the set of snapshots, chunks and refs to push.
 // When branch is non-empty only that branch's chain is included.
-func collectPushScope(ctx context.Context, store storage.Storer, branch string) ([]core.SnapshotID, []core.Hash, []*core.Reference, error) {
+func collectPushScope(ctx context.Context, st *store.StoreSet, branch string) ([]core.SnapshotID, []core.Hash, []*core.Reference, error) {
 	var snapIDs []core.SnapshotID
 	var chunkHashes []core.Hash
 	var refs []*core.Reference
@@ -20,12 +20,12 @@ func collectPushScope(ctx context.Context, store storage.Storer, branch string) 
 	if branch != "" {
 		// Branch-scoped: walk the branch's PrevID chain.
 		refName := "heads/" + branch
-		ref, err := store.GetRef(ctx, refName)
+		ref, err := st.Refs.GetRef(ctx, refName)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("get branch ref: %w", err)
 		}
 		refs = append(refs, ref)
-		ids, chunks, err := walkSnapshotChain(ctx, store, core.SnapshotID{Hash: ref.Target})
+		ids, chunks, err := walkSnapshotChain(ctx, st, core.SnapshotID{Hash: ref.Target})
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -33,7 +33,7 @@ func collectPushScope(ctx context.Context, store storage.Storer, branch string) 
 		chunkHashes = chunks
 	} else {
 		// Full repo: list all snapshots, collect all refs.
-		summaries, err := store.ListSnapshots(ctx, nil)
+		summaries, err := st.Snapshots.ListSnapshots(ctx, nil)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("list snapshots: %w", err)
 		}
@@ -44,7 +44,7 @@ func collectPushScope(ctx context.Context, store storage.Storer, branch string) 
 			}
 			id := core.SnapshotID{Hash: s.ID.Hash}
 			snapIDs = append(snapIDs, id)
-			snap, err := store.GetSnapshot(ctx, id)
+			snap, err := st.Snapshots.GetSnapshot(ctx, id)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("get snapshot %s: %w", id.Hash.String(), err)
 			}
@@ -57,7 +57,7 @@ func collectPushScope(ctx context.Context, store storage.Storer, branch string) 
 				}
 			}
 		}
-		allRefs, err := store.ListRefs(ctx, "")
+		allRefs, err := st.Refs.ListRefs(ctx, "")
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("list refs: %w", err)
 		}
@@ -135,7 +135,7 @@ func collectPullScope(ctx context.Context, rfs RemoteFS, branch string) ([]core.
 
 // walkSnapshotChain walks the local PrevID chain from start and collects all
 // reachable snapshot IDs and their chunk hashes.
-func walkSnapshotChain(ctx context.Context, store storage.Storer, start core.SnapshotID) ([]core.SnapshotID, []core.Hash, error) {
+func walkSnapshotChain(ctx context.Context, st *store.StoreSet, start core.SnapshotID) ([]core.SnapshotID, []core.Hash, error) {
 	var snapIDs []core.SnapshotID
 	var chunkHashes []core.Hash
 	seen := make(map[core.Hash]bool)
@@ -150,9 +150,9 @@ func walkSnapshotChain(ctx context.Context, store storage.Storer, start core.Sna
 		}
 		seen[cur.Hash] = true
 		snapIDs = append(snapIDs, cur)
-		snap, err := store.GetSnapshot(ctx, cur)
+		snap, err := st.Snapshots.GetSnapshot(ctx, cur)
 		if err != nil {
-			if errors.Is(err, storage.ErrNotFound) {
+			if errors.Is(err, store.ErrNotFound) {
 				break
 			}
 			return nil, nil, fmt.Errorf("get snapshot %s: %w", cur.Hash.String(), err)
@@ -216,11 +216,11 @@ func walkRemoteSnapshotChain(ctx context.Context, rfs RemoteFS, start core.Snaps
 // the snapshot PrevID chain. Returns (false, nil) when ancestor is not
 // reachable (the full chain was walked without finding it). Returns
 // (false, err) when the chain cannot be fully walked — e.g. a snapshot in
-// the descendant's chain is missing from the local store, or the context
+// the descendant's chain is missing from the local st, or the context
 // was cancelled. The caller should treat an error as "cannot determine
 // ancestry" and fall back to the diverged/force-push path rather than
 // silently assuming the ref is fast-forwardable.
-func isAncestor(ctx context.Context, store storage.Storer, descendant, ancestor core.Hash) (bool, error) {
+func isAncestor(ctx context.Context, st *store.StoreSet, descendant, ancestor core.Hash) (bool, error) {
 	if descendant.IsZero() || ancestor.IsZero() {
 		return false, nil
 	}
@@ -240,7 +240,7 @@ func isAncestor(ctx context.Context, store storage.Storer, descendant, ancestor 
 		if cur.Hash == ancestor {
 			return true, nil
 		}
-		snap, err := store.GetSnapshot(ctx, cur)
+		snap, err := st.Snapshots.GetSnapshot(ctx, cur)
 		if err != nil {
 			// A missing or unreadable snapshot breaks the chain: we
 			// cannot determine whether ancestor is reachable. Surface

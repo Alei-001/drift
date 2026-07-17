@@ -13,7 +13,7 @@ var (
 	// ErrUnsupported is returned by NewRemoteFS when cfg.Type does not match
 	// any registered protocol.
 	ErrUnsupported = os.ErrInvalid
-	// ErrNotFound mirrors storage.ErrNotFound for remote paths.
+	// ErrNotFound mirrors store.ErrNotFound for remote paths.
 	ErrNotFound = os.ErrNotExist
 )
 

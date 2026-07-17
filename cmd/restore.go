@@ -1,11 +1,12 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"errors"
 	"fmt"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +55,7 @@ var restoreCmd = &cobra.Command{
 		var add, mod []core.FileEntry
 		var del []string
 		if filePath == "" {
-			add, mod, del, err = porcelain.ComputeRestoreChanges(ctx, cwd, &cfg.Core, snapshot)
+			add, mod, del, err = snapkg.ComputeRestoreChanges(ctx, cwd, &cfg.Core, snapshot)
 			if err != nil {
 				return err
 			}
@@ -64,18 +65,18 @@ var restoreCmd = &cobra.Command{
 		// when no backup snapshot was created (clean workspace). This must be
 		// read BEFORE RestoreSnapshot, which moves HEAD to the restore target.
 		var prevHeadID string
-		if prevHead, refErr := store.GetRef(ctx, "HEAD"); refErr == nil && !prevHead.Target.IsZero() {
+		if prevHead, refErr := store.Refs.GetRef(ctx, "HEAD"); refErr == nil && !prevHead.Target.IsZero() {
 			prevHeadID = prevHead.Target.String()
 		}
 
-		backupID, err := porcelain.RestoreSnapshot(ctx, store, cwd, snapshot.ID, filePath, restoreNoBackup, &cfg.Core)
+		backupID, err := snapkg.RestoreSnapshot(ctx, store, cwd, snapshot.ID, filePath, restoreNoBackup, &cfg.Core)
 		if err != nil {
 			// Tailor the hint to the failure: ErrFileNotFound means the file
 			// simply doesn't exist in that snapshot (the user should list
 			// files with `drift show`), whereas other errors (e.g. write
 			// failures) suggest saving first.
 			hint := "use 'drift save' first, or restore a single file."
-			if errors.Is(err, porcelain.ErrFileNotFound) {
+			if errors.Is(err, errs.ErrFileNotFound) {
 				hint = fmt.Sprintf("use 'drift show %s' to list files in this snapshot.", args[0])
 			}
 			reportFailed("Restore", "restore", "restore failed.", hint, err)

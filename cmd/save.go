@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	"github.com/Alei-001/drift/internal/branch"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,7 +12,6 @@ import (
 	"time"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -63,9 +65,9 @@ var saveCmd = &cobra.Command{
 			tagsToCreate = append(tagsToCreate, t)
 		}
 
-		snapshot, err := porcelain.CreateSnapshot(ctx, store, cwd, message, author, &cfg.Core)
+		snapshot, err := snapkg.CreateSnapshot(ctx, store, cwd, message, author, &cfg.Core)
 		if err != nil {
-			if errors.Is(err, porcelain.ErrNothingToSave) {
+			if errors.Is(err, errs.ErrNothingToSave) {
 				reportFailed("Save", "save", "nothing to save.", "modify some files first to create a meaningful checkpoint.", err)
 				return ErrSilent
 			}
@@ -76,7 +78,7 @@ var saveCmd = &cobra.Command{
 		// The snapshot is already saved at this point; SnapshotFileDiff only
 		// produces the diff display, so a failure here is downgraded to a
 		// warning rather than aborting the command.
-		add, mod, del, err := porcelain.SnapshotFileDiff(ctx, store, snapshot)
+		add, mod, del, err := snapkg.SnapshotFileDiff(ctx, store, snapshot)
 		changesOK := true
 		if err != nil {
 			slog.Warn("compute changes failed", "error", err)
@@ -91,14 +93,14 @@ var saveCmd = &cobra.Command{
 		// can detect the partial failure.
 		var successTags []string
 		for _, t := range tagsToCreate {
-			if err := porcelain.AddTag(ctx, store, cwd, t, snapshot.ID); err != nil {
+			if err := branch.AddTag(ctx, store, cwd, t, snapshot.ID); err != nil {
 				// AddTag wraps known errors (e.g. ErrTagAlreadyExists) with a
 				// "tag '<name>' already exists: <inner>" prefix that would
 				// duplicate the tag name and the inner message. Unwrap to the
 				// sentinel so the warning reads cleanly:
 				//   warning: tag '<name>' already exists
 				msg := err.Error()
-				if errors.Is(err, porcelain.ErrTagAlreadyExists) {
+				if errors.Is(err, errs.ErrTagAlreadyExists) {
 					msg = "already exists"
 				}
 				fmt.Fprintf(&tagWarn, "  warning: tag '%s' %s\n", t, msg)
@@ -189,7 +191,7 @@ type saveData struct {
 }
 
 // buildSaveFiles assembles the JSON file list from the added, modified, and
-// deleted file sets produced by porcelain.SnapshotFileDiff. The returned slice
+// deleted file sets produced by snapkg.SnapshotFileDiff. The returned slice
 // is always non-nil so that an empty change set serializes as [] rather than
 // null.
 func buildSaveFiles(added, modified []core.FileEntry, deleted []string) []saveFile {

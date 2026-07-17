@@ -1,20 +1,20 @@
 package cmd
 
 import (
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"context"
 	"fmt"
 	"strings"
 
 	"github.com/Alei-001/drift/internal/core"
-	"github.com/Alei-001/drift/internal/porcelain"
-	"github.com/Alei-001/drift/internal/storage"
+	"github.com/Alei-001/drift/internal/store"
 	"github.com/Alei-001/drift/internal/util/format"
 )
 
 // diffStatSnapshots prints a --stat summary between two snapshots. The
 // per-file computation lives in porcelain; this function only renders.
-func diffStatSnapshots(ctx context.Context, store storage.Storer, snap1, snap2 *core.Snapshot) error {
-	stats, err := porcelain.ComputeStatSnapshots(ctx, store, snap1, snap2)
+func diffStatSnapshots(ctx context.Context, st *store.StoreSet, snap1, snap2 *core.Snapshot) error {
+	stats, err := snapkg.ComputeStatSnapshots(ctx, st, snap1, snap2)
 	if err != nil {
 		return err
 	}
@@ -24,8 +24,8 @@ func diffStatSnapshots(ctx context.Context, store storage.Storer, snap1, snap2 *
 
 // diffStatWorkspace prints a --stat summary between workspace and snapshot.
 // The per-file computation lives in porcelain; this function only renders.
-func diffStatWorkspace(ctx context.Context, store storage.Storer, cwd string, cfg *core.CoreConfig, snap *core.Snapshot) error {
-	stats, err := porcelain.ComputeStatWorkspace(ctx, store, cwd, cfg, snap)
+func diffStatWorkspace(ctx context.Context, st *store.StoreSet, cwd string, cfg *core.CoreConfig, snap *core.Snapshot) error {
+	stats, err := snapkg.ComputeStatWorkspace(ctx, st, cwd, cfg, snap)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func statBar(ins, del int) string {
 }
 
 // printStatOutput prints the --stat file list and summary line.
-func printStatOutput(stats []porcelain.FileStat) {
+func printStatOutput(stats []snapkg.FileStat) {
 	if len(stats) == 0 {
 		fmt.Println()
 		fmt.Println("  No changes.")

@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/sync"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +54,7 @@ The current branch after clone is the remote's HEAD branch.`,
 			return err
 		}
 
-		result, err := porcelain.CloneRemote(ctx, porcelain.CloneOptions{
+		result, err := sync.CloneRemote(ctx, sync.CloneOptions{
 			TargetDir:  dir,
 			WorkDir:    cwd,
 			RemoteURL:  url,

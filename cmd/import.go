@@ -1,12 +1,13 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 var importCmd = &cobra.Command{
@@ -35,10 +36,10 @@ After importing, run 'drift save' to record the change as a new snapshot.`,
 		branchName := args[0]
 		filePath := args[1]
 
-		entry, err := porcelain.ImportFileFromBranch(ctx, store, cwd, branchName, filePath, &cfg.Core)
+		entry, err := snapkg.ImportFileFromBranch(ctx, store, cwd, branchName, filePath, &cfg.Core)
 		if err != nil {
 			hint := "use 'drift branch list' to see available branches."
-			if errors.Is(err, porcelain.ErrFileNotFound) {
+			if errors.Is(err, errs.ErrFileNotFound) {
 				hint = fmt.Sprintf("use 'drift show branch:%s' to list files in this branch.", branchName)
 			}
 			reportFailed("Import", "import", "import failed.", hint, err)

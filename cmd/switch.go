@@ -1,10 +1,11 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	"github.com/Alei-001/drift/internal/branch"
 	"errors"
 	"fmt"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 	"github.com/spf13/cobra"
 )
 
@@ -33,17 +34,17 @@ var switchCmd = &cobra.Command{
 
 		name := args[0]
 		author := cfg.User.Name
-		autosaveID, fromBranch, diffCount, err := porcelain.SwitchBranch(ctx, store, cwd, name, switchCreate, switchNoAutosave, author, &cfg.Core)
+		autosaveID, fromBranch, diffCount, err := branch.SwitchBranch(ctx, store, cwd, name, switchCreate, switchNoAutosave, author, &cfg.Core)
 		if err != nil {
-			if errors.Is(err, porcelain.ErrUncommittedChanges) {
+			if errors.Is(err, errs.ErrUncommittedChanges) {
 				reportFailed("Switch", "switch", "--no-autosave requires a clean working tree.", "use 'drift save' first, or drop --no-autosave to auto-save.", err)
 				return silentWrap(err)
 			}
-			if errors.Is(err, porcelain.ErrBranchNotFound) {
+			if errors.Is(err, errs.ErrBranchNotFound) {
 				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' not found.", name), "use 'drift branch list' to list existing branches.", err)
 				return silentWrap(err)
 			}
-			if errors.Is(err, porcelain.ErrBranchAlreadyExists) {
+			if errors.Is(err, errs.ErrBranchAlreadyExists) {
 				reportFailed("Switch", "switch", fmt.Sprintf("branch '%s' already exists.", name), "use 'drift switch "+name+"' to switch to it.", err)
 				return silentWrap(err)
 			}

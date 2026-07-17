@@ -1,12 +1,12 @@
 package cmd
 
 import (
+	snapkg "github.com/Alei-001/drift/internal/snapshot"
 	"fmt"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 var exportOutput string
@@ -52,7 +52,7 @@ drift-export-<short-id>.zip in the current directory.`,
 			}
 		}
 
-		result, err := porcelain.ExportSnapshot(ctx, store, snapshot.ID, output)
+		result, err := snapkg.ExportSnapshot(ctx, store, snapshot.ID, output)
 		if err != nil {
 			reportFailed("Export", "export", "export failed.", "", err)
 			return ErrSilent

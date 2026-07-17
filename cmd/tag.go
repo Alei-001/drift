@@ -1,13 +1,14 @@
 package cmd
 
 import (
+	"github.com/Alei-001/drift/internal/errs"
+	"github.com/Alei-001/drift/internal/branch"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/Alei-001/drift/internal/porcelain"
 )
 
 // tagCmd is the parent command for tag management subcommands.
@@ -35,7 +36,7 @@ var tagListCmd = &cobra.Command{
 		}
 		defer store.Close()
 
-		tags, err := porcelain.ListTags(ctx, store)
+		tags, err := branch.ListTags(ctx, store)
 		if err != nil {
 			return err
 		}
@@ -109,11 +110,11 @@ var tagAddCmd = &cobra.Command{
 			reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.", nil)
 			return ErrSilent
 		}
-		if err := porcelain.AddTag(ctx, store, cwd, name, snap.ID); err != nil {
+		if err := branch.AddTag(ctx, store, cwd, name, snap.ID); err != nil {
 			switch {
-			case errors.Is(err, porcelain.ErrTagAlreadyExists):
+			case errors.Is(err, errs.ErrTagAlreadyExists):
 				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' already exists.", name), fmt.Sprintf("use 'drift tag delete %s' first, or pick another name.", name), err)
-			case errors.Is(err, porcelain.ErrSnapshotNotFound):
+			case errors.Is(err, errs.ErrSnapshotNotFound):
 				reportFailed("Tag", "tag", fmt.Sprintf("snapshot '%s' not found.", version), "use 'drift log' to list available snapshots.", err)
 			default:
 				reportFailed("Tag", "tag", "could not create tag.", "", err)
@@ -147,8 +148,8 @@ var tagDeleteCmd = &cobra.Command{
 		defer store.Close()
 
 		name := args[0]
-		if err := porcelain.DeleteTag(ctx, store, cwd, name); err != nil {
-			if errors.Is(err, porcelain.ErrTagNotFound) {
+		if err := branch.DeleteTag(ctx, store, cwd, name); err != nil {
+			if errors.Is(err, errs.ErrTagNotFound) {
 				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' not found.", name), "use 'drift tag list' to see existing tags.", err)
 			} else {
 				reportFailed("Tag", "tag", err.Error(), "", err)
@@ -183,11 +184,11 @@ var tagRenameCmd = &cobra.Command{
 
 		oldName := args[0]
 		newName := args[1]
-		if err := porcelain.RenameTag(ctx, store, cwd, oldName, newName); err != nil {
+		if err := branch.RenameTag(ctx, store, cwd, oldName, newName); err != nil {
 			switch {
-			case errors.Is(err, porcelain.ErrTagNotFound):
+			case errors.Is(err, errs.ErrTagNotFound):
 				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' not found.", oldName), "use 'drift tag list' to see existing tags.", err)
-			case errors.Is(err, porcelain.ErrTagAlreadyExists):
+			case errors.Is(err, errs.ErrTagAlreadyExists):
 				reportFailed("Tag", "tag", fmt.Sprintf("tag '%s' already exists.", newName), fmt.Sprintf("use 'drift tag delete %s' first, or pick another name.", newName), err)
 			default:
 				reportFailed("Tag", "tag", "could not rename tag.", "", err)

@@ -19,10 +19,10 @@ func TestBinaryChunkerFor_LargeFile(t *testing.T) {
 }
 
 func TestBinaryChunkerFor_HugeFile(t *testing.T) {
-	// >= 500MB: FixedChunker.
-	c := BinaryChunkerFor(600 * 1024 * 1024)
-	if _, ok := c.(*FixedChunker); !ok {
-		t.Errorf("600MB: expected *FixedChunker, got %T", c)
+	// >= 1GB: FastCDC with 8x scaled params.
+	c := BinaryChunkerFor(1100 * 1024 * 1024)
+	if _, ok := c.(*FastCDCChunker); !ok {
+		t.Errorf("1.1GB: expected *FastCDCChunker, got %T", c)
 	}
 }
 
@@ -42,10 +42,15 @@ func TestBinaryChunkerFor_Boundaries(t *testing.T) {
 	if _, ok := c.(*FastCDCChunker); !ok {
 		t.Errorf("500MB-1: expected *FastCDCChunker, got %T", c)
 	}
-	// Exactly 500MB: huge tier (FixedChunker).
+	// Exactly 500MB: large tier (FastCDC scaled) — under 1GB.
 	c = BinaryChunkerFor(500 * 1024 * 1024)
-	if _, ok := c.(*FixedChunker); !ok {
-		t.Errorf("500MB: expected *FixedChunker, got %T", c)
+	if _, ok := c.(*FastCDCChunker); !ok {
+		t.Errorf("500MB: expected *FastCDCChunker, got %T", c)
+	}
+	// Exactly 1GB: huge tier (FastCDC 8x params).
+	c = BinaryChunkerFor(1 * 1024 * 1024 * 1024)
+	if _, ok := c.(*FastCDCChunker); !ok {
+		t.Errorf("1GB: expected *FastCDCChunker, got %T", c)
 	}
 }
 
@@ -82,9 +87,9 @@ func TestBinaryChunkerFor_DefaultParams(t *testing.T) {
 }
 
 // TestBinaryChunkerFor_LargeFileScalesParams verifies that the large-file tier
-// (50MB–500MB) scales the default params 4×.
+// (200MB–1GB) scales the default params 4×.
 func TestBinaryChunkerFor_LargeFileScalesParams(t *testing.T) {
-	c := BinaryChunkerFor(100 * 1024 * 1024) // 100MB, large tier
+	c := BinaryChunkerFor(300 * 1024 * 1024) // 300MB, large tier
 	fc, ok := c.(*FastCDCChunker)
 	if !ok {
 		t.Fatalf("expected *FastCDCChunker, got %T", c)
@@ -98,16 +103,19 @@ func TestBinaryChunkerFor_LargeFileScalesParams(t *testing.T) {
 }
 
 // TestBinaryChunkerFor_HugeFileUsesAvgScaled verifies that the huge-file tier
-// (>= 500MB) uses a FixedChunker with avgSize*8 derived from the default avg.
+// (>= 1GB) uses a FastCDCChunker with 8x scaled params.
 func TestBinaryChunkerFor_HugeFileUsesAvgScaled(t *testing.T) {
-	c := BinaryChunkerFor(600 * 1024 * 1024) // 600MB, huge tier
-	fc, ok := c.(*FixedChunker)
+	c := BinaryChunkerFor(1100 * 1024 * 1024) // 1.1GB, huge tier
+	fc, ok := c.(*FastCDCChunker)
 	if !ok {
-		t.Fatalf("expected *FixedChunker, got %T", c)
+		t.Fatalf("expected *FastCDCChunker, got %T", c)
 	}
-	// avgSize * 8 = 256KB * 8 = 2MB; FixedChunker clamps to [4096, 64MB].
-	want := fastCDCDefaultAvgSize * 8
-	if fc.chunkSize != want {
-		t.Errorf("chunkSize: got %d, want %d", fc.chunkSize, want)
+	wantMin := fastCDCDefaultMinSize * 8
+	if fc.minSize != wantMin {
+		t.Errorf("scaled minSize: got %d, want %d", fc.minSize, wantMin)
+	}
+	wantMax := fastCDCDefaultMaxSize * 8
+	if fc.maxSize != wantMax {
+		t.Errorf("scaled maxSize: got %d, want %d", fc.maxSize, wantMax)
 	}
 }
